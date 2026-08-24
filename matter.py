@@ -122,6 +122,7 @@ def cmd_packet(args):
     conn = store.connect(args.case_dir)
     text = pk.packet(conn, args.case_dir, layer=args.layer)
     if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w") as f:
             f.write(text + "\n")
         print(f"wrote {args.out}")
