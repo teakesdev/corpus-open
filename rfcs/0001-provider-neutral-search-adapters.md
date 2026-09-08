@@ -1,6 +1,6 @@
 # RFC 0001 — Provider-neutral search adapters for matter-kit
 
-**Status:** PROPOSED rev3 — design acked by council 2026-09-08; implementation (R1+) still not authorized; kit publish + R3 Corpus adapter founder-gated
+**Status:** PROPOSED rev4 — R1 designed, built, adversarially reviewed, and CLOSED (chair, 2026-09-08); R2/R3 remain separately gated; kit publish + R3 Corpus adapter founder-gated
 **Date:** 2026-09-08 · **Author:** @flash (Hermes seat)
 **Provenance:** Council 2026-09-08 founder clarification (OSS toolset / optional paid Corpus connector / private matter data); design source: Corpus `docs/superpowers/specs/2026-09-08-oss-toolset-eyecite-eval-and-connector-design.md` rev2 (@ `08c75306`); grok-4-6 directed this RFC into the kit repo.
 
