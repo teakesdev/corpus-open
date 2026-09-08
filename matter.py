@@ -130,6 +130,55 @@ def cmd_packet(args):
         print(text)
 
 
+def cmd_cite(args):
+    """cite extract|list — local citation extraction (RFC 0001 §2.2/§2.3).
+
+    Offsets are meaningful against the exact decoded text parsed; its sha256
+    is stored per row (`text_sha256`). The document (container) sha256 is
+    recorded separately and never used to define offsets.
+    """
+    conn = store.connect(args.case_dir)
+    from matterkit import citations
+    if args.sub == "extract":
+        raw = open(args.path, "rb").read()
+        text = raw.decode("utf-8", errors="replace")
+        import hashlib
+        doc_sha = hashlib.sha256(raw).hexdigest()
+        rows = citations.extract_citations(text, document_sha256=doc_sha)
+        n = citations.record_extractions(conn, rows)
+        ok = sum(1 for r in rows if r["status"] == "extracted")
+        print(f"extracted {ok}/{n} citation(s) from {args.path} "
+              f"(text sha256 {rows[0]['text_sha256'][:12]}…)" if rows
+              else f"0 citations found in {args.path}")
+        for r in rows:
+            mark = "✓" if r["status"] == "extracted" else "✗ unparsed"
+            print(f"  {mark} [{r['char_start']}:{r['char_end']}] {r['raw_fragment']!r}")
+    else:
+        q = "SELECT * FROM citation_extractions ORDER BY created_at, char_start"
+        if args.status:
+            q += f" WHERE status='{args.status}'"
+        for r in conn.execute(q):
+            print(f"[{r['status']:17}] {r['raw_fragment']!r} "
+                  f"@ {r['char_start']}:{r['char_end']} "
+                  f"(text {r['text_sha256'][:12]}, parser {r['parser']})")
+
+
+def cmd_auth_stage(args):
+    """Stage-validated authority status change (RFC 0001 §2.2c)."""
+    conn = store.connect(args.case_dir)
+    from matterkit import citations
+    try:
+        citations.transition_authority(
+            conn, args.authority_id, args.status,
+            checked_via=args.via, check_evidence=args.evidence)
+    except citations.StageOrderError as e:
+        sys.exit(f"refused: {e}")
+    row = conn.execute("SELECT status, checked_via, check_evidence FROM authorities WHERE id=?",
+                       (args.authority_id,)).fetchone()
+    print(f"authority {args.authority_id} → [{row['status']}] "
+          f"via={row['checked_via']!r} evidence={'recorded' if row['check_evidence'] else '—'}")
+
+
 def main():
     ap = argparse.ArgumentParser(prog="matter")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -155,6 +204,15 @@ def main():
 
     p = sub.add_parser("authority"); p.add_argument("case_dir"); p.add_argument("citation")
     p.add_argument("--via", default=None); p.set_defaults(fn=cmd_authority)
+
+    p = sub.add_parser("cite"); p.add_argument("sub", choices=["extract", "list"]); p.add_argument("case_dir")
+    p.add_argument("path", nargs="?")
+    p.add_argument("--status", choices=["extracted", "extraction-failed"])
+    p.set_defaults(fn=cmd_cite)
+
+    p = sub.add_parser("stage"); p.add_argument("case_dir"); p.add_argument("authority_id"); p.add_argument("status")
+    p.add_argument("--via", default=None); p.add_argument("--evidence", default=None)
+    p.set_defaults(fn=cmd_auth_stage)
 
     p = sub.add_parser("packet"); p.add_argument("case_dir")
     p.add_argument("--layer", default="3min", choices=["30s", "3min", "15min"])

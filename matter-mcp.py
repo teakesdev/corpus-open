@@ -28,6 +28,10 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}}}},
     {"name": "matter.packet_render", "description": "Render the counsel packet markdown at a given layer (30s | 3min | 15min). Read-only; returns text.",
      "inputSchema": {"type": "object", "properties": {"layer": {"type": "string"}}}},
+    {"name": "matter.cite_extract", "description": "Local citation extraction (RFC 0001 §2.2/§2.3): stdlib parser, zero network, no adapter imports reachable; needs no consent grant. Records rows with character offsets keyed to the parsed text's sha256; unparsed section fragments are first-class extraction-failed rows, never dropped.",
+     "inputSchema": {"type": "object", "required": ["text"],
+                     "properties": {"text": {"type": "string"},
+                                    "document_sha256": {"type": "string"}}}},
 ]
 
 
@@ -71,6 +75,13 @@ def call(name: str, args: dict):
         return json.dumps([dict(r) for r in conn.execute(q)], indent=1)
     if name == "matter.packet_render":
         return pk.packet(conn, MATTER_DIR, layer=args.get("layer", "3min"))
+    if name == "matter.cite_extract":
+        from matterkit import citations
+        text = args.get("text", "")
+        rows = citations.extract_citations(
+            text, document_sha256=args.get("document_sha256"))
+        citations.record_extractions(conn, rows)
+        return json.dumps(rows, indent=1)
     raise ValueError(f"unknown tool: {name}")
 
 

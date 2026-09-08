@@ -121,6 +121,6 @@ Still founder-gated: publishing the kit remote; R3 Corpus adapter authorization 
 
 ## 6. Rollout (small, separate commits)
 
-- R1: `search.py` interface + consent/egress scaffolding + authorities stage statuses + `matter.cite_extract` (zero network).
-- R2: `courtlistener-free` adapter behind a written grant.
-- R3: `corpus` adapter (founder-gated, keyed, after the Set A/B/C eval and DE Title 8 proof).
+- R1: **LANDED 2026-09-08** — `matterkit/citations.py` (stdlib parser, extraction-failure rows with offsets keyed to `text_sha256`, stage-order validator incl. evidence requirement), `matterkit/consent.py` (cooperative guardrail exactly as scoped: fail-closed missing/corrupt/expired/escalating/self-authored grants; `kind` defaults agent → conservative), `matterkit/search.py` (interface + hash-only egress + **zero adapters**), `citation_extractions` table + `check_evidence` column + backward-compatible migration, `matter cite extract|list` + `matter stage` CLI, `matter.cite_extract` MCP tool. Evidence: `tests/test_rfc0001.py` **31/31** — legacy-store migration, CLI/MCP regression, offsets-vs-text-sha, network-denied MCP `cite_extract` E2E (sockets disabled), AST import-graph scan, consent policy incl. self-authored-grant refusal and cross-agent reuse pinned as documented limit. Packet count updated for the new vocabulary (legacy `verified-official` counts as checked).
+- R2: `courtlistener-free` adapter behind a written grant. *(not started; separate go)*
+- R3: `corpus` adapter (founder-gated, keyed, after the Set A/B/C eval and DE Title 8 proof). *(not started)*
