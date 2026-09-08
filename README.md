@@ -61,8 +61,10 @@ source, or evidence-free "checked," is refused. These tokens mean *a defined
 source was checked*, never *this is correct law*.
 
 Adapters (network search) ship in later releases and require an explicit
-grant in `.matter/consent.json`; R1 ships zero adapters and the kit makes no
-network calls. See `rfcs/0001-provider-neutral-search-adapters.md`.
+grant in `.matter/consent.json` — issued by a human (`kind: "human"`),
+naming its authorized callers; agent-authored grants are inert proposals.
+R1 ships zero adapters and the kit makes no network calls.
+See `rfcs/0001-provider-neutral-search-adapters.md`.
 
 ## Skills
 

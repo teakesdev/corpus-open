@@ -1,19 +1,24 @@
-"""Cooperative consent enforcement for adapters (RFC 0001 §2.4, rev3 scope).
+"""Cooperative consent enforcement for adapters (RFC 0001 §2.4, rev4 scope).
 
 TRUST MODEL — read before extending: everything in this module lives inside
-the runtime's write authority. consent.json, its created_by field, and
-egress.jsonl can all be forged by a compromised agent. What the kit provides:
+the runtime's write authority. consent.json, its fields, and egress.jsonl can
+all be forged by a compromised agent. The kit honestly provides:
 
-  (i)  no ACCIDENTAL egress — absent/expired/out-of-scope grants are refused
-       by the kit's own code at construction and at call time;
-  (ii) no LEGITIMATE self-expansion — a grant authored by the calling agent
-       identity authorizes nothing (cooperative guard); cross-agent grant
-       reuse is permitted at kit level and is a documented limit, not an
-       oversight (tests pin this);
+  (i)   no ACCIDENTAL egress — absent/corrupt/expired/out-of-scope grants are
+        refused by the kit's own code at construction and at call time;
+  (ii)  ISSUER / CALLERS / SCOPE (rev4): a grant has an issuer (created_by),
+        an explicit authorized_callers list, and a scope (endpoints x payload
+        types x expiry x budget). kind:"human" grants authorize their issuer
+        and listed callers only — explicit delegation is the intended
+        headless workflow; unlisted callers are refused. kind:"agent" grants
+        (the conservative default when the field is absent) are INERT
+        PROPOSALS: an agent cannot confer authority it does not hold,
+        including to itself. All of this is forgeable by a compromised
+        runtime — cooperative enforcement, not containment;
   (iii) compromised-agent CONTAINMENT requires a trust anchor outside the
-       agent's write authority (separate broker, OS-user-owned grant store).
-       The kit does not ship one; without it the kit's promise is "the kit's
-       own call graph refuses," never "the system cannot egress."
+        agent's write authority (separate broker, OS-user-owned grant store).
+        The kit does not ship one; without it the kit's promise is "the kit's
+        own call graph refuses," never "the system cannot egress."
 
 Payload sensitivity ladder: query_text < passage_text < document_text.
 Query text is itself matter-derived; passage/document payloads are excluded
@@ -27,8 +32,9 @@ SENSITIVITY = {"query_text": 1, "passage_text": 2, "document_text": 3}
 
 
 class ConsentError(PermissionError):
-    """Refused by consent policy (absent / expired / out-of-scope / self-authored /
-    over-budget grant). Fail closed: this is raised, never silently downgraded."""
+    """Refused by consent policy (absent / expired / out-of-scope / unlisted
+    caller / inert agent-authored grant / over budget). Fail closed: raised,
+    never silently downgraded."""
 
 
 def consent_path(matter_dir: str) -> str:
@@ -71,42 +77,65 @@ def _today_usage(matter_dir: str, provider: str) -> int:
     return n
 
 
+def _identity_ok(g: dict, caller_id: str) -> tuple[bool, str]:
+    """Issuer / callers / scope identity rule (rev4).
+
+    - kind:"agent" grants (default when absent) are inert for everyone:
+      self-authorship is the expansion vector the cooperative model blocks,
+      and an agent cannot confer authority it does not hold.
+    - kind:"human" grants authorize the issuer and explicitly listed callers.
+      Unlisted callers are refused: human authorship neither authorizes every
+      agent implicitly nor prevents explicit delegation.
+    Forgeable by a compromised runtime — see module docstring (ii)/(iii).
+    """
+    if g.get("kind", "agent") != "human":
+        return False, "agent-authored grants are inert proposals"
+    issuer = g.get("created_by")
+    callers = g.get("authorized_callers") or []
+    if caller_id != issuer and caller_id not in callers:
+        return False, (f"caller {caller_id!r} is neither the issuer nor in "
+                       f"authorized_callers")
+    return True, ""
+
+
 def authorize(matter_dir: str, provider: str, endpoint: str, payload_type: str,
               caller_id: str) -> dict:
     """Return the matching grant or raise ConsentError. Called at construction
     AND per call (call-time recheck is the one that catches escalation)."""
     if payload_type not in SENSITIVITY:
         raise ConsentError(f"unknown payload type {payload_type!r}")
+    refusals: list[str] = []
     for g in load_grants(matter_dir):
         if g.get("provider") != provider:
             continue
         if endpoint not in (g.get("endpoints") or []):
             continue
         if payload_type not in (g.get("payload_types") or []):
+            refusals.append(f"payload {payload_type!r} outside grant scope")
             continue
-        # Cooperative guard: a grant authored by an AGENT identity authorizes
-        # nothing for that agent (kind defaults to "agent" when absent, so an
-        # omitted field is conservative). A grant with kind "human" authorizes
-        # its author and any agent running under the human's authority.
-        # Forgeable by a compromised runtime — documented limit, see above.
-        if g.get("kind", "agent") == "agent" and g.get("created_by") == caller_id:
+        ok, why = _identity_ok(g, caller_id)
+        if not ok:
+            refusals.append(why)
             continue
         exp = g.get("expires")
         if exp:
             try:
                 if _dt.datetime.fromisoformat(exp) < _dt.datetime.now(_dt.timezone.utc):
+                    refusals.append("grant expired")
                     continue
             except ValueError:
-                continue  # unparseable expiry -> treat grant as dead
+                refusals.append("grant expiry unparseable — treated as dead")
+                continue
         budget = g.get("daily_budget")
         if isinstance(budget, int) and _today_usage(matter_dir, provider) >= budget:
             raise ConsentError(
                 f"daily budget ({budget}) exhausted for provider {provider!r}")
         return g
+    detail = "; ".join(dict.fromkeys(refusals)) if refusals else "no matching grant"
     raise ConsentError(
         f"no valid grant for {provider}/{endpoint}/{payload_type} "
-        f"(caller {caller_id!r}) — write .matter/consent.json first; "
-        "see RFC 0001 §2.4")
+        f"(caller {caller_id!r}) — {detail}. Write .matter/consent.json per "
+        "RFC 0001 §2.4")
 
 
 def require_escalation(matter_dir: str, provider: str, endpoint: str,
