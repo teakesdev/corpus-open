@@ -45,7 +45,19 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 CREATE TABLE IF NOT EXISTS authorities (
   id TEXT PRIMARY KEY, citation TEXT NOT NULL,
-  status TEXT DEFAULT 'unverified', checked_via TEXT, note TEXT
+  status TEXT DEFAULT 'unverified', checked_via TEXT, note TEXT,
+  check_evidence TEXT
+);
+CREATE TABLE IF NOT EXISTS citation_extractions (
+  id TEXT PRIMARY KEY,
+  document_sha256 TEXT,
+  text_sha256 TEXT NOT NULL,
+  parser TEXT NOT NULL,
+  char_start INTEGER, char_end INTEGER,
+  raw_fragment TEXT NOT NULL,
+  parsed_citation TEXT,
+  status TEXT NOT NULL CHECK (status IN ('extracted','extraction-failed')),
+  created_at TEXT NOT NULL
 );
 """
 
@@ -62,7 +74,16 @@ def connect(matter_dir: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Backward-compatible migrations for stores created before v0.2 (RFC 0001)."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(authorities)")]
+    if cols and "check_evidence" not in cols:
+        conn.execute("ALTER TABLE authorities ADD COLUMN check_evidence TEXT")
+        conn.commit()
 
 
 def new_id(prefix: str = "") -> str:

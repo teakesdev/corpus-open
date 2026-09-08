@@ -44,7 +44,25 @@ python3 matter.py packet ~/cases/my-case --layer 3min --out COUNSEL_PACKET.md
 ```
 
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
-`matter.deadline_list` · `matter.packet_render`.
+`matter.deadline_list` · `matter.packet_render` · `matter.cite_extract`.
+
+## Citations and stages (v0.2, RFC 0001)
+
+```bash
+python3 matter.py cite extract ~/cases/my-case Evidence/complaint.txt  # local parse; offsets keyed to the parsed text's sha256
+python3 matter.py cite list ~/cases/my-case --status extraction-failed # unparsed fragments, first-class, never dropped
+python3 matter.py stage ~/cases/my-case auth_xxx source-checked \
+  --via "courtlistener:id=123" --evidence "DL #123 text matches; still good law as of 2026-09-08"
+```
+
+Stages: `unverified` → `resolved` → (`research-pending`) → `source-checked` /
+`stale-flagged`. Transitions are validated — a check status without a resolved
+source, or evidence-free "checked," is refused. These tokens mean *a defined
+source was checked*, never *this is correct law*.
+
+Adapters (network search) ship in later releases and require an explicit
+grant in `.matter/consent.json`; R1 ships zero adapters and the kit makes no
+network calls. See `rfcs/0001-provider-neutral-search-adapters.md`.
 
 ## Skills
 

@@ -16,7 +16,13 @@ def status_report(conn, matter_dir: str) -> str:
         lines.append(f"- {r['kind']}: {r['c']}")
     n_assert = conn.execute("SELECT COUNT(*) c FROM assertions").fetchone()["c"]
     n_dead = conn.execute("SELECT COUNT(*) c FROM deadlines WHERE state='open'").fetchone()["c"]
-    n_auth = conn.execute("SELECT COUNT(*) c FROM authorities WHERE status!='verified'").fetchone()["c"]
+    # "Unverified" = no source check yet (RFC 0001 §2.2 vocabulary):
+    # pre-check stages are unverified/resolved/research-pending; legacy
+    # 'verified-official' rows count as checked.
+    checked = ("source-checked", "stale-flagged", "verified-official")
+    n_auth = conn.execute(
+        "SELECT COUNT(*) c FROM authorities WHERE status NOT IN ({})".format(
+            ",".join("?" * len(checked))), checked).fetchone()["c"]
     lines += ["", f"Assertions: {n_assert} · Open deadlines: {n_dead} · Unverified authorities: {n_auth}"]
     return "\n".join(lines)
 
