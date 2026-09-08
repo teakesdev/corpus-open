@@ -246,7 +246,7 @@ class TestConsentCooperative(unittest.TestCase):
         g = {"provider": "p1", "endpoints": ["example.org"],
              "payload_types": ["query_text"], "daily_budget": None,
              "created_by": "ty", "created_at": "2026-09-08T00:00:00+00:00",
-             "expires": None, "kind": "human"}
+             "expires": None, "kind": "human", "authorized_callers": []}
         g.update(over)
         return g
 
@@ -269,18 +269,35 @@ class TestConsentCooperative(unittest.TestCase):
         g = consent.authorize(self.dir, "p1", "example.org", "query_text", "ty")
         self.assertEqual(g["provider"], "p1")
 
-    def test_cross_agent_reuse_allowed_documented_limit(self):
-        # Kit-level cooperative scope: agent B may run under ty's grant.
-        # Pinned as a DOCUMENTED LIMIT, not an oversight (module docstring).
-        self._write([self._grant()])
+    def test_listed_agent_authorized_is_the_headless_workflow(self):
+        # Explicit delegation: a human-issued grant naming the agent in
+        # authorized_callers lets that agent run within the grant's scope.
+        self._write([self._grant(authorized_callers=["agent-b"])])
         g = consent.authorize(self.dir, "p1", "example.org", "query_text", "agent-b")
-        self.assertEqual(g["created_by"], "ty")
+        self.assertEqual(g["created_by"], "ty")  # issuer, not the agent
 
-    def test_self_authored_grant_authorizes_nothing(self):
-        # An agent honestly marking its own grant kind:"agent" gains nothing.
-        self._write([self._grant(created_by="agent-b", kind="agent")])
+    def test_unlisted_agent_refused_under_human_grant(self):
+        # Human authorship neither authorizes every agent implicitly:
+        # an agent NOT in authorized_callers is refused even though the
+        # grant is human-authored (rev4 — closes the rev3 guard gap).
+        self._write([self._grant(authorized_callers=["agent-a"])])
         with self.assertRaises(consent.ConsentError):
             consent.authorize(self.dir, "p1", "example.org", "query_text", "agent-b")
+
+    def test_listed_agent_cannot_exceed_scope(self):
+        # Delegation is within scope only: listed caller, ungranted payload.
+        self._write([self._grant(authorized_callers=["agent-b"])])
+        with self.assertRaises(consent.ConsentError):
+            consent.authorize(self.dir, "p1", "example.org", "passage_text", "agent-b")
+
+    def test_self_authored_grant_authorizes_nothing(self):
+        # An agent-authored grant is an inert proposal — for anyone.
+        self._write([self._grant(created_by="agent-b", kind="agent",
+                                 authorized_callers=["agent-b", "ty"])])
+        with self.assertRaises(consent.ConsentError):
+            consent.authorize(self.dir, "p1", "example.org", "query_text", "agent-b")
+        with self.assertRaises(consent.ConsentError):
+            consent.authorize(self.dir, "p1", "example.org", "query_text", "ty")
 
     def test_agent_authored_grant_lacks_kind_defaults_to_agent(self):
         # Omitting the kind field is conservative: treated as agent-authored.
@@ -333,49 +350,76 @@ class TestAdapterSurface(unittest.TestCase):
 
 
 class TestNetworkIsolation(unittest.TestCase):
-    """cite_extract path must work with sockets disabled (chair requirement)."""
+    """`matter.cite_extract` under PYTHON-LEVEL network denial inside the
+    MCP child process (chair requirement, corrected implementation).
 
-    def setUp(self):
-        self._sock = socket.socket
-        self._cc = getattr(socket, "create_connection", None)
-        def _deny(*a, **k):
-            raise OSError("network denied by R1 isolation test")
-        socket.socket = _deny
-        socket.create_connection = _deny
-        self.addCleanup(self._restore)
+    NOT OS-level containment: the denial is a sitecustomize hook placed on
+    the child's socket module via PYTHONPATH. Negative controls prove the
+    harness genuinely blocks — the same socket attempt fails with the
+    harness on the path and succeeds without it.
+    (Deepseek finding: the previous test monkeypatched sockets only in the
+    test parent; the MCP child never inherited it.)
 
-    def _restore(self):
-        socket.socket = self._sock
-        if self._cc is not None:
-            socket.create_connection = self._cc
+    Harness: tests/netblock_sitecustomize/sitecustomize.py
+    """
 
-    def test_cite_extract_runs_network_denied(self):
-        with tempfile.TemporaryDirectory() as d:
-            subprocess.run([sys.executable, os.path.join(KIT, "matter.py"), "init", d],
-                           check=True, capture_output=True)
-            env = dict(os.environ, MATTER_DIR=d)
-            msgs = [
-                {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-                 "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                            "clientInfo": {"name": "t", "version": "0"}}},
-                {"jsonrpc": "2.0", "method": "notifications/initialized"},
-                {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                 "params": {"name": "matter.cite_extract",
-                            "arguments": {"text": SAMPLE,
-                                          "document_sha256": "deadbeef"}}},
-            ]
-            r = subprocess.run([sys.executable, os.path.join(KIT, "matter-mcp.py")],
-                               input="\n".join(json.dumps(m) for m in msgs),
-                               capture_output=True, text=True, env=env, timeout=30)
-            lines = [json.loads(l) for l in r.stdout.strip().splitlines() if l.strip()]
-            self.assertEqual(lines[-1]["id"], 2)
-            self.assertFalse(lines[-1]["result"].get("isError"))
-            rows = json.loads(lines[-1]["result"]["content"][0]["text"])
-            statuses = [x["status"] for x in rows]
-            self.assertIn("extracted", statuses)
-            self.assertIn("extraction-failed", statuses)
+    SITECUSTOMIZE = os.path.join(KIT, "tests", "netblock_sitecustomize")
 
-    def test_extraction_module_import_graph_is_clean(self):
+    def _mcp_cite_extract(self, env_extra):
+        d = tempfile.mkdtemp(prefix="mk-iso-")
+        self.addCleanup(subprocess.run, ["rm", "-rf", d])
+        subprocess.run([sys.executable, os.path.join(KIT, "matter.py"), "init", d],
+                       check=True, capture_output=True)
+        env = dict(os.environ, MATTER_DIR=d, **env_extra)
+        msgs = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                        "clientInfo": {"name": "t", "version": "0"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "matter.cite_extract",
+                        "arguments": {"text": SAMPLE,
+                                      "document_sha256": "deadbeef"}}},
+        ]
+        r = subprocess.run([sys.executable, os.path.join(KIT, "matter-mcp.py")],
+                           input="\n".join(json.dumps(m) for m in msgs),
+                           capture_output=True, text=True, env=env, timeout=30)
+        return [json.loads(l) for l in r.stdout.strip().splitlines() if l.strip()]
+
+    def test_negative_control_socket_blocked_with_harness(self):
+        # The harness must actually deny: a fresh child attempting a socket
+        # fails while PYTHONPATH points at the sitecustomize dir.
+        probe = ("import socket; "
+                 "socket.socket(socket.AF_INET, socket.SOCK_STREAM)")
+        env = dict(os.environ, PYTHONPATH=self.SITECUSTOMIZE)
+        r = subprocess.run([sys.executable, "-c", probe],
+                           capture_output=True, text=True, env=env, timeout=30)
+        self.assertNotEqual(r.returncode, 0,
+                            "isolation harness did NOT block sockets — "
+                            "the denial test below would be vacuous")
+        self.assertIn("network denied by R1 isolation harness", r.stderr)
+
+    def test_negative_control_socket_allowed_without_harness(self):
+        # Without the harness the same probe must succeed — proving the
+        # block comes from the harness, not the environment.
+        probe = ("import socket; "
+                 "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()")
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)
+        r = subprocess.run([sys.executable, "-c", probe],
+                           capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_cite_extract_runs_with_sockets_denied_in_child(self):
+        lines = self._mcp_cite_extract({"PYTHONPATH": self.SITECUSTOMIZE})
+        self.assertEqual(lines[-1]["id"], 2)
+        self.assertFalse(lines[-1]["result"].get("isError"))
+        rows = json.loads(lines[-1]["result"]["content"][0]["text"])
+        statuses = [x["status"] for x in rows]
+        self.assertIn("extracted", statuses)
+        self.assertIn("extraction-failed", statuses)
+
+    def test_import_graph_is_clean(self):
         import ast
         banned = {"socket", "urllib", "http", "requests", "httpx", "ssl",
                   "ftplib", "smtplib", "telnetlib", "xmlrpc", "asyncio"}
