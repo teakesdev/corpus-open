@@ -27,8 +27,8 @@
       },
       {
         "start": 419,
-        "end": 431,
-        "reason": "SECTION 1. SHORT TITLE; TABLE OF CONTENTS. \u2014 Act heading chrome; amendment 2026-09-09 per Astra (frozen ignored_intervals did not cover it; prior-session chrome discussion is not a scoring rule)"
+        "end": 428,
+        "reason": "SECTION 1 heading \u2014 cover exactly text[start:end]=='SECTION 1' per second reviewer; chrome, neither gold nor FP"
       }
     ]
   },
@@ -99,5 +99,24 @@
   "label_contract_amendments": [
     "2026-09-09 (Astra): SECTION 1 heading added to ignored_intervals [419,431] \u2014 chrome exclusion must be explicit, not inherited from prior-session discussion.",
     "2026-09-09 (Astra): out-of-scope references (named acts, structural refs) are neither gold nor FP."
-  ]
+  ],
+  "out_of_scope_intervals": {
+    "usc_11_362_decoded.txt": [
+      {
+        "start": 273,
+        "end": 307,
+        "reason": "named act 'Securities Investor Protection Act of 1970' without locator \u2014 out of scope, neither gold nor FP"
+      },
+      {
+        "start": 125,
+        "end": 139,
+        "reason": "structural 'subsection (b)' \u2014 out of scope, neither gold nor FP"
+      },
+      {
+        "start": 3705,
+        "end": 3740,
+        "reason": "structural 'title IV of the Social Security Act' \u2014 out of scope, neither gold nor FP"
+      }
+    ]
+  }
 }
