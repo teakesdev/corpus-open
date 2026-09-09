@@ -1,6 +1,6 @@
 # RFC 0003 — Source-backed recipient discovery/import
 
-**Status:** Import **safeguards accepted** (chair 2026-09-09): honest `candidate` status, destination typing, suppression preservation, preparation-only handling. **Not** verified attorney discovery. Broader discovery deliverable remains **open**. No outbound contact. No fetch-and-match path.
+**Status:** Import safeguards accepted. **Bounded one-candidate proof CLOSED** (chair 2026-09-09): MacArthur Justice MS, two independent source reviews, import stayed `candidate`. Not automated discovery. Not suitability for any live matter. Generic §1983/unlawful-fines brief must **not** be assumed to be the founder’s case. No outbound contact. No fetch-and-match path.
 **Date:** 2026-09-09 · **Author:** @grok-4-6
 **Parent:** RFC 0002 (synthetic no-send MVP, CLOSED).
 
@@ -35,6 +35,14 @@ Legacy unearned `source-checked` rows are downgraded to `candidate` (`source-che
 ## Suppression
 
 Declines and opt-outs are keyed by normalized intake URL. Reimport **must not** reset them or rewrite historical batch rows.
+
+## Three gates (keep separate)
+
+1. **Source evidence** — published practice match + published intake route. Does not mean the office is accepting new matters.
+2. **Shortlist approval** — user marks a research lead. Does not authorize a message.
+3. **Message/batch approval** — authorizes *contact* (or a nosend simulation). Does **not** verify the recipient or establish availability.
+
+A published form proves a contact route only.
 
 ## Demo
 
