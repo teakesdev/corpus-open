@@ -207,7 +207,8 @@ def cmd_search(args):
     from matterkit.consent import ConsentError
     try:
         rows = S.manual_search(
-            args.case_dir, args.caller, args.query, limit=args.limit)
+            args.case_dir, args.caller, args.query, limit=args.limit,
+            auth_mode=args.auth)
     except (LookupError, ConsentError, RuntimeError, ValueError) as e:
         sys.exit(f"refused: {e}")
     print(f"{len(rows)} CourtListener hit(s) for {args.query!r} "
@@ -284,6 +285,7 @@ def main():
     p.add_argument("query")
     p.add_argument("--caller", default=os.environ.get("USER", "human"))
     p.add_argument("--limit", type=int, default=5)
+    p.add_argument("--auth", choices=["anonymous", "authenticated"], default="anonymous")
     p.add_argument("--record-resolved", action="store_true")
     p.set_defaults(fn=cmd_search)
 
