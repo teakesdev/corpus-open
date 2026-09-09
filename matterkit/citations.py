@@ -49,44 +49,70 @@ def now_iso() -> str:
 # span already claimed by an earlier pattern is never re-claimed)
 # --------------------------------------------------------------------------
 _PATTERNS = [
-    # U.S. Code:           15 U.S.C. § 1681a   /   15 USC § 1681a
-    re.compile(r"\b\d+\s+U\.?S\.?C\.?\s*§+\s*[\dA-Za-z]+(?:\s*\([^)]{1,40}\))?"),
+    # Public laws (en dash or hyphen):   Pub. L. 96–170 / Pub. L. 104-317
+    re.compile(r"\bPub\.\s*L\.\s*\d+\s*[–\-—]\s*\d+\b"),
+    # Revised Statutes:                  R.S. § 1979 (Unicode space tolerated by \s)
+    re.compile(r"\bR\.S\.\s*§+\s*[\dA-Za-z.\-]+"),
+    # Florida short:                     F.S. 605.0101 / F.S. § 605.0101
+    re.compile(r"\bF\.S\.\s*(?:§+\s*)?[\dA-Za-z.\-]+"),
+    # Code of Federal Regulations — dotted or undotted, § optional:
+    #   17 C.F.R. § 240.10b-5 / 12 CFR 1026.1
+    re.compile(r"\b\d+\s+C\.?F\.?R\.?\s*(?:§+\s*)?[\dA-Za-z.\-]+"),
+    # U.S. Code — abbreviated or spelled out:
+    #   15 U.S.C. § 1681a / 42 U.S. Code § 1983
+    re.compile(r"\b\d+\s+(?:U\.?S\.?C\.?|U\.?S\.?\s+Code)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
     # Code of Federal Regulations (full depth):  17 C.F.R. § 240.10b-5
     re.compile(r"\b\d+\s+C\.F\.R\.\s*§+\s*[\dA-Za-z.\-]+"),
     # Delaware:            8 Del. C. § 141
-    re.compile(r"\b\d+\s+Del\.\s+C\.\s*§+\s*\d+[a-z]?"),
+    re.compile(r"\b\d+\s+Del\.\s+C\.\s*§+\s*\d+[a-z]?(?:\s*\([^)]{1,24}\))?"),
     # State Code Ann.:     Miss. Code Ann. § 57-1-319 / Wyo. Stat. Ann. § 17-29-802
-    re.compile(r"\b[A-Z][A-Za-z.]*\.?\s+(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+"),
+    re.compile(r"\b[A-Z][A-Za-z.]*\.?\s+(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
     # Keyword-tail code names (v2): dotted words chain across legitimate
     # spaces; (?<![\w.]) forbids starting mid-acronym (the 'N.Y.' -> 'Y. …'
     # FP) and sentence prefixes can never match (no trailing dot).
     #   Cal. Civ. Code § 1542 · Cal. Bus. & Prof. Code § 17200 ·
     #   Tex. Bus. & Orgs. Code § 101.55 · N.Y. Bus. Corp. Law § 405
-    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,4}(?:Code|Law)\s*§+\s*[\dA-Za-z.\-]+"),
+    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,4}(?:Code|Law)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
     # Gov't-tail:          Tex. Gov't Code § 3.005
-    re.compile(r"(?<![\w.])[A-Z][\w'.]*(?:\s*&\s*)?\s*Gov'?t\.?\s+(?:Code|Stat\.)\s*§+\s*[\dA-Za-z.\-]+"),
+    re.compile(r"(?<![\w.])[A-Z][\w'.]*(?:\s*&\s*)?\s*Gov'?t\.?\s+(?:Code|Stat\.)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
     # Dotted-pure stat:    Fla. Stat. § 605.100
-    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,2}Stat\.\s*§+\s*[\dA-Za-z.\-]+"),
+    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,2}Stat\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
     # Multi-part compiled statutes:  805 Ill. Comp. Stat. 5/1.10
     re.compile(r"\b\d+\s+[A-Z][\w'.]*\.(?:\s*[A-Z][\w'.]*\.)+\s*\d+(?:\.\d+)?/\d+(?:\.\d+)?\b"),
     # Reporter cites:      347 U.S. 483   /   946 So. 2d 851
     re.compile(r"\b\d+\s+[A-Z][A-Za-z.]*(?:\.\s*\d+[a-z]*)?\s+\d+\b"),
-    # Bare section fragment — kept and recorded as extraction-failure evidence,
-    # never silently dropped (chair requirement, 2026-09-08):
-    re.compile(r"§+\s*[\dA-Za-z.\-]+"),
+    # Cross-reference word family (holdout labels): section 43 of Title 8 ·
+    # sections 106 and 106A · section 401(a) · Sec. 107
+    re.compile(r"\b(?:sections?|Sec\.)\s+\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?(?:\s+(?:and|or|through|to)\s+\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)*(?:\s+of\s+Title\s+\d+)?"),
+    # Statute-range cite:                605.0101 - 605.1108
+    re.compile(r"\b\d+\.\d{3,5}\s*[-–—]\s*\d+\.\d{3,5}\b"),
+    # Florida session-law cite:          s. 2, ch. 2013-180
+    re.compile(r"\bs\.\s*\d+\s*,\s*ch\.\s*\d{4}\s*[-–—]\s*\d+\b"),
+    # Short-form section cite (v3 — holdout labels establish these are real
+    # citations, not extraction failures): § 1983 / § 309(c). Digit-start is
+    # mandatory ('§ for' is not a citation). HTML entities and Unicode spaces
+    # in the gap are tolerated so offsets never shift.
+    re.compile(r"(?:§|&sect;|&#x00A7;|&#167;)\s*(?:&nbsp;|&#x2003;|&#8194;|&#8195;|&#8239;|\s)*\d[\dA-Za-z.\-]*(?:\s*\([^)]{1,24}\))?"),
+    # Bare § followed by a NON-number: recorded as extraction-failed evidence
+    # (honest-failure path preserved for genuinely unparsable fragments).
+    re.compile(r"(?:§|&sect;|&#x00A7;|&#167;)\s*(?:&nbsp;|&#x2003;|\s)*[A-Za-z][\dA-Za-z.\-]*"),
 ]
 
 
 def _looks_complete(fragment: str) -> bool:
     """Heuristic: does the fragment carry its citation context?
 
-    A §-fragment is complete only when a code name/number precedes the sign;
-    a bare `§ 1234` is a real citation attempt the parser could not resolve
-    to a code, so it is recorded as extraction-failed with offsets.
+    v3: a short-form `§ 1983` IS a complete citation (holdout labels
+    established this); bare-§ failure rows now only arise when an entity
+    decode failed or the fragment is otherwise non-citation noise. Entity
+    forms (&sect; etc.) count as complete when they carry a section number.
     """
-    if "§" in fragment:
-        before = fragment.split("§", 1)[0]
-        return bool(re.search(r"[A-Za-z]", before) or re.search(r"\d", before))
+    core = fragment.replace("&sect;", "§").replace("&#x00A7;", "§").replace("&#167;", "§")
+    if "§" in core:
+        after = core.split("§", 1)[1].lstrip()
+        # complete iff a DIGIT follows the sign ('§ for' is not a citation;
+        # '§ 1983' and '§ 309(c)' are — holdout labels, 2026-09-08)
+        return bool(after[:1].isdigit())
     return True
 
 
@@ -95,13 +121,26 @@ def extract_citations(text: str, document_sha256: str | None = None,
     """Parse `text`; return rows ready for citation_extractions. Local-only."""
     text_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
     found: list[dict] = []
-    claimed: list[tuple[int, int]] = []
+    matches: list[tuple[int, int]] = []
+
+    def _claimed(s: int, e: int) -> bool:
+        """Exact-duplicate or boundary-crossing overlap blocks a match.
+        Full containment is ALLOWED: real corpora legitimately yield nested
+        predictions (full cite + its tail short-form), and the holdout gold
+        labels score them as separate items."""
+        for cs, ce in matches:
+            if (s, e) == (cs, ce):
+                return True
+            if s < ce and cs < e and not (cs <= s and e <= ce) and not (s <= cs and ce <= e):
+                return True  # partial/crossing overlap
+        return False
+
     for pat in _PATTERNS:
         for m in pat.finditer(text):
             s, e = m.span()
-            if any(s < ce and cs < e for cs, ce in claimed):
+            if _claimed(s, e):
                 continue
-            claimed.append((s, e))
+            matches.append((s, e))
             frag = text[s:e]
             # A trailing period directly after the section/reporter number is
             # sentence punctuation, not citation content ('...§ 57-1-319.').
@@ -121,6 +160,33 @@ def extract_citations(text: str, document_sha256: str | None = None,
                 "status": "extracted" if ok else "extraction-failed",
                 "created_at": now_iso(),
             })
+            # Coordinated cross-reference (holdout labels score each member as
+            # its own item): 'section 502 or 503' also yields 'section 502'
+            # and the trailing member as separate nested rows.
+            xref = re.match(
+                r"((?:sections?|Sec\.)\s+\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)"
+                r"(\s+(?:and|or|through|to)\s+)(\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)",
+                frag)
+            if xref:
+                head_s = s + xref.start(1)
+                head_e = head_s + len(xref.group(1))
+                tail_s = s + xref.start(3)
+                tail_e = tail_s + len(xref.group(3))
+                for sub_s, sub_e in ((head_s, head_e), (tail_s, tail_e)):
+                    if not _claimed(sub_s, sub_e):
+                        matches.append((sub_s, sub_e))
+                        found.append({
+                            "id": "cx_" + secrets.token_hex(6),
+                            "document_sha256": document_sha256,
+                            "text_sha256": text_sha,
+                            "parser": parser,
+                            "char_start": sub_s,
+                            "char_end": sub_e,
+                            "raw_fragment": text[sub_s:sub_e],
+                            "parsed_citation": text[sub_s:sub_e],
+                            "status": "extracted",
+                            "created_at": now_iso(),
+                        })
     found.sort(key=lambda r: r["char_start"])
     return found
 

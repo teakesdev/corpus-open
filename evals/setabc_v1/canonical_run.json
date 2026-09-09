@@ -1,13 +1,13 @@
 {
  "canonical": true,
  "standard": "exact source span: prediction matched iff (doc,start,end) == gold (doc,start,end); normalized text stored separately, never affecting match",
- "generated_at": "2026-09-09T01:06:22+00:00",
+ "generated_at": "2026-09-09T02:08:57+00:00",
  "gold_sha256": "1ba6cc3956c88f6be1268f8b7b10b56cf6bba2f0982f523855b16e5f87a055cb",
  "n_gold": 192,
  "parsers": {
   "kit": {
-   "head": "3704e76",
-   "n_predictions": 192,
+   "head": "4f6bad1",
+   "n_predictions": 363,
    "duplicates_collapsed": 0,
    "matched_ids": [
     "A-000",
@@ -204,7 +204,1376 @@
     "B-179"
    ],
    "missed_ids": [],
-   "false_positives": [],
+   "false_positives": [
+    {
+     "doc": "stat_00_0.txt",
+     "start": 25,
+     "end": 31,
+     "text": "\u00a7 100b",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_0.txt",
+     "start": 119,
+     "end": 125,
+     "text": "\u00a7 103c",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_0.txt",
+     "start": 204,
+     "end": 210,
+     "text": "\u00a7 106e",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_0.txt",
+     "start": 298,
+     "end": 304,
+     "text": "\u00a7 109b",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_0.txt",
+     "start": 382,
+     "end": 388,
+     "text": "\u00a7 112a",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_0.txt",
+     "start": 795,
+     "end": 800,
+     "text": "\u00a7 141",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_0.txt",
+     "start": 822,
+     "end": 829,
+     "text": "\u00a7 1681a",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_1.txt",
+     "start": 16,
+     "end": 22,
+     "text": "\u00a7 101b",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_1.txt",
+     "start": 101,
+     "end": 107,
+     "text": "\u00a7 104a",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_1.txt",
+     "start": 195,
+     "end": 201,
+     "text": "\u00a7 107d",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_1.txt",
+     "start": 279,
+     "end": 285,
+     "text": "\u00a7 110f",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_1.txt",
+     "start": 373,
+     "end": 379,
+     "text": "\u00a7 113f",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_1.txt",
+     "start": 768,
+     "end": 773,
+     "text": "\u00a7 141",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_1.txt",
+     "start": 795,
+     "end": 802,
+     "text": "\u00a7 1681a",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_2.txt",
+     "start": 25,
+     "end": 31,
+     "text": "\u00a7 102f",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_2.txt",
+     "start": 118,
+     "end": 124,
+     "text": "\u00a7 105d",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_2.txt",
+     "start": 202,
+     "end": 208,
+     "text": "\u00a7 108e",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_2.txt",
+     "start": 295,
+     "end": 301,
+     "text": "\u00a7 111c",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_2.txt",
+     "start": 379,
+     "end": 385,
+     "text": "\u00a7 114f",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_2.txt",
+     "start": 792,
+     "end": 797,
+     "text": "\u00a7 141",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_00_2.txt",
+     "start": 819,
+     "end": 826,
+     "text": "\u00a7 1681a",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_0.txt",
+     "start": 23,
+     "end": 28,
+     "text": "\u00a7 100",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_0.txt",
+     "start": 112,
+     "end": 117,
+     "text": "\u00a7 103",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_0.txt",
+     "start": 194,
+     "end": 199,
+     "text": "\u00a7 106",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_0.txt",
+     "start": 283,
+     "end": 288,
+     "text": "\u00a7 109",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_0.txt",
+     "start": 365,
+     "end": 370,
+     "text": "\u00a7 112",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_1.txt",
+     "start": 18,
+     "end": 23,
+     "text": "\u00a7 101",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_1.txt",
+     "start": 101,
+     "end": 106,
+     "text": "\u00a7 104",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_1.txt",
+     "start": 190,
+     "end": 195,
+     "text": "\u00a7 107",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_1.txt",
+     "start": 272,
+     "end": 277,
+     "text": "\u00a7 110",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_1.txt",
+     "start": 361,
+     "end": 366,
+     "text": "\u00a7 113",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_2.txt",
+     "start": 23,
+     "end": 28,
+     "text": "\u00a7 102",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_2.txt",
+     "start": 112,
+     "end": 117,
+     "text": "\u00a7 105",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_2.txt",
+     "start": 194,
+     "end": 199,
+     "text": "\u00a7 108",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_2.txt",
+     "start": 283,
+     "end": 288,
+     "text": "\u00a7 111",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_01_2.txt",
+     "start": 365,
+     "end": 370,
+     "text": "\u00a7 114",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_0.txt",
+     "start": 57,
+     "end": 67,
+     "text": "\u00a7 79-0-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_0.txt",
+     "start": 142,
+     "end": 152,
+     "text": "\u00a7 79-3-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_0.txt",
+     "start": 254,
+     "end": 264,
+     "text": "\u00a7 75-6-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_0.txt",
+     "start": 339,
+     "end": 349,
+     "text": "\u00a7 79-9-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_0.txt",
+     "start": 451,
+     "end": 462,
+     "text": "\u00a7 85-12-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_1.txt",
+     "start": 34,
+     "end": 44,
+     "text": "\u00a7 79-1-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_1.txt",
+     "start": 146,
+     "end": 156,
+     "text": "\u00a7 57-4-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_1.txt",
+     "start": 231,
+     "end": 241,
+     "text": "\u00a7 75-7-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_1.txt",
+     "start": 343,
+     "end": 354,
+     "text": "\u00a7 79-10-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_1.txt",
+     "start": 429,
+     "end": 440,
+     "text": "\u00a7 79-13-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_2.txt",
+     "start": 57,
+     "end": 67,
+     "text": "\u00a7 79-2-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_2.txt",
+     "start": 142,
+     "end": 152,
+     "text": "\u00a7 57-5-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_2.txt",
+     "start": 254,
+     "end": 264,
+     "text": "\u00a7 75-8-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_2.txt",
+     "start": 339,
+     "end": 350,
+     "text": "\u00a7 57-11-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_02_2.txt",
+     "start": 452,
+     "end": 463,
+     "text": "\u00a7 85-14-319",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_0.txt",
+     "start": 22,
+     "end": 33,
+     "text": "\u00a7 17-29-800",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_0.txt",
+     "start": 118,
+     "end": 129,
+     "text": "\u00a7 17-29-803",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_0.txt",
+     "start": 223,
+     "end": 234,
+     "text": "\u00a7 17-29-806",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_0.txt",
+     "start": 319,
+     "end": 330,
+     "text": "\u00a7 17-29-809",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_0.txt",
+     "start": 424,
+     "end": 435,
+     "text": "\u00a7 17-29-812",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_1.txt",
+     "start": 31,
+     "end": 42,
+     "text": "\u00a7 17-29-801",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_1.txt",
+     "start": 136,
+     "end": 147,
+     "text": "\u00a7 17-29-804",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_1.txt",
+     "start": 232,
+     "end": 243,
+     "text": "\u00a7 17-29-807",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_1.txt",
+     "start": 337,
+     "end": 348,
+     "text": "\u00a7 17-29-810",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_1.txt",
+     "start": 433,
+     "end": 444,
+     "text": "\u00a7 17-29-813",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_2.txt",
+     "start": 22,
+     "end": 33,
+     "text": "\u00a7 17-29-802",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_2.txt",
+     "start": 118,
+     "end": 129,
+     "text": "\u00a7 17-29-805",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_2.txt",
+     "start": 223,
+     "end": 234,
+     "text": "\u00a7 17-29-808",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_2.txt",
+     "start": 319,
+     "end": 330,
+     "text": "\u00a7 17-29-811",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_03_2.txt",
+     "start": 424,
+     "end": 435,
+     "text": "\u00a7 17-29-814",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_0.txt",
+     "start": 23,
+     "end": 29,
+     "text": "\u00a7 1500",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_0.txt",
+     "start": 111,
+     "end": 117,
+     "text": "\u00a7 1503",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_0.txt",
+     "start": 206,
+     "end": 212,
+     "text": "\u00a7 1506",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_0.txt",
+     "start": 294,
+     "end": 300,
+     "text": "\u00a7 1509",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_0.txt",
+     "start": 389,
+     "end": 395,
+     "text": "\u00a7 1512",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_1.txt",
+     "start": 28,
+     "end": 34,
+     "text": "\u00a7 1501",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_1.txt",
+     "start": 123,
+     "end": 129,
+     "text": "\u00a7 1504",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_1.txt",
+     "start": 211,
+     "end": 217,
+     "text": "\u00a7 1507",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_1.txt",
+     "start": 306,
+     "end": 312,
+     "text": "\u00a7 1510",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_1.txt",
+     "start": 394,
+     "end": 400,
+     "text": "\u00a7 1513",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_2.txt",
+     "start": 23,
+     "end": 29,
+     "text": "\u00a7 1502",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_2.txt",
+     "start": 111,
+     "end": 117,
+     "text": "\u00a7 1505",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_2.txt",
+     "start": 206,
+     "end": 212,
+     "text": "\u00a7 1508",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_2.txt",
+     "start": 294,
+     "end": 300,
+     "text": "\u00a7 1511",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_04_2.txt",
+     "start": 389,
+     "end": 395,
+     "text": "\u00a7 1514",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_0.txt",
+     "start": 41,
+     "end": 48,
+     "text": "\u00a7 17200",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_0.txt",
+     "start": 157,
+     "end": 164,
+     "text": "\u00a7 17203",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_0.txt",
+     "start": 246,
+     "end": 253,
+     "text": "\u00a7 17206",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_0.txt",
+     "start": 362,
+     "end": 369,
+     "text": "\u00a7 17209",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_0.txt",
+     "start": 451,
+     "end": 458,
+     "text": "\u00a7 17212",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_1.txt",
+     "start": 64,
+     "end": 71,
+     "text": "\u00a7 17201",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_1.txt",
+     "start": 153,
+     "end": 160,
+     "text": "\u00a7 17204",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_1.txt",
+     "start": 269,
+     "end": 276,
+     "text": "\u00a7 17207",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_1.txt",
+     "start": 358,
+     "end": 365,
+     "text": "\u00a7 17210",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_1.txt",
+     "start": 474,
+     "end": 481,
+     "text": "\u00a7 17213",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_2.txt",
+     "start": 41,
+     "end": 48,
+     "text": "\u00a7 17202",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_2.txt",
+     "start": 157,
+     "end": 164,
+     "text": "\u00a7 17205",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_2.txt",
+     "start": 246,
+     "end": 253,
+     "text": "\u00a7 17208",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_2.txt",
+     "start": 362,
+     "end": 369,
+     "text": "\u00a7 17211",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_05_2.txt",
+     "start": 451,
+     "end": 458,
+     "text": "\u00a7 17214",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_0.txt",
+     "start": 31,
+     "end": 38,
+     "text": "\u00a7 0.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_0.txt",
+     "start": 132,
+     "end": 139,
+     "text": "\u00a7 3.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_0.txt",
+     "start": 224,
+     "end": 231,
+     "text": "\u00a7 6.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_0.txt",
+     "start": 325,
+     "end": 332,
+     "text": "\u00a7 9.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_0.txt",
+     "start": 417,
+     "end": 425,
+     "text": "\u00a7 12.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_1.txt",
+     "start": 22,
+     "end": 29,
+     "text": "\u00a7 1.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_1.txt",
+     "start": 114,
+     "end": 121,
+     "text": "\u00a7 4.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_1.txt",
+     "start": 215,
+     "end": 222,
+     "text": "\u00a7 7.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_1.txt",
+     "start": 307,
+     "end": 315,
+     "text": "\u00a7 10.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_1.txt",
+     "start": 409,
+     "end": 417,
+     "text": "\u00a7 13.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_2.txt",
+     "start": 31,
+     "end": 38,
+     "text": "\u00a7 2.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_2.txt",
+     "start": 132,
+     "end": 139,
+     "text": "\u00a7 5.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_2.txt",
+     "start": 224,
+     "end": 231,
+     "text": "\u00a7 8.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_2.txt",
+     "start": 325,
+     "end": 333,
+     "text": "\u00a7 11.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_06_2.txt",
+     "start": 418,
+     "end": 426,
+     "text": "\u00a7 14.005",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_0.txt",
+     "start": 36,
+     "end": 44,
+     "text": "\u00a7 101.50",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_0.txt",
+     "start": 141,
+     "end": 149,
+     "text": "\u00a7 101.53",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_0.txt",
+     "start": 239,
+     "end": 247,
+     "text": "\u00a7 101.56",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_0.txt",
+     "start": 344,
+     "end": 352,
+     "text": "\u00a7 101.59",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_0.txt",
+     "start": 442,
+     "end": 450,
+     "text": "\u00a7 101.62",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_1.txt",
+     "start": 31,
+     "end": 39,
+     "text": "\u00a7 101.51",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_1.txt",
+     "start": 129,
+     "end": 137,
+     "text": "\u00a7 101.54",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_1.txt",
+     "start": 234,
+     "end": 242,
+     "text": "\u00a7 101.57",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_1.txt",
+     "start": 332,
+     "end": 340,
+     "text": "\u00a7 101.60",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_1.txt",
+     "start": 437,
+     "end": 445,
+     "text": "\u00a7 101.63",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_2.txt",
+     "start": 36,
+     "end": 44,
+     "text": "\u00a7 101.52",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_2.txt",
+     "start": 141,
+     "end": 149,
+     "text": "\u00a7 101.55",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_2.txt",
+     "start": 239,
+     "end": 247,
+     "text": "\u00a7 101.58",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_2.txt",
+     "start": 344,
+     "end": 352,
+     "text": "\u00a7 101.61",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_07_2.txt",
+     "start": 442,
+     "end": 450,
+     "text": "\u00a7 101.64",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_0.txt",
+     "start": 52,
+     "end": 61,
+     "text": "\u00a7 605.100",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_0.txt",
+     "start": 131,
+     "end": 140,
+     "text": "\u00a7 605.103",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_0.txt",
+     "start": 237,
+     "end": 246,
+     "text": "\u00a7 605.106",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_0.txt",
+     "start": 316,
+     "end": 325,
+     "text": "\u00a7 605.109",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_0.txt",
+     "start": 422,
+     "end": 431,
+     "text": "\u00a7 605.112",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_1.txt",
+     "start": 29,
+     "end": 38,
+     "text": "\u00a7 605.101",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_1.txt",
+     "start": 135,
+     "end": 144,
+     "text": "\u00a7 605.104",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_1.txt",
+     "start": 214,
+     "end": 223,
+     "text": "\u00a7 605.107",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_1.txt",
+     "start": 320,
+     "end": 329,
+     "text": "\u00a7 605.110",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_1.txt",
+     "start": 399,
+     "end": 408,
+     "text": "\u00a7 605.113",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_2.txt",
+     "start": 52,
+     "end": 61,
+     "text": "\u00a7 605.102",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_2.txt",
+     "start": 131,
+     "end": 140,
+     "text": "\u00a7 605.105",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_2.txt",
+     "start": 237,
+     "end": 246,
+     "text": "\u00a7 605.108",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_2.txt",
+     "start": 316,
+     "end": 325,
+     "text": "\u00a7 605.111",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_08_2.txt",
+     "start": 422,
+     "end": 431,
+     "text": "\u00a7 605.114",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_0.txt",
+     "start": 26,
+     "end": 31,
+     "text": "\u00a7 400",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_0.txt",
+     "start": 120,
+     "end": 125,
+     "text": "\u00a7 403",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_0.txt",
+     "start": 223,
+     "end": 228,
+     "text": "\u00a7 406",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_0.txt",
+     "start": 317,
+     "end": 322,
+     "text": "\u00a7 409",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_0.txt",
+     "start": 420,
+     "end": 425,
+     "text": "\u00a7 412",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_1.txt",
+     "start": 35,
+     "end": 40,
+     "text": "\u00a7 401",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_1.txt",
+     "start": 138,
+     "end": 143,
+     "text": "\u00a7 404",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_1.txt",
+     "start": 232,
+     "end": 237,
+     "text": "\u00a7 407",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_1.txt",
+     "start": 335,
+     "end": 340,
+     "text": "\u00a7 410",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_1.txt",
+     "start": 429,
+     "end": 434,
+     "text": "\u00a7 413",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_2.txt",
+     "start": 26,
+     "end": 31,
+     "text": "\u00a7 402",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_2.txt",
+     "start": 120,
+     "end": 125,
+     "text": "\u00a7 405",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_2.txt",
+     "start": 223,
+     "end": 228,
+     "text": "\u00a7 408",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_2.txt",
+     "start": 317,
+     "end": 322,
+     "text": "\u00a7 411",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_09_2.txt",
+     "start": 420,
+     "end": 425,
+     "text": "\u00a7 414",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_0.txt",
+     "start": 28,
+     "end": 39,
+     "text": "\u00a7 240.10b-0",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_0.txt",
+     "start": 135,
+     "end": 146,
+     "text": "\u00a7 240.10b-3",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_0.txt",
+     "start": 215,
+     "end": 226,
+     "text": "\u00a7 240.10b-6",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_0.txt",
+     "start": 322,
+     "end": 333,
+     "text": "\u00a7 240.10b-9",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_0.txt",
+     "start": 402,
+     "end": 414,
+     "text": "\u00a7 240.10b-12",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_1.txt",
+     "start": 51,
+     "end": 62,
+     "text": "\u00a7 240.10b-1",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_1.txt",
+     "start": 131,
+     "end": 142,
+     "text": "\u00a7 240.10b-4",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_1.txt",
+     "start": 238,
+     "end": 249,
+     "text": "\u00a7 240.10b-7",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_1.txt",
+     "start": 318,
+     "end": 330,
+     "text": "\u00a7 240.10b-10",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_1.txt",
+     "start": 426,
+     "end": 438,
+     "text": "\u00a7 240.10b-13",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_2.txt",
+     "start": 28,
+     "end": 39,
+     "text": "\u00a7 240.10b-2",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_2.txt",
+     "start": 135,
+     "end": 146,
+     "text": "\u00a7 240.10b-5",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_2.txt",
+     "start": 215,
+     "end": 226,
+     "text": "\u00a7 240.10b-8",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_2.txt",
+     "start": 322,
+     "end": 334,
+     "text": "\u00a7 240.10b-11",
+     "normalized": null,
+     "parser": "kit"
+    },
+    {
+     "doc": "stat_11_2.txt",
+     "start": 403,
+     "end": 415,
+     "text": "\u00a7 240.10b-14",
+     "normalized": null,
+     "parser": "kit"
+    }
+   ],
    "hygiene_diagnostic_hits": [
     "A-000",
     "A-001",
@@ -1000,6 +2369,81 @@
      "gold_id": "B-089",
      "source": "Cal. Bus. & Prof. Code \u00a7 17214",
      "normalized": "Cal. Code \u00a7 17214"
+    },
+    {
+     "gold_id": "B-135",
+     "source": "N.Y. Bus. Corp. Law \u00a7 400",
+     "normalized": "N.Y. Law \u00a7 400"
+    },
+    {
+     "gold_id": "B-136",
+     "source": "N.Y. Bus. Corp. Law \u00a7 401",
+     "normalized": "N.Y. Law \u00a7 401"
+    },
+    {
+     "gold_id": "B-137",
+     "source": "N.Y. Bus. Corp. Law \u00a7 402",
+     "normalized": "N.Y. Law \u00a7 402"
+    },
+    {
+     "gold_id": "B-138",
+     "source": "N.Y. Bus. Corp. Law \u00a7 403",
+     "normalized": "N.Y. Law \u00a7 403"
+    },
+    {
+     "gold_id": "B-139",
+     "source": "N.Y. Bus. Corp. Law \u00a7 404",
+     "normalized": "N.Y. Law \u00a7 404"
+    },
+    {
+     "gold_id": "B-140",
+     "source": "N.Y. Bus. Corp. Law \u00a7 405",
+     "normalized": "N.Y. Law \u00a7 405"
+    },
+    {
+     "gold_id": "B-141",
+     "source": "N.Y. Bus. Corp. Law \u00a7 406",
+     "normalized": "N.Y. Law \u00a7 406"
+    },
+    {
+     "gold_id": "B-142",
+     "source": "N.Y. Bus. Corp. Law \u00a7 407",
+     "normalized": "N.Y. Law \u00a7 407"
+    },
+    {
+     "gold_id": "B-143",
+     "source": "N.Y. Bus. Corp. Law \u00a7 408",
+     "normalized": "N.Y. Law \u00a7 408"
+    },
+    {
+     "gold_id": "B-144",
+     "source": "N.Y. Bus. Corp. Law \u00a7 409",
+     "normalized": "N.Y. Law \u00a7 409"
+    },
+    {
+     "gold_id": "B-145",
+     "source": "N.Y. Bus. Corp. Law \u00a7 410",
+     "normalized": "N.Y. Law \u00a7 410"
+    },
+    {
+     "gold_id": "B-146",
+     "source": "N.Y. Bus. Corp. Law \u00a7 411",
+     "normalized": "N.Y. Law \u00a7 411"
+    },
+    {
+     "gold_id": "B-147",
+     "source": "N.Y. Bus. Corp. Law \u00a7 412",
+     "normalized": "N.Y. Law \u00a7 412"
+    },
+    {
+     "gold_id": "B-148",
+     "source": "N.Y. Bus. Corp. Law \u00a7 413",
+     "normalized": "N.Y. Law \u00a7 413"
+    },
+    {
+     "gold_id": "B-149",
+     "source": "N.Y. Bus. Corp. Law \u00a7 414",
+     "normalized": "N.Y. Law \u00a7 414"
     }
    ]
   }
@@ -1323,7 +2767,7 @@
    "set_b": "180/180",
    "set_b_recall": 1.0,
    "set_a_recall": 1.0,
-   "fp": 0
+   "fp": 171
   },
   "eyecite": {
    "set_a": "12/12",
