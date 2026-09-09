@@ -264,7 +264,7 @@ def cmd_outreach(args):
         print(f"sha256: {man['sha256']}")
         print(f"recipients: {man['n']}")
         for it in man["items"]:
-            print(f"  - {it['name']} <{it['intake_url']}>")
+            print(f"  - {it['recipient_id']}  {it['name']} <{it['intake_url']}>")
             print(f"    why: {it['match_reason']}")
             print(f"    source: {it['source_url']}")
             print(f"    subject: {it['subject']}")

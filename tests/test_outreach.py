@@ -86,6 +86,31 @@ class OutreachTests(unittest.TestCase):
         self.assertNotIn("import smtplib", src)
         self.assertNotIn("from smtplib", src)
 
+    def test_empty_manifest_refuses(self):
+        empty = outreach.build_manifest(self.conn)
+        self.assertEqual(empty["n"], 0)
+        with self.assertRaises(ValueError) as cm:
+            outreach.approve_and_simulate(
+                self.conn, self.d, issuer="test", expected_sha=empty["sha256"])
+        self.assertIn("empty manifest", str(cm.exception))
+        with self.assertRaises(ValueError):
+            outreach.draft_all(self.conn, SYNTH_POSTURE)
+
+    def test_redraft_replaces_does_not_duplicate(self):
+        outreach.seed_synthetic(self.conn)
+        outreach.draft_all(self.conn, SYNTH_POSTURE)
+        first = outreach.build_manifest(self.conn)
+        self.assertEqual(first["n"], 3)
+        fixed = dict(SYNTH_POSTURE, deadline="2026-11-01")
+        outreach.draft_all(self.conn, fixed)
+        second = outreach.build_manifest(self.conn)
+        self.assertEqual(second["n"], 3)
+        n_drafts = self.conn.execute("SELECT COUNT(*) c FROM outreach_drafts").fetchone()["c"]
+        self.assertEqual(n_drafts, 3)
+        bodies = " ".join(it["body"] for it in second["items"])
+        self.assertIn("2026-11-01", bodies)
+        self.assertNotIn("2026-10-15", bodies)
+
 
 if __name__ == "__main__":
     unittest.main()
