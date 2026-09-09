@@ -2,8 +2,8 @@
  "version": "holdout_v1",
  "labeler": "adversarial-review-deepseek-agent",
  "labeled_at": "2026-09-08",
- "corrected_at": "2026-09-08 (nested-prefix artifacts removed; true U+202F heading added; non-overlapping longest-match)",
- "method": "independent manual labeling, programmatic offset verification, non-overlapping",
+ "corrected_at": "2026-09-08 v3 (taxonomy: Stat. = session-law citations; coordinated-reference convention; +section 3)",
+ "method": "independent manual labeling, programmatic offset verification, non-overlapping, taxonomy per chair correction",
  "items": {
   "usc_1983.txt": [
    {
@@ -50,6 +50,18 @@
    },
    {
     "doc": "usc_1983.txt",
+    "citation": "93 Stat. 1284",
+    "start": 1143,
+    "end": 1156
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "110 Stat. 3853",
+    "start": 1214,
+    "end": 1228
+   },
+   {
+    "doc": "usc_1983.txt",
     "citation": "R.S. \u00a7\u202f1979",
     "start": 1268,
     "end": 1279
@@ -59,6 +71,12 @@
     "citation": "\u00a7\u202f1",
     "start": 1320,
     "end": 1323
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "17 Stat. 13",
+    "start": 1325,
+    "end": 1336
    },
    {
     "doc": "usc_1983.txt",
@@ -77,6 +95,12 @@
     "citation": "Pub. L. 96\u2013170",
     "start": 2026,
     "end": 2040
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "section 3",
+    "start": 2194,
+    "end": 2203
    },
    {
     "doc": "usc_1983.txt",
@@ -126,14 +150,8 @@
    },
    {
     "doc": "usc_501.txt",
-    "citation": "section 502",
+    "citation": "section 502 or 503",
     "start": 388,
-    "end": 399
-   },
-   {
-    "doc": "usc_501.txt",
-    "citation": "503",
-    "start": 403,
     "end": 406
    }
   ],
@@ -152,9 +170,27 @@
    },
    {
     "doc": "usc_107.txt",
+    "citation": "90 Stat. 2546",
+    "start": 1305,
+    "end": 1318
+   },
+   {
+    "doc": "usc_107.txt",
     "citation": "&sect;101",
     "start": 1279,
     "end": 1288
+   },
+   {
+    "doc": "usc_107.txt",
+    "citation": "104 Stat. 5132",
+    "start": 1378,
+    "end": 1392
+   },
+   {
+    "doc": "usc_107.txt",
+    "citation": "106 Stat. 3145",
+    "start": 1432,
+    "end": 1446
    },
    {
     "doc": "usc_107.txt",
