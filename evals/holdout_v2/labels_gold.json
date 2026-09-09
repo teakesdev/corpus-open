@@ -1,0 +1,669 @@
+{
+ "version": "holdout_v2",
+ "labeler": "adversarial-review-deepseek-agent",
+ "labeled_at": "2026-09-09",
+ "status": "FOR SECOND REVIEWER \u2014 NOT SCORED",
+ "label_method": "independent manual labeling; Python str char offsets (0-based, end-exclusive); offsets on exact input string per manifest (raw entities NOT decoded); longest non-overlapping spans; session-law N Stat. P = gold; coordinated refs = one span",
+ "items": {
+  "usc_18_1001_decoded.txt": [
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "18 U.S. Code \u00a7 1001",
+    "start": 0,
+    "end": 19
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "section 2331",
+    "start": 806,
+    "end": 818
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "chapter 109A, 109B, 110, or 117",
+    "start": 906,
+    "end": 937
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "section 1591",
+    "start": 942,
+    "end": 954
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "ch. 645",
+    "start": 1935,
+    "end": 1942
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "62 Stat. 749",
+    "start": 1944,
+    "end": 1956
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 103\u2013322",
+    "start": 1958,
+    "end": 1973
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "\u00a7\u202f330016(1)(L)",
+    "start": 1989,
+    "end": 2003
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "108 Stat. 2147",
+    "start": 2021,
+    "end": 2035
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 104\u2013292",
+    "start": 2037,
+    "end": 2052
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "\u00a7\u202f2",
+    "start": 2054,
+    "end": 2057
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "110 Stat. 3459",
+    "start": 2074,
+    "end": 2088
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 108\u2013458",
+    "start": 2090,
+    "end": 2105
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "\u00a7\u202f6703(a)",
+    "start": 2117,
+    "end": 2126
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "118 Stat. 3766",
+    "start": 2143,
+    "end": 2157
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 109\u2013248",
+    "start": 2159,
+    "end": 2174
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "\u00a7\u202f141(c)",
+    "start": 2185,
+    "end": 2193
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "120 Stat. 603",
+    "start": 2210,
+    "end": 2223
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "\u00a7\u202f80",
+    "start": 2295,
+    "end": 2299
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "ch. 321",
+    "start": 2315,
+    "end": 2322
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "\u00a7\u202f35",
+    "start": 2324,
+    "end": 2328
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "35 Stat. 1095",
+    "start": 2330,
+    "end": 2343
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "40 Stat. 1015",
+    "start": 2369,
+    "end": 2382
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "48 Stat. 996",
+    "start": 2408,
+    "end": 2420
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "52 Stat. 197",
+    "start": 2444,
+    "end": 2456
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Section 80",
+    "start": 2460,
+    "end": 2470
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "section 287",
+    "start": 2590,
+    "end": 2601
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "section 2",
+    "start": 2727,
+    "end": 2736
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "section 6",
+    "start": 2919,
+    "end": 2928
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "section 287",
+    "start": 3123,
+    "end": 3134
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 109\u2013248",
+    "start": 3199,
+    "end": 3214
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 108\u2013458",
+    "start": 3283,
+    "end": 3298
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "section 2331",
+    "start": 3451,
+    "end": 3463
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 104\u2013292",
+    "start": 3618,
+    "end": 3633
+   },
+   {
+    "doc": "usc_18_1001_decoded.txt",
+    "citation": "Pub. L. 103\u2013322",
+    "start": 4245,
+    "end": 4260
+   }
+  ],
+  "usc_5_552_raw.html": [
+   {
+    "doc": "usc_5_552_raw.html",
+    "citation": "&sect;552",
+    "start": 25,
+    "end": 34
+   }
+  ],
+  "del_8_141_decoded.txt": [
+   {
+    "doc": "del_8_141_decoded.txt",
+    "citation": "\u00a7\n 141",
+    "start": 0,
+    "end": 6
+   }
+  ],
+  "cfr_17_240_10b5_decoded.txt": [
+   {
+    "doc": "cfr_17_240_10b5_decoded.txt",
+    "citation": "\u00a7 240.10b-5",
+    "start": 0,
+    "end": 11
+   },
+   {
+    "doc": "cfr_17_240_10b5_decoded.txt",
+    "citation": "Sec. 10",
+    "start": 730,
+    "end": 737
+   },
+   {
+    "doc": "cfr_17_240_10b5_decoded.txt",
+    "citation": "48 Stat. 891",
+    "start": 739,
+    "end": 751
+   },
+   {
+    "doc": "cfr_17_240_10b5_decoded.txt",
+    "citation": "15 U.S.C. 78j",
+    "start": 753,
+    "end": 766
+   },
+   {
+    "doc": "cfr_17_240_10b5_decoded.txt",
+    "citation": "13 FR 8183",
+    "start": 770,
+    "end": 780
+   },
+   {
+    "doc": "cfr_17_240_10b5_decoded.txt",
+    "citation": "16 FR 7928",
+    "start": 811,
+    "end": 821
+   }
+  ],
+  "plaw_107_204_decoded.txt": [
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "116 STAT. 745",
+    "start": 115,
+    "end": 128
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Public Law 107-204",
+    "start": 132,
+    "end": 150
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "H.R. 3763",
+    "start": 358,
+    "end": 367
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "SECTION 1",
+    "start": 553,
+    "end": 562
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "15 USC 7201",
+    "start": 578,
+    "end": 589
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 1",
+    "start": 783,
+    "end": 789
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 2",
+    "start": 823,
+    "end": 829
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 3",
+    "start": 844,
+    "end": 850
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 101",
+    "start": 940,
+    "end": 948
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 102",
+    "start": 992,
+    "end": 1000
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 103",
+    "start": 1031,
+    "end": 1039
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 104",
+    "start": 1108,
+    "end": 1116
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 105",
+    "start": 1169,
+    "end": 1177
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 106",
+    "start": 1224,
+    "end": 1232
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 107",
+    "start": 1267,
+    "end": 1275
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 108",
+    "start": 1312,
+    "end": 1320
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 109",
+    "start": 1344,
+    "end": 1352
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 201",
+    "start": 1397,
+    "end": 1405
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 202",
+    "start": 1459,
+    "end": 1467
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 203",
+    "start": 1495,
+    "end": 1503
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 204",
+    "start": 1529,
+    "end": 1537
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 205",
+    "start": 1576,
+    "end": 1584
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 206",
+    "start": 1609,
+    "end": 1617
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 207",
+    "start": 1642,
+    "end": 1650
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 208",
+    "start": 1721,
+    "end": 1729
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 209",
+    "start": 1753,
+    "end": 1761
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 301",
+    "start": 1862,
+    "end": 1870
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 302",
+    "start": 1905,
+    "end": 1913
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 303",
+    "start": 1963,
+    "end": 1971
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 304",
+    "start": 2014,
+    "end": 2022
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 305",
+    "start": 2067,
+    "end": 2075
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 306",
+    "start": 2118,
+    "end": 2126
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 307",
+    "start": 2181,
+    "end": 2189
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 308",
+    "start": 2243,
+    "end": 2251
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 401",
+    "start": 2323,
+    "end": 2331
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 402",
+    "start": 2366,
+    "end": 2374
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 403",
+    "start": 2418,
+    "end": 2426
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "116 STAT. 746",
+    "start": 2515,
+    "end": 2528
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 404",
+    "start": 2532,
+    "end": 2540
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 405",
+    "start": 2586,
+    "end": 2594
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 406",
+    "start": 2607,
+    "end": 2615
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 407",
+    "start": 2663,
+    "end": 2671
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 408",
+    "start": 2721,
+    "end": 2729
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 409",
+    "start": 2783,
+    "end": 2791
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 501",
+    "start": 2865,
+    "end": 2873
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 601",
+    "start": 3031,
+    "end": 3039
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 602",
+    "start": 3074,
+    "end": 3082
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 603",
+    "start": 3131,
+    "end": 3139
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 604",
+    "start": 3193,
+    "end": 3201
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 701",
+    "start": 3298,
+    "end": 3306
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 702",
+    "start": 3383,
+    "end": 3391
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 703",
+    "start": 3455,
+    "end": 3463
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 704",
+    "start": 3510,
+    "end": 3518
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 705",
+    "start": 3550,
+    "end": 3558
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 801",
+    "start": 3646,
+    "end": 3654
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 802",
+    "start": 3669,
+    "end": 3677
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 803",
+    "start": 3722,
+    "end": 3730
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 804",
+    "start": 3808,
+    "end": 3816
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 805",
+    "start": 3863,
+    "end": 3871
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 806",
+    "start": 3972,
+    "end": 3980
+   },
+   {
+    "doc": "plaw_107_204_decoded.txt",
+    "citation": "Sec. 807",
+    "start": 4069,
+    "end": 4077
+   }
+  ],
+  "fl_607_0101_raw.html": [
+   {
+    "doc": "fl_607_0101_raw.html",
+    "citation": "607.0101",
+    "start": 49,
+    "end": 57
+   },
+   {
+    "doc": "fl_607_0101_raw.html",
+    "citation": "s. 1, ch. 89-154",
+    "start": 1193,
+    "end": 1209
+   },
+   {
+    "doc": "fl_607_0101_raw.html",
+    "citation": "s. 3, ch. 2014-209",
+    "start": 1211,
+    "end": 1229
+   },
+   {
+    "doc": "fl_607_0101_raw.html",
+    "citation": "s. 1, ch. 2019-90",
+    "start": 1231,
+    "end": 1248
+   }
+  ]
+ }
+}
