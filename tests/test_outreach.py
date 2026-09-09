@@ -28,16 +28,16 @@ class OutreachTests(unittest.TestCase):
         ids = outreach.seed_synthetic(self.conn)
         self.assertEqual(len(ids), 3)
         drafts = outreach.draft_all(self.conn, SYNTH_POSTURE)
-        self.assertEqual(len(drafts), 3)
+        self.assertEqual(len(drafts), 2)
         man = outreach.build_manifest(self.conn)
-        self.assertEqual(man["n"], 3)
+        self.assertEqual(man["n"], 2)
         path = outreach.write_manifest(self.d, man)
         self.assertTrue(os.path.isfile(path))
         bid = outreach.approve_and_simulate(
             self.conn, self.d, issuer="test", expected_sha=man["sha256"])
         self.assertTrue(bid.startswith("ob_"))
         outbox = os.path.join(self.d, ".matter", "outreach", "outbox")
-        self.assertEqual(len(os.listdir(outbox)), 3)
+        self.assertEqual(len(os.listdir(outbox)), 2)
         led = outreach.ledger(self.conn)
         self.assertIn("SYNTHETIC", led)
         self.assertIn("send=simulated", led)
@@ -100,13 +100,13 @@ class OutreachTests(unittest.TestCase):
         outreach.seed_synthetic(self.conn)
         outreach.draft_all(self.conn, SYNTH_POSTURE)
         first = outreach.build_manifest(self.conn)
-        self.assertEqual(first["n"], 3)
+        self.assertEqual(first["n"], 2)
         fixed = dict(SYNTH_POSTURE, deadline="2026-11-01")
         outreach.draft_all(self.conn, fixed)
         second = outreach.build_manifest(self.conn)
-        self.assertEqual(second["n"], 3)
+        self.assertEqual(second["n"], 2)
         n_drafts = self.conn.execute("SELECT COUNT(*) c FROM outreach_drafts").fetchone()["c"]
-        self.assertEqual(n_drafts, 3)
+        self.assertEqual(n_drafts, 2)
         bodies = " ".join(it["body"] for it in second["items"])
         self.assertIn("2026-11-01", bodies)
         self.assertNotIn("2026-10-15", bodies)
@@ -119,7 +119,7 @@ class OutreachTests(unittest.TestCase):
         n_items = self.conn.execute(
             "SELECT COUNT(*) c FROM outreach_batch_items WHERE batch_id=?",
             (bid,)).fetchone()["c"]
-        self.assertEqual(n_items, 3)
+        self.assertEqual(n_items, 2)
 
     def test_completed_batch_records_survive_later_redraft(self):
         outreach.seed_synthetic(self.conn)
@@ -129,14 +129,15 @@ class OutreachTests(unittest.TestCase):
             self.conn, self.d, issuer="test", expected_sha=man["sha256"])
         old_drafts = {r["draft_id"] for r in self.conn.execute(
             "SELECT draft_id FROM outreach_batch_items WHERE batch_id=?", (bid,))}
-        self.assertEqual(len(old_drafts), 3)
+        self.assertEqual(len(old_drafts), 2)
         outreach.add_recipient(
             self.conn, name="Alex Ng, Esq.", org="Ng Clinic (SYNTHETIC)",
             jurisdiction="N.D. Example", practice_area="civil",
             intake_channel="published web form",
             intake_url="https://example.org/ng/intake",
             match_reason="clinic listing civil intake",
-            source_url="https://example.org/ng/about")
+            source_url="https://example.org/ng/about",
+            destination_type="form")
         outreach.draft_all(self.conn, SYNTH_POSTURE)
         still = {r["draft_id"] for r in self.conn.execute(
             "SELECT draft_id FROM outreach_batch_items WHERE batch_id=?", (bid,))}
@@ -144,7 +145,7 @@ class OutreachTests(unittest.TestCase):
         n_old = self.conn.execute(
             "SELECT COUNT(*) c FROM outreach_drafts WHERE id IN ({})".format(
                 ",".join("?" * len(old_drafts))), tuple(old_drafts)).fetchone()["c"]
-        self.assertEqual(n_old, 3)
+        self.assertEqual(n_old, 2)
 
 
 if __name__ == "__main__":

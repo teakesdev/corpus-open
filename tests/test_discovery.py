@@ -13,6 +13,7 @@ class TestDiscoveryImport(unittest.TestCase):
             "intake_url": "https://example.org/intake",
             "source_url": "https://example.org/about",
             "retrieved_at": "2026-09-09",   # date-only: naive datetime crash class
+            "destination_type": "form",
             "intake_verbatim_on_source": "Contact us for a consultation.",
             "match_reason": "regression",
         }]}

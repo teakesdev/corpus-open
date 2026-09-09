@@ -117,7 +117,46 @@ def _ensure(conn) -> None:
             conn.execute("ALTER TABLE outreach_recipients ADD COLUMN record_sha256 TEXT")
         if "email" not in cols:
             conn.execute("ALTER TABLE outreach_recipients ADD COLUMN email TEXT")
+        if "destination_type" not in cols:
+            conn.execute(
+                "ALTER TABLE outreach_recipients ADD COLUMN destination_type TEXT "
+                "DEFAULT 'unknown'")
+    _downgrade_unearned_source_checked(conn)
     conn.commit()
+
+
+def _downgrade_unearned_source_checked(conn) -> None:
+    """source-checked is fetch-gated. Self-asserted imports must not keep it.
+
+    Idempotent: rows already candidate, or marked fetch-matched, are left alone.
+    Evidence rows are not deleted.
+    """
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(outreach_recipients)")]
+    if "status" not in cols:
+        return
+    rows = conn.execute("SELECT * FROM outreach_recipients").fetchall()
+    for r in rows:
+        flags = json.loads(r["flags_json"] or "[]") if "flags_json" in r.keys() else []
+        dest = ""
+        if "destination_type" in r.keys():
+            dest = (r["destination_type"] or "").strip()
+        if not dest:
+            dest = "unknown"
+            flags = list(flags)
+            if "destination-unclassified" not in flags:
+                flags.append("destination-unclassified")
+            conn.execute(
+                "UPDATE outreach_recipients SET destination_type=?, flags_json=? WHERE id=?",
+                (dest, json.dumps(flags), r["id"]))
+        if r["status"] == "source-checked" and "fetch-matched" not in flags:
+            flags = list(flags)
+            if "source-checked-revoked:unverified" not in flags:
+                flags.append("source-checked-revoked:unverified")
+            if "verbatim-unverified" not in flags:
+                flags.append("verbatim-unverified")
+            conn.execute(
+                "UPDATE outreach_recipients SET status='candidate', flags_json=? WHERE id=?",
+                (json.dumps(flags), r["id"]))
 
 
 def refuse_if_unsafe(subject: str, body: str) -> None:
@@ -132,20 +171,40 @@ def refuse_if_unsafe(subject: str, body: str) -> None:
         raise ValueError("draft refused: exhibit references are not allowed in initial inquiry")
 
 
+NON_DRAFTABLE = {"directory", "unknown"}
+PREP_ONLY = {"portal", "form"}
+DESTINATION_TYPES = ("directory", "portal", "form", "email")
+PREP_BANNER = (
+    "PREPARATION ONLY — this is not permission to submit a form or portal. "
+    "A published channel is not availability or willingness to take a case.\n\n"
+)
+
+
+def destination_type_of(row) -> str:
+    if "destination_type" not in row.keys() or not row["destination_type"]:
+        return "unknown"
+    return row["destination_type"]
+
+
 def add_recipient(conn, *, name, org, jurisdiction, practice_area,
-                  intake_channel, intake_url, match_reason, source_url) -> str:
+                  intake_channel, intake_url, match_reason, source_url,
+                  destination_type: str = "unknown") -> str:
     _ensure(conn)
     if not intake_url.startswith("http"):
         raise ValueError("intake_url must be an http(s) published channel — do not invent one")
     if not source_url.startswith("http"):
         raise ValueError("source_url required — why this recipient was selected")
+    if destination_type not in DESTINATION_TYPES and destination_type != "unknown":
+        raise ValueError(
+            f"destination_type must be one of {DESTINATION_TYPES} or unknown")
     rid = store.new_id("or_")
     conn.execute(
         "INSERT INTO outreach_recipients "
         "(id,name,org,jurisdiction,practice_area,intake_channel,intake_url,"
-        "match_reason,source_url,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "match_reason,source_url,status,created_at,destination_type) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, name, org, jurisdiction, practice_area, intake_channel, intake_url,
-         match_reason, source_url, "shortlisted", now_iso()))
+         match_reason, source_url, "shortlisted", now_iso(), destination_type))
     conn.commit()
     return rid
 
@@ -158,19 +217,22 @@ def seed_synthetic(conn) -> list[str]:
              intake_channel="published web form",
              intake_url="https://example.org/legal-aid/intake",
              match_reason="Legal-aid clinic listing civil intake for this district",
-             source_url="https://example.org/legal-aid/practice-areas"),
+             source_url="https://example.org/legal-aid/practice-areas",
+             destination_type="form"),
         dict(name="Jordan Kim, Esq.", org="Kim Unbundled Practice (SYNTHETIC)",
              jurisdiction="N.D. Example", practice_area="civil rights / unbundled",
              intake_channel="published email",
              intake_url="https://example.org/kim-law/contact",
              match_reason="Firm site lists limited-scope civil consults in this court",
-             source_url="https://example.org/kim-law/limited-scope"),
+             source_url="https://example.org/kim-law/limited-scope",
+             destination_type="form"),
         dict(name="Example Bar Lawyer Referral", org="Example State Bar LRS (SYNTHETIC)",
              jurisdiction="Example", practice_area="lawyer referral service",
              intake_channel="published referral form",
              intake_url="https://example.org/state-bar/lrs",
              match_reason="State bar LRS is the non-spam path to attorneys taking cases",
-             source_url="https://example.org/state-bar/lrs-about"),
+             source_url="https://example.org/state-bar/lrs-about",
+             destination_type="directory"),
     ]
     return [add_recipient(conn, **s) for s in specs]
 
@@ -186,11 +248,19 @@ def draft_all(conn, posture: dict) -> list[str]:
         "SELECT * FROM outreach_recipients WHERE status='shortlisted'").fetchall()
     if not recips:
         raise ValueError("no shortlisted recipients — seed or add before drafting")
+    draftable = [r for r in recips if destination_type_of(r) not in NON_DRAFTABLE]
+    skipped = [r for r in recips if destination_type_of(r) in NON_DRAFTABLE]
+    if not draftable:
+        kinds = sorted({destination_type_of(r) for r in skipped}) or ["unknown"]
+        raise ValueError(
+            "no draftable recipients — "
+            f"{', '.join(kinds)} destinations are research leads, not deliverable "
+            "addresses (directory/unknown cannot become a To: or form submit)")
     conn.execute(
         "DELETE FROM outreach_drafts WHERE recipient_id IN "
         "(SELECT id FROM outreach_recipients WHERE status='shortlisted')")
     ids = []
-    for r in recips:
+    for r in draftable:
         filled = DRAFT_TEMPLATE.format(
             representation=posture.get(
                 "representation", "a consultation / limited-scope representation"),
@@ -205,9 +275,13 @@ def draft_all(conn, posture: dict) -> list[str]:
         )
         first, _, rest = filled.partition("\n")
         subject = first.replace("Subject:", "", 1).strip()
+        dest = destination_type_of(r)
+        banner = PREP_BANNER if dest in PREP_ONLY else ""
         body = (
             f"To: {r['name']} ({r['org']})\n"
-            f"Intake: {r['intake_channel']} — {r['intake_url']}\n\n"
+            f"Intake: {r['intake_channel']} — {r['intake_url']}\n"
+            f"Destination-Type: {dest}\n\n"
+            + banner
             + rest.strip() + "\n"
         )
         refuse_if_unsafe(subject, body)

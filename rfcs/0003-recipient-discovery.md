@@ -1,6 +1,6 @@
 # RFC 0003 — Source-backed recipient discovery/import
 
-**Status:** SCOPED increment — import + stages + suppression. No outbound contact. Not a grant to scrape directories, guess emails, SMTP, or treat a published URL as willingness to take a case.
+**Status:** OPEN pending review of destination-type + honest `source-checked`. No outbound contact. No fetch-and-match path in this increment.
 **Date:** 2026-09-09 · **Author:** @grok-4-6
 **Parent:** RFC 0002 (synthetic no-send MVP, CLOSED).
 
@@ -8,18 +8,29 @@
 
 | Stage | Meaning |
 |---|---|
-| `candidate` | Imported; source incomplete (no verbatim claim and/or no retrieval date). |
-| `source-checked` | Brief recorded `source_url` + `retrieved_at` + `intake_verbatim_on_source`. **Integrity of the record, not independent verification.** Does not mean available/willing. |
-| `shortlisted` | User-approved for contact. Still unsendable until an approved message batch (RFC 0002). |
+| `candidate` | Imported. Verbatim quotes in the brief are **evidence assertions**, not verification. |
+| `source-checked` | **Not granted on import.** Requires a future fetch-and-match that the *exact* intake channel belongs to the intended org on the cited source. Generic “contact our firm” matching is insufficient. Until that path exists, nothing enters this stage. |
+| `shortlisted` | User-approved as a research lead / for contact tracking. Still unsendable until an approved message batch. Does not earn `source-checked`. |
 
-Import never jumps to `shortlisted`. `draft` still requires `shortlisted`.
+Legacy unearned `source-checked` rows are downgraded to `candidate` (`source-checked-revoked:unverified`); evidence/history is preserved. No grandfathering.
+
+## Destination types
+
+`destination_type ∈ {directory, portal, form, email}`. Legacy/unclassified = `unknown`.
+
+| Type | Shortlist | Draft |
+|---|---|---|
+| `directory`, `unknown` | research lead only | **refuse** — URL is not a To: or form-submit |
+| `portal`, `form` | yes | preparation-only banner; **not** permission to submit |
+| `email` | yes | draftable; transport remains `nosend` |
 
 ## Refusals and flags
 
 - Guessed emails / `mailto:` intake → **refuse**.
-- Conflicting intake URLs for the same org → flag `conflict:intake-mismatch`.
-- `retrieved_at` older than 90 days → flag `stale-evidence` (still importable).
-- Duplicate channel in one brief → one recipient, flag `duplicate-channel`.
+- Conflicting intake URLs for the same org → `conflict:intake-mismatch`.
+- `retrieved_at` older than 90 days → `stale-evidence` (still importable as `candidate`).
+- Duplicate channel in one brief → one recipient, `duplicate-channel`.
+- Verbatim claim without fetch → `verbatim-unverified`.
 
 ## Suppression
 
@@ -27,4 +38,4 @@ Declines and opt-outs are keyed by normalized intake URL. Reimport **must not** 
 
 ## Demo
 
-`evals/outreach_import/brief.json` — generic civil finders from USAGov + ABA public pages, retrieved 2026-09-09. No matter facts.
+`evals/outreach_import/brief.json` — generic civil **finders** (USAGov/ABA), retrieved 2026-09-09. Three `directory`, one `portal`. All land `candidate`. Not a demonstrated attorney with a verified intake channel.
