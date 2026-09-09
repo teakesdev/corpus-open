@@ -1,0 +1,734 @@
+{
+  "run": "holdout_v3_acceptance",
+  "status": "ACCEPTANCE_RECORD",
+  "kit_commit": "c3e3a5f",
+  "parser_path": "/private/tmp/mk-hv3-score/matterkit/citations.py",
+  "parser_id": "kit-cite-0.4",
+  "parser_capability": "experimental",
+  "parser_utf8_sha256": "03c69676a1d81d52271efa30a3c0e43f315324973f7b43954da199f94bdd72e6",
+  "gold_utf8_sha256": "5579f67e04633d677c01f7f633a41b3fae409ebc5169846a1c5cddc98dad9c87",
+  "manifest_utf8_sha256": "36c503187b9b98c3fcc080d491ebad7d3b8abcd00052e8582d4d7d279af3a2d4",
+  "n_gold": 21,
+  "n_statutory": 20,
+  "n_identifier": 1,
+  "n_extracted": 39,
+  "n_extraction_failed": 0,
+  "n_matched": 18,
+  "n_matched_statutory": 17,
+  "n_matched_identifier": 1,
+  "n_missed": 3,
+  "n_fp": 7,
+  "n_preds_in_ignored_intervals": 14,
+  "n_preds_in_out_of_scope": 0,
+  "recall_all": 0.8571,
+  "recall_statutory": 0.85,
+  "matched_ids": [
+    "H3-000",
+    "H3-002",
+    "H3-004",
+    "H3-005",
+    "H3-006",
+    "H3-007",
+    "H3-008",
+    "H3-009",
+    "H3-010",
+    "H3-011",
+    "H3-012",
+    "H3-013",
+    "H3-014",
+    "H3-016",
+    "H3-017",
+    "H3-018",
+    "H3-019",
+    "H3-020"
+  ],
+  "missed_ids": [
+    "H3-001",
+    "H3-003",
+    "H3-015"
+  ],
+  "missed": [
+    {
+      "id": "H3-001",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 180,
+      "end": 204,
+      "text": "section 301, 302, or 303",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-003",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 2009,
+      "end": 2033,
+      "text": "section 301, 302, or 303",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-015",
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 280,
+      "end": 298,
+      "text": "§ 255.2(a) and (b)",
+      "kind": "statutory_citation"
+    }
+  ],
+  "false_positives": [
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3,
+      "end": 18,
+      "text": "U.S. Code § 362",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 13,
+      "end": 18,
+      "text": "§ 362",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 180,
+      "end": 191,
+      "text": "section 301",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 2009,
+      "end": 2020,
+      "text": "section 301",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3545,
+      "end": 3557,
+      "text": "sections 464",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3562,
+      "end": 3568,
+      "text": "466(a)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 280,
+      "end": 290,
+      "text": "§ 255.2(a)",
+      "status": "extracted",
+      "parser": "kit"
+    }
+  ],
+  "preds_in_ignored_intervals": [
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 666,
+      "end": 672,
+      "text": "Sec. 1",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 849,
+      "end": 858,
+      "text": "Sec. 1001",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 992,
+      "end": 1001,
+      "text": "Sec. 2711",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1036,
+      "end": 1045,
+      "text": "Sec. 2712",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1078,
+      "end": 1087,
+      "text": "Sec. 2713",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1132,
+      "end": 1141,
+      "text": "Sec. 2714",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1179,
+      "end": 1188,
+      "text": "Sec. 2715",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1300,
+      "end": 1309,
+      "text": "Sec. 2716",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1361,
+      "end": 1370,
+      "text": "Sec. 2717",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1405,
+      "end": 1414,
+      "text": "Sec. 2718",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1467,
+      "end": 1476,
+      "text": "Sec. 2719",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1495,
+      "end": 1504,
+      "text": "Sec. 1002",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1545,
+      "end": 1554,
+      "text": "Sec. 1003",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1609,
+      "end": 1618,
+      "text": "Sec. 1004",
+      "status": "extracted",
+      "parser": "kit"
+    }
+  ],
+  "preds_in_out_of_scope": [],
+  "extraction_failed": [],
+  "gold": [
+    {
+      "id": "H3-000",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 0,
+      "end": 18,
+      "text": "11 U.S. Code § 362",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-001",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 180,
+      "end": 204,
+      "text": "section 301, 302, or 303",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-002",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 250,
+      "end": 265,
+      "text": "section 5(a)(3)",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-003",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 2009,
+      "end": 2033,
+      "text": "section 301, 302, or 303",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-004",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 2076,
+      "end": 2091,
+      "text": "section 5(a)(3)",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-005",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3283,
+      "end": 3301,
+      "text": "section 466(a)(16)",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-006",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3439,
+      "end": 3456,
+      "text": "section 466(a)(7)",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-007",
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3545,
+      "end": 3571,
+      "text": "sections 464 and 466(a)(3)",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-008",
+      "doc": "usc_18_201_raw.html",
+      "start": 25,
+      "end": 34,
+      "text": "&sect;201",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-009",
+      "doc": "del_8_102_decoded.txt",
+      "start": 0,
+      "end": 6,
+      "text": "§\n 102",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-010",
+      "doc": "del_8_102_decoded.txt",
+      "start": 869,
+      "end": 874,
+      "text": "§ 103",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-011",
+      "doc": "del_8_102_decoded.txt",
+      "start": 948,
+      "end": 956,
+      "text": "§ 503(i)",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-012",
+      "doc": "del_8_102_decoded.txt",
+      "start": 2250,
+      "end": 2255,
+      "text": "§ 103",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-013",
+      "doc": "del_8_102_decoded.txt",
+      "start": 3042,
+      "end": 3047,
+      "text": "§ 395",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-014",
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 0,
+      "end": 7,
+      "text": "§ 255.1",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-015",
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 280,
+      "end": 298,
+      "text": "§ 255.2(a) and (b)",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-016",
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 1949,
+      "end": 1956,
+      "text": "§ 255.5",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-017",
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 85,
+      "end": 98,
+      "text": "124 STAT. 119",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-018",
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 102,
+      "end": 120,
+      "text": "Public Law 111-148",
+      "kind": "statutory_citation"
+    },
+    {
+      "id": "H3-019",
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 233,
+      "end": 242,
+      "text": "H.R. 3590",
+      "kind": "non_statutory_identifier"
+    },
+    {
+      "id": "H3-020",
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 482,
+      "end": 494,
+      "text": "42 USC 18001",
+      "kind": "statutory_citation"
+    }
+  ],
+  "predictions": [
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 0,
+      "end": 18,
+      "text": "11 U.S. Code § 362",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3,
+      "end": 18,
+      "text": "U.S. Code § 362",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 13,
+      "end": 18,
+      "text": "§ 362",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 180,
+      "end": 191,
+      "text": "section 301",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 250,
+      "end": 265,
+      "text": "section 5(a)(3)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 2009,
+      "end": 2020,
+      "text": "section 301",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 2076,
+      "end": 2091,
+      "text": "section 5(a)(3)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3283,
+      "end": 3301,
+      "text": "section 466(a)(16)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3439,
+      "end": 3456,
+      "text": "section 466(a)(7)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3545,
+      "end": 3571,
+      "text": "sections 464 and 466(a)(3)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3545,
+      "end": 3557,
+      "text": "sections 464",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_11_362_decoded.txt",
+      "start": 3562,
+      "end": 3568,
+      "text": "466(a)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "usc_18_201_raw.html",
+      "start": 25,
+      "end": 34,
+      "text": "&sect;201",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "del_8_102_decoded.txt",
+      "start": 0,
+      "end": 6,
+      "text": "§\n 102",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "del_8_102_decoded.txt",
+      "start": 869,
+      "end": 874,
+      "text": "§ 103",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "del_8_102_decoded.txt",
+      "start": 948,
+      "end": 956,
+      "text": "§ 503(i)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "del_8_102_decoded.txt",
+      "start": 2250,
+      "end": 2255,
+      "text": "§ 103",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "del_8_102_decoded.txt",
+      "start": 3042,
+      "end": 3047,
+      "text": "§ 395",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 0,
+      "end": 7,
+      "text": "§ 255.1",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 280,
+      "end": 290,
+      "text": "§ 255.2(a)",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "cfr_16_255_1_decoded.txt",
+      "start": 1949,
+      "end": 1956,
+      "text": "§ 255.5",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 85,
+      "end": 98,
+      "text": "124 STAT. 119",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 102,
+      "end": 120,
+      "text": "Public Law 111-148",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 233,
+      "end": 242,
+      "text": "H.R. 3590",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 482,
+      "end": 494,
+      "text": "42 USC 18001",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 666,
+      "end": 672,
+      "text": "Sec. 1",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 849,
+      "end": 858,
+      "text": "Sec. 1001",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 992,
+      "end": 1001,
+      "text": "Sec. 2711",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1036,
+      "end": 1045,
+      "text": "Sec. 2712",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1078,
+      "end": 1087,
+      "text": "Sec. 2713",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1132,
+      "end": 1141,
+      "text": "Sec. 2714",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1179,
+      "end": 1188,
+      "text": "Sec. 2715",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1300,
+      "end": 1309,
+      "text": "Sec. 2716",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1361,
+      "end": 1370,
+      "text": "Sec. 2717",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1405,
+      "end": 1414,
+      "text": "Sec. 2718",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1467,
+      "end": 1476,
+      "text": "Sec. 2719",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1495,
+      "end": 1504,
+      "text": "Sec. 1002",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1545,
+      "end": 1554,
+      "text": "Sec. 1003",
+      "status": "extracted",
+      "parser": "kit"
+    },
+    {
+      "doc": "plaw_111_148_decoded.txt",
+      "start": 1609,
+      "end": 1618,
+      "text": "Sec. 1004",
+      "status": "extracted",
+      "parser": "kit"
+    }
+  ]
+}
