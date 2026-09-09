@@ -40,6 +40,7 @@ class SearchResult:
 ADAPTERS: dict[str, str] = {
     # name -> import path; urllib stays out of this file (isolation scan).
     "courtlistener-free": "matterkit.adapters.courtlistener.CourtListenerFreeAdapter",
+    "corpus-search": "matterkit.adapters.corpus_search.CorpusSearchAdapter",
 }
 
 
@@ -63,11 +64,13 @@ def build_adapter(provider: str, matter_dir: str, caller_id: str,
 
 def manual_search(matter_dir: str, caller_id: str, text: str,
                   provider: str = "courtlistener-free",
-                  limit: int = 5, auth_mode: str = "anonymous") -> list[SearchResult]:
+                  limit: int = 5, auth_mode: str = "anonymous",
+                  jurisdiction: str | None = None) -> list[SearchResult]:
     """Manual query/citation lookup. Results are provenance records only —
     never written as source-checked."""
     adapter = build_adapter(provider, matter_dir, caller_id, auth_mode=auth_mode)
-    return adapter.search(SearchQuery(text=text, source_type="case", limit=limit),
+    return adapter.search(SearchQuery(text=text, source_type="case",
+                                      jurisdiction=jurisdiction, limit=limit),
                           caller_id=caller_id)
 
 
