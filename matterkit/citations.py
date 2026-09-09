@@ -50,13 +50,25 @@ def now_iso() -> str:
 # --------------------------------------------------------------------------
 _PATTERNS = [
     # U.S. Code:           15 U.S.C. § 1681a   /   15 USC § 1681a
-    re.compile(r"\b\d+\s+U\.?S\.?C\.?\s*§+\s*\d+[a-z]?(?:\s*\([^)]{1,40}\))?"),
+    re.compile(r"\b\d+\s+U\.?S\.?C\.?\s*§+\s*[\dA-Za-z]+(?:\s*\([^)]{1,40}\))?"),
+    # Code of Federal Regulations (full depth):  17 C.F.R. § 240.10b-5
+    re.compile(r"\b\d+\s+C\.F\.R\.\s*§+\s*[\dA-Za-z.\-]+"),
     # Delaware:            8 Del. C. § 141
     re.compile(r"\b\d+\s+Del\.\s+C\.\s*§+\s*\d+[a-z]?"),
     # State Code Ann.:     Miss. Code Ann. § 57-1-319 / Wyo. Stat. Ann. § 17-29-802
     re.compile(r"\b[A-Z][A-Za-z.]*\.?\s+(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+"),
-    # Any named code:      Cal. Civ. Code § 1542
-    re.compile(r"\b[A-Z][A-Za-z. ]{2,40}?\bCode\b\s*§+\s*[\dA-Za-z.\-]+"),
+    # Keyword-tail code names (v2): dotted words chain across legitimate
+    # spaces; (?<![\w.]) forbids starting mid-acronym (the 'N.Y.' -> 'Y. …'
+    # FP) and sentence prefixes can never match (no trailing dot).
+    #   Cal. Civ. Code § 1542 · Cal. Bus. & Prof. Code § 17200 ·
+    #   Tex. Bus. & Orgs. Code § 101.55 · N.Y. Bus. Corp. Law § 405
+    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,4}(?:Code|Law)\s*§+\s*[\dA-Za-z.\-]+"),
+    # Gov't-tail:          Tex. Gov't Code § 3.005
+    re.compile(r"(?<![\w.])[A-Z][\w'.]*(?:\s*&\s*)?\s*Gov'?t\.?\s+(?:Code|Stat\.)\s*§+\s*[\dA-Za-z.\-]+"),
+    # Dotted-pure stat:    Fla. Stat. § 605.100
+    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,2}Stat\.\s*§+\s*[\dA-Za-z.\-]+"),
+    # Multi-part compiled statutes:  805 Ill. Comp. Stat. 5/1.10
+    re.compile(r"\b\d+\s+[A-Z][\w'.]*\.(?:\s*[A-Z][\w'.]*\.)+\s*\d+(?:\.\d+)?/\d+(?:\.\d+)?\b"),
     # Reporter cites:      347 U.S. 483   /   946 So. 2d 851
     re.compile(r"\b\d+\s+[A-Z][A-Za-z.]*(?:\.\s*\d+[a-z]*)?\s+\d+\b"),
     # Bare section fragment — kept and recorded as extraction-failure evidence,

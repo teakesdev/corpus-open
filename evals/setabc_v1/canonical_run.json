@@ -1,13 +1,13 @@
 {
  "canonical": true,
  "standard": "exact source span: prediction matched iff (doc,start,end) == gold (doc,start,end); normalized text stored separately, never affecting match",
- "generated_at": "2026-09-09T00:52:58+00:00",
+ "generated_at": "2026-09-09T01:06:22+00:00",
  "gold_sha256": "1ba6cc3956c88f6be1268f8b7b10b56cf6bba2f0982f523855b16e5f87a055cb",
  "n_gold": 192,
  "parsers": {
   "kit": {
-   "head": "0f9c190",
-   "n_predictions": 117,
+   "head": "3704e76",
+   "n_predictions": 192,
    "duplicates_collapsed": 0,
    "matched_ids": [
     "A-000",
@@ -81,9 +81,7 @@
     "B-056",
     "B-057",
     "B-058",
-    "B-059"
-   ],
-   "missed_ids": [
+    "B-059",
     "B-060",
     "B-061",
     "B-062",
@@ -205,368 +203,8 @@
     "B-178",
     "B-179"
    ],
-   "false_positives": [
-    {
-     "doc": "stat_04_0.txt",
-     "start": 0,
-     "end": 29,
-     "text": "Compare Cal. Civ. Code \u00a7 1500",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_0.txt",
-     "start": 83,
-     "end": 117,
-     "text": "The court in Cal. Civ. Code \u00a7 1503",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_0.txt",
-     "start": 183,
-     "end": 212,
-     "text": "Compare Cal. Civ. Code \u00a7 1506",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_0.txt",
-     "start": 266,
-     "end": 300,
-     "text": "The court in Cal. Civ. Code \u00a7 1509",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_0.txt",
-     "start": 366,
-     "end": 395,
-     "text": "Compare Cal. Civ. Code \u00a7 1512",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_1.txt",
-     "start": 0,
-     "end": 34,
-     "text": "The court in Cal. Civ. Code \u00a7 1501",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_1.txt",
-     "start": 100,
-     "end": 129,
-     "text": "Compare Cal. Civ. Code \u00a7 1504",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_1.txt",
-     "start": 183,
-     "end": 217,
-     "text": "The court in Cal. Civ. Code \u00a7 1507",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_1.txt",
-     "start": 283,
-     "end": 312,
-     "text": "Compare Cal. Civ. Code \u00a7 1510",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_1.txt",
-     "start": 366,
-     "end": 400,
-     "text": "The court in Cal. Civ. Code \u00a7 1513",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_2.txt",
-     "start": 0,
-     "end": 29,
-     "text": "Compare Cal. Civ. Code \u00a7 1502",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_2.txt",
-     "start": 83,
-     "end": 117,
-     "text": "The court in Cal. Civ. Code \u00a7 1505",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_2.txt",
-     "start": 183,
-     "end": 212,
-     "text": "Compare Cal. Civ. Code \u00a7 1508",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_2.txt",
-     "start": 266,
-     "end": 300,
-     "text": "The court in Cal. Civ. Code \u00a7 1511",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_04_2.txt",
-     "start": 366,
-     "end": 395,
-     "text": "Compare Cal. Civ. Code \u00a7 1514",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_0.txt",
-     "start": 30,
-     "end": 48,
-     "text": "Prof. Code \u00a7 17200",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_0.txt",
-     "start": 146,
-     "end": 164,
-     "text": "Prof. Code \u00a7 17203",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_0.txt",
-     "start": 235,
-     "end": 253,
-     "text": "Prof. Code \u00a7 17206",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_0.txt",
-     "start": 351,
-     "end": 369,
-     "text": "Prof. Code \u00a7 17209",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_0.txt",
-     "start": 440,
-     "end": 458,
-     "text": "Prof. Code \u00a7 17212",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_1.txt",
-     "start": 53,
-     "end": 71,
-     "text": "Prof. Code \u00a7 17201",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_1.txt",
-     "start": 142,
-     "end": 160,
-     "text": "Prof. Code \u00a7 17204",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_1.txt",
-     "start": 258,
-     "end": 276,
-     "text": "Prof. Code \u00a7 17207",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_1.txt",
-     "start": 347,
-     "end": 365,
-     "text": "Prof. Code \u00a7 17210",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_1.txt",
-     "start": 463,
-     "end": 481,
-     "text": "Prof. Code \u00a7 17213",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_2.txt",
-     "start": 30,
-     "end": 48,
-     "text": "Prof. Code \u00a7 17202",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_2.txt",
-     "start": 146,
-     "end": 164,
-     "text": "Prof. Code \u00a7 17205",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_2.txt",
-     "start": 235,
-     "end": 253,
-     "text": "Prof. Code \u00a7 17208",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_2.txt",
-     "start": 351,
-     "end": 369,
-     "text": "Prof. Code \u00a7 17211",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_05_2.txt",
-     "start": 440,
-     "end": 458,
-     "text": "Prof. Code \u00a7 17214",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_0.txt",
-     "start": 25,
-     "end": 44,
-     "text": "Orgs. Code \u00a7 101.50",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_0.txt",
-     "start": 130,
-     "end": 149,
-     "text": "Orgs. Code \u00a7 101.53",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_0.txt",
-     "start": 228,
-     "end": 247,
-     "text": "Orgs. Code \u00a7 101.56",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_0.txt",
-     "start": 333,
-     "end": 352,
-     "text": "Orgs. Code \u00a7 101.59",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_0.txt",
-     "start": 431,
-     "end": 450,
-     "text": "Orgs. Code \u00a7 101.62",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_1.txt",
-     "start": 20,
-     "end": 39,
-     "text": "Orgs. Code \u00a7 101.51",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_1.txt",
-     "start": 118,
-     "end": 137,
-     "text": "Orgs. Code \u00a7 101.54",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_1.txt",
-     "start": 223,
-     "end": 242,
-     "text": "Orgs. Code \u00a7 101.57",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_1.txt",
-     "start": 321,
-     "end": 340,
-     "text": "Orgs. Code \u00a7 101.60",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_1.txt",
-     "start": 426,
-     "end": 445,
-     "text": "Orgs. Code \u00a7 101.63",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_2.txt",
-     "start": 25,
-     "end": 44,
-     "text": "Orgs. Code \u00a7 101.52",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_2.txt",
-     "start": 130,
-     "end": 149,
-     "text": "Orgs. Code \u00a7 101.55",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_2.txt",
-     "start": 228,
-     "end": 247,
-     "text": "Orgs. Code \u00a7 101.58",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_2.txt",
-     "start": 333,
-     "end": 352,
-     "text": "Orgs. Code \u00a7 101.61",
-     "normalized": null,
-     "parser": "kit"
-    },
-    {
-     "doc": "stat_07_2.txt",
-     "start": 431,
-     "end": 450,
-     "text": "Orgs. Code \u00a7 101.64",
-     "normalized": null,
-     "parser": "kit"
-    }
-   ],
+   "missed_ids": [],
+   "false_positives": [],
    "hygiene_diagnostic_hits": [
     "A-000",
     "A-001",
@@ -639,7 +277,127 @@
     "B-056",
     "B-057",
     "B-058",
-    "B-059"
+    "B-059",
+    "B-060",
+    "B-061",
+    "B-062",
+    "B-063",
+    "B-064",
+    "B-065",
+    "B-066",
+    "B-067",
+    "B-068",
+    "B-069",
+    "B-070",
+    "B-071",
+    "B-072",
+    "B-073",
+    "B-074",
+    "B-075",
+    "B-076",
+    "B-077",
+    "B-078",
+    "B-079",
+    "B-080",
+    "B-081",
+    "B-082",
+    "B-083",
+    "B-084",
+    "B-085",
+    "B-086",
+    "B-087",
+    "B-088",
+    "B-089",
+    "B-090",
+    "B-091",
+    "B-092",
+    "B-093",
+    "B-094",
+    "B-095",
+    "B-096",
+    "B-097",
+    "B-098",
+    "B-099",
+    "B-100",
+    "B-101",
+    "B-102",
+    "B-103",
+    "B-104",
+    "B-105",
+    "B-106",
+    "B-107",
+    "B-108",
+    "B-109",
+    "B-110",
+    "B-111",
+    "B-112",
+    "B-113",
+    "B-114",
+    "B-115",
+    "B-116",
+    "B-117",
+    "B-118",
+    "B-119",
+    "B-120",
+    "B-121",
+    "B-122",
+    "B-123",
+    "B-124",
+    "B-125",
+    "B-126",
+    "B-127",
+    "B-128",
+    "B-129",
+    "B-130",
+    "B-131",
+    "B-132",
+    "B-133",
+    "B-134",
+    "B-135",
+    "B-136",
+    "B-137",
+    "B-138",
+    "B-139",
+    "B-140",
+    "B-141",
+    "B-142",
+    "B-143",
+    "B-144",
+    "B-145",
+    "B-146",
+    "B-147",
+    "B-148",
+    "B-149",
+    "B-150",
+    "B-151",
+    "B-152",
+    "B-153",
+    "B-154",
+    "B-155",
+    "B-156",
+    "B-157",
+    "B-158",
+    "B-159",
+    "B-160",
+    "B-161",
+    "B-162",
+    "B-163",
+    "B-164",
+    "B-165",
+    "B-166",
+    "B-167",
+    "B-168",
+    "B-169",
+    "B-170",
+    "B-171",
+    "B-172",
+    "B-173",
+    "B-174",
+    "B-175",
+    "B-176",
+    "B-177",
+    "B-178",
+    "B-179"
    ]
   },
   "eyecite": {
@@ -1350,6 +1108,36 @@
    "B-087",
    "B-088",
    "B-089",
+   "B-090",
+   "B-091",
+   "B-092",
+   "B-093",
+   "B-094",
+   "B-095",
+   "B-096",
+   "B-097",
+   "B-098",
+   "B-099",
+   "B-100",
+   "B-101",
+   "B-102",
+   "B-103",
+   "B-104",
+   "B-105",
+   "B-106",
+   "B-107",
+   "B-108",
+   "B-109",
+   "B-110",
+   "B-111",
+   "B-112",
+   "B-113",
+   "B-114",
+   "B-115",
+   "B-116",
+   "B-117",
+   "B-118",
+   "B-119",
    "B-120",
    "B-121",
    "B-122",
@@ -1379,9 +1167,39 @@
    "B-146",
    "B-147",
    "B-148",
-   "B-149"
+   "B-149",
+   "B-150",
+   "B-151",
+   "B-152",
+   "B-153",
+   "B-154",
+   "B-155",
+   "B-156",
+   "B-157",
+   "B-158",
+   "B-159",
+   "B-160",
+   "B-161",
+   "B-162",
+   "B-163",
+   "B-164",
+   "B-165",
+   "B-166",
+   "B-167",
+   "B-168",
+   "B-169",
+   "B-170",
+   "B-171",
+   "B-172",
+   "B-173",
+   "B-174",
+   "B-175",
+   "B-176",
+   "B-177",
+   "B-178",
+   "B-179"
   ],
-  "count": 132,
+  "count": 192,
   "kit_only": [
    "B-000",
    "B-001",
@@ -1412,231 +1230,100 @@
    "B-026",
    "B-027",
    "B-028",
-   "B-029"
+   "B-029",
+   "B-090",
+   "B-091",
+   "B-092",
+   "B-093",
+   "B-094",
+   "B-095",
+   "B-096",
+   "B-097",
+   "B-098",
+   "B-099",
+   "B-100",
+   "B-101",
+   "B-102",
+   "B-103",
+   "B-104",
+   "B-105",
+   "B-106",
+   "B-107",
+   "B-108",
+   "B-109",
+   "B-110",
+   "B-111",
+   "B-112",
+   "B-113",
+   "B-114",
+   "B-115",
+   "B-116",
+   "B-117",
+   "B-118",
+   "B-119",
+   "B-150",
+   "B-151",
+   "B-152",
+   "B-153",
+   "B-154",
+   "B-155",
+   "B-156",
+   "B-157",
+   "B-158",
+   "B-159",
+   "B-160",
+   "B-161",
+   "B-162",
+   "B-163",
+   "B-164",
+   "B-165",
+   "B-166",
+   "B-167",
+   "B-168",
+   "B-169",
+   "B-170",
+   "B-171",
+   "B-172",
+   "B-173",
+   "B-174",
+   "B-175",
+   "B-176",
+   "B-177",
+   "B-178",
+   "B-179"
   ],
-  "eyecite_only": [
-   "B-060",
-   "B-061",
-   "B-062",
-   "B-063",
-   "B-064",
-   "B-065",
-   "B-066",
-   "B-067",
-   "B-068",
-   "B-069",
-   "B-070",
-   "B-071",
-   "B-072",
-   "B-073",
-   "B-074",
-   "B-075",
-   "B-076",
-   "B-077",
-   "B-078",
-   "B-079",
-   "B-080",
-   "B-081",
-   "B-082",
-   "B-083",
-   "B-084",
-   "B-085",
-   "B-086",
-   "B-087",
-   "B-088",
-   "B-089",
-   "B-120",
-   "B-121",
-   "B-122",
-   "B-123",
-   "B-124",
-   "B-125",
-   "B-126",
-   "B-127",
-   "B-128",
-   "B-129",
-   "B-130",
-   "B-131",
-   "B-132",
-   "B-133",
-   "B-134",
-   "B-135",
-   "B-136",
-   "B-137",
-   "B-138",
-   "B-139",
-   "B-140",
-   "B-141",
-   "B-142",
-   "B-143",
-   "B-144",
-   "B-145",
-   "B-146",
-   "B-147",
-   "B-148",
-   "B-149"
-  ],
-  "neither_count": 60
+  "eyecite_only": [],
+  "neither_count": 0
  },
  "pollution_telemetry_both_parsers": [
   {
    "parser": "kit",
-   "doc": "stat_04_0.txt",
-   "gold_id": "B-060",
+   "doc": "stat_11_1.txt",
+   "gold_id": "B-166",
    "span": [
-    0,
-    29
+    308,
+    330
    ],
-   "text": "Compare Cal. Civ. Code \u00a7 1500"
+   "text": "17 C.F.R. \u00a7 240.10b-10"
   },
   {
    "parser": "kit",
-   "doc": "stat_04_0.txt",
-   "gold_id": "B-063",
+   "doc": "stat_11_1.txt",
+   "gold_id": "B-166",
    "span": [
-    83,
-    117
+    416,
+    438
    ],
-   "text": "The court in Cal. Civ. Code \u00a7 1503"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_0.txt",
-   "gold_id": "B-066",
-   "span": [
-    183,
-    212
-   ],
-   "text": "Compare Cal. Civ. Code \u00a7 1506"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_0.txt",
-   "gold_id": "B-069",
-   "span": [
-    266,
-    300
-   ],
-   "text": "The court in Cal. Civ. Code \u00a7 1509"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_0.txt",
-   "gold_id": "B-072",
-   "span": [
-    366,
-    395
-   ],
-   "text": "Compare Cal. Civ. Code \u00a7 1512"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_1.txt",
-   "gold_id": "B-061",
-   "span": [
-    0,
-    34
-   ],
-   "text": "The court in Cal. Civ. Code \u00a7 1501"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_1.txt",
-   "gold_id": "B-064",
-   "span": [
-    100,
-    129
-   ],
-   "text": "Compare Cal. Civ. Code \u00a7 1504"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_1.txt",
-   "gold_id": "B-067",
-   "span": [
-    183,
-    217
-   ],
-   "text": "The court in Cal. Civ. Code \u00a7 1507"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_1.txt",
-   "gold_id": "B-070",
-   "span": [
-    283,
-    312
-   ],
-   "text": "Compare Cal. Civ. Code \u00a7 1510"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_1.txt",
-   "gold_id": "B-073",
-   "span": [
-    366,
-    400
-   ],
-   "text": "The court in Cal. Civ. Code \u00a7 1513"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_2.txt",
-   "gold_id": "B-062",
-   "span": [
-    0,
-    29
-   ],
-   "text": "Compare Cal. Civ. Code \u00a7 1502"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_2.txt",
-   "gold_id": "B-065",
-   "span": [
-    83,
-    117
-   ],
-   "text": "The court in Cal. Civ. Code \u00a7 1505"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_2.txt",
-   "gold_id": "B-068",
-   "span": [
-    183,
-    212
-   ],
-   "text": "Compare Cal. Civ. Code \u00a7 1508"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_2.txt",
-   "gold_id": "B-071",
-   "span": [
-    266,
-    300
-   ],
-   "text": "The court in Cal. Civ. Code \u00a7 1511"
-  },
-  {
-   "parser": "kit",
-   "doc": "stat_04_2.txt",
-   "gold_id": "B-074",
-   "span": [
-    366,
-    395
-   ],
-   "text": "Compare Cal. Civ. Code \u00a7 1514"
+   "text": "17 C.F.R. \u00a7 240.10b-13"
   }
  ],
  "summary_exact": {
   "kit": {
    "set_a": "12/12",
-   "set_b": "60/180",
-   "set_b_recall": 0.3333,
+   "set_b": "180/180",
+   "set_b_recall": 1.0,
    "set_a_recall": 1.0,
-   "fp": 45
+   "fp": 0
   },
   "eyecite": {
    "set_a": "12/12",
@@ -1645,7 +1332,7 @@
    "set_a_recall": 1.0,
    "fp": 18
   },
-  "union_set_b": "120/180",
+  "union_set_b": "180/180",
   "note": "hygiene numbers live in parsers.*.hygiene_diagnostic_hits \u2014 diagnostic only, never a headline"
  }
 }
