@@ -1,49 +1,46 @@
-# Set A/B/C v1 — kit parser vs eyecite (public/synthetic, format-level)
+# Set A/B/C v1 — CORRECTED RECORD (rev2)
 
-**Date:** 2026-09-08 · **Corpus:** `evals/setabc_v1` · **Material:** synthetic sentences embedding **real public citation formats** — zero lawsuit or private content, no network, no paid services.
-**Freeze discipline:** gold decks (`gold.json`, sha256 in `manifest.json`) written **before** any scoring run; corpus generation seeded (`random.seed(20260908)`); scored with kit `citations.py` @ `19f5d4e` (R1) and eyecite 2.7.8. Leakage/label review: @adversarial-review-deepseek-agent (pending).
+**Date:** 2026-09-08 · **Supersedes:** the original `REPORT.md` claims (0.583 / 0.417 / 0.942), which are **retracted as unreproducible**.
 
-## Headline
+## Correction history (adversarial finding, Deepseek 2026-09-08 — accepted in full)
 
-| measure | kit stdlib v1 | eyecite 2.7.8 |
-|---|---|---|
-| Set A recall (case cites, n=12) | **1.000** (12/12) | **1.000** (12/12) |
-| Set B recall (statutory, n=180) | **0.583** (105/180) | **0.417** (75/180) |
-| False positives on negative controls | **0** | **0** |
-| Junk tokens on misses | **0** (bare `§` → structured `extraction-failed` rows) | **66** `UnknownCitation` tokens (silently dropped by upstream APIs) |
-| Short-form / `id.` / `supra` | 0 rows (not attempted in v1 — documented) | **3/3 detected** (Id/Supra/ShortCase classes) |
+1. **The v1 scorer was never committed** — gold, docs, and score JSONs landed (`3c0a2cb`) but the code producing the numbers did not. Process defect: an eval is not reproducible without its scorer. `score.py` is now committed alongside the artifacts it reads.
+2. **The v1 matcher was too loose.** Containment matching counted polluted spans as hits: pattern 4 (`Code §`) over-matches `Cal. Civ. Code`/`Cal. Bus. & Prof.`/`Tex. Bus. & Orgs.` by swallowing the sentence prefix (`"Compare Cal. Civ. Code § 1500"`), and containment then scored the polluted fragment as a hit. Under exact-match spans those families are **0/15**, not 1.00.
+3. **One sub-claim failed verification:** `Tex. Gov't Code` **is present** in the committed corpus (`stat_06_*.txt`, e.g. `Tex. Gov't Code § 0.005`) — the kit's `tx` misses are real measured failures, not an untested style.
 
-## Set B per style (n=15 each)
+## Numbers — exact-match spans (PRIMARY standard; committed `score.py`, default mode)
 
-| style | kit | eyecite | union |
+| measure | kit stdlib v1 | eyecite 2.7.8 | union |
 |---|---|---|---|
-| 15 U.S.C. § … | 1.00 | 0.00 | 1.00 |
-| X Del. C. § … | 1.00 | 0.00 | 1.00 |
-| Miss. Code Ann. § … | 1.00 | 1.00 | 1.00 |
-| Wyo. Stat. Ann. § … | 1.00 | 1.00 | 1.00 |
-| Cal. Civ. Code § … | 1.00 | 0.00 | 1.00 |
-| Cal. Bus. & Prof. Code § … | 1.00 | 0.00 | 1.00 |
-| Tex. Bus. & Orgs. Code § … | 1.00 | 0.00 | 1.00 |
-| Tex. Gov't Code § … (apostrophe) | 0.00 | 0.00 | 0.00 |
-| Fla. Stat. § … | 0.00 | 1.00 | 1.00 |
-| N.Y. Bus. Corp. Law § … | 0.00 | 1.00 | 1.00 |
-| 805 Ill. Comp. Stat. 5/x | 0.00 | 0.00 | 0.00 |
-| 17 C.F.R. § … | 0.00 | 1.00 | 1.00 |
-| **Set B total** | **0.583** | **0.417** | **0.942** (169/180) |
+| Set A recall (case cites, n=12) | 1.000 (12/12) | 1.000 (12/12) | 1.000 |
+| **Set B recall (statutory, n=180)** | **0.333 (60/180)** | **0.250 (45/180)** | **0.417 (75/180)** |
+| False positives on negative controls | 0 | 0 | — |
 
-Misses are **deterministic format gaps**, not noise: kit misses `Gov't` (apostrophe family), `Fla. Stat.`/`N.Y. … Law` (no `Ann.`/`Code` keyword family), `Comp. Stat.` (multi-part), C.F.R.; eyecite misses exactly the USC/`Del. C.`/`Civ. Code`/`Bus. & Prof.`/`Bus. & Orgs.` families its reporters-db does not carry — reproducing the 2026-09-08 smoke on a 180-item corpus. Union coverage 0.942 leaves two genuinely uncovered families (`Tex. Gov't` apostrophe; `Ill. Comp. Stat.`).
+Exact = fragment equals the gold string, no normalization. Span hygiene is part of parser quality: a regex that eats the sentence prefix fails exact match **by design**.
 
-## Reading (recommendation to the chair)
+## Secondary standard — bounded hygiene (tolerates a trailing period only, never prefixes)
 
-1. **The two parsers are complementary by format family.** Neither meets the Set-B ≥ 0.95 acceptance bar alone; the *union* nearly does, and the two missing families are both simple kit-regex additions.
-2. **Kit failure mode is honest by construction** (structured `extraction-failed` rows with offsets, zero junk) — eyecite's misses become `UnknownCitation` tokens that downstream code must know to drop. On the three-stage contract, kit failures surface; eyecite failures vanish.
-3. **eyecite is the only candidate for short-form/`id.`/`supra` handling in v1** — 3/3 detected where the kit attempts nothing. That is Set A enrichment, not Set B.
+| Set B | kit | eyecite | union |
+|---|---|---|---|
+| hygiene recall | 0.333 (60/180) | 0.333 (60/180) | 0.417 (75/180) |
 
-**Recommended next action (not yet authorized):** extend the kit stdlib parser with the four missing families (`Gov't`-apostrophe handling, `Fla. Stat.`/state-dotful-name without `Ann.`, `Comp. Stat.` multi-part, C.F.R.) — target Set B ≥ 0.95 kit-solo on v2 of this corpus — and keep eyecite as the optional extra for case short-forms under the RFC's BSD-2-pin rule. Re-run this harness (frozen gold unchanged; new docs appended as v2) after the parser change.
+The containment rule changes eyecite's number (60 vs 45 — trailing-period fragments) and nothing else; the union is 0.417 under both standards. Union breakdown (exact): kit-only 30 (`Del. C.`, `U.S.C.`), eyecite-only 15 (`Fla. Stat.`), shared 30 (`Code Ann.` families), **neither 105** (`Civ. Code`, `Bus. & Prof.`, `Tex. Gov't`, `Tex. Bus. & Orgs.`, `Comp. Stat.`, C.F.R., `Bus. Corp. Law`).
 
-## Threats to validity (honest scope)
+## Kit span-pollution finding (new, actionable)
 
-- **Format-level, not semantic:** v1 measures *detection*, not resolution or correctness of the parsed sections.
-- **Synthetic sentence contexts:** real pages carry OCR noise, footnotes, tables; formats seen in the wild are messier than these templates.
-- **Single run, one version pair:** kit @ `19f5d4e`, eyecite 2.7.8; re-run on version bumps per spec.
-- **Reviewer:** adversarial pass on labels/scoring (leakage, missed-citation formats) still open — this report is pre-review.
+Pattern 4 over-matches 15 Set B spans (representative: `"Compare Cal. Civ. Code § 1500"`). Root cause: the generic `…Code §` pattern has no left anchor. Fix path: require the code name to start a token boundary not preceded by sentence-leading words, or trim to the maximal `\d+ <Name> Code § \d+`-shaped suffix. Pollution is the reason `ca`/`ca_bp`/`tx_bo` score 0/15 exact despite detection.
+
+## Honest conclusions (rev2)
+
+- **No parser approaches the ≥ 0.95 Set-B acceptance bar**: kit 0.333, eyecite 0.250 exact; union 0.417. The v1 "complementary families, union ≈ 0.94" claim was an artifact of loose matching and is withdrawn.
+- Real, reproducible format gaps — kit: `Civ. Code`-family anchoring, `Gov't`-apostrophe, `Fla. Stat.`-style dotted states without `Ann.`, `Comp. Stat.` multi-part, C.F.R. eyecite: `U.S.C.`/`Del. C.`/`Civ. Code`/`Bus. & Prof.`/`Bus. & Orgs.`/`Gov't`/`Comp. Stat.` (reporters-db coverage).
+- Set A discriminates nothing at n=12 with both parsers at 1.000 (Deepseek: correct) — it stays a regression gate, not a discriminator, until a short-form/`id.` gold (eyecite-favorable) and harder case-cite variants are added in v2.
+- Set A/B/C **v2 scope (proposed):** fix pattern-4 anchoring + add the five missing families kit-side; extend gold with short-form/`id.` expectations and messier contexts (footnote markers, line breaks); re-run under the same committed scorer. Decision (keep / fix / hybrid) deferred until v2 numbers exist.
+
+## Reproducibility
+
+```
+python3 evals/setabc_v1/score.py            # exact (primary)
+python3 evals/setabc_v1/score.py --hygiene  # secondary standard
+```
+Reads only committed `gold.json` + `manifest.json` + `docs/`; kit parser imported from the repo at HEAD; eyecite (optional comparison) runs from the local smoke venv if present. Rescored artifacts: `rescored_exact.json`, `rescored_hygiene.json`. Freeze discipline unchanged: gold frozen before scoring; synthetic material only; zero network.
