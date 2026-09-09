@@ -2,19 +2,20 @@
  "version": "holdout_v1",
  "labeler": "adversarial-review-deepseek-agent",
  "labeled_at": "2026-09-08",
- "method": "independent manual labeling, programmatic offset verification",
+ "corrected_at": "2026-09-08 (nested-prefix artifacts removed; true U+202F heading added; non-overlapping longest-match)",
+ "method": "independent manual labeling, programmatic offset verification, non-overlapping",
  "items": {
   "usc_1983.txt": [
    {
     "doc": "usc_1983.txt",
-    "citation": "42 U.S. Code \u00a7 1983",
-    "start": 99,
-    "end": 118
+    "citation": "\u00a7\u202f1983",
+    "start": 33,
+    "end": 39
    },
    {
     "doc": "usc_1983.txt",
-    "citation": "\u00a7 1983",
-    "start": 112,
+    "citation": "42 U.S. Code \u00a7 1983",
+    "start": 99,
     "end": 118
    },
    {
@@ -25,15 +26,45 @@
    },
    {
     "doc": "usc_1983.txt",
+    "citation": "Pub. L. 96\u2013170",
+    "start": 1105,
+    "end": 1119
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f1",
+    "start": 1121,
+    "end": 1124
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "Pub. L. 104\u2013317",
+    "start": 1159,
+    "end": 1174
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f309(c)",
+    "start": 1187,
+    "end": 1195
+   },
+   {
+    "doc": "usc_1983.txt",
     "citation": "R.S. \u00a7\u202f1979",
     "start": 1268,
     "end": 1279
    },
    {
     "doc": "usc_1983.txt",
-    "citation": "Pub. L. 96\u2013170",
-    "start": 1105,
-    "end": 1119
+    "citation": "\u00a7\u202f1",
+    "start": 1320,
+    "end": 1323
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "section 43 of Title 8",
+    "start": 1376,
+    "end": 1397
    },
    {
     "doc": "usc_1983.txt",
@@ -55,63 +86,15 @@
    },
    {
     "doc": "usc_1983.txt",
-    "citation": "Pub. L. 104\u2013317",
-    "start": 1159,
-    "end": 1174
+    "citation": "section 1343 of Title 28",
+    "start": 2248,
+    "end": 2272
    },
    {
     "doc": "usc_1983.txt",
     "citation": "Pub. L. 104\u2013317",
     "start": 1446,
     "end": 1461
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "\u00a7\u202f1",
-    "start": 33,
-    "end": 36
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "\u00a7\u202f1",
-    "start": 1097,
-    "end": 1100
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "\u00a7\u202f1",
-    "start": 1121,
-    "end": 1124
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "\u00a7\u202f1",
-    "start": 1273,
-    "end": 1276
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "\u00a7\u202f1",
-    "start": 1320,
-    "end": 1323
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "\u00a7\u202f309(c)",
-    "start": 1187,
-    "end": 1195
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "section 43 of Title 8",
-    "start": 1376,
-    "end": 1397
-   },
-   {
-    "doc": "usc_1983.txt",
-    "citation": "section 1343 of Title 28",
-    "start": 2248,
-    "end": 2272
    }
   ],
   "cfr_1026.txt": [
@@ -149,7 +132,7 @@
    },
    {
     "doc": "usc_501.txt",
-    "citation": "section 503",
+    "citation": "503",
     "start": 403,
     "end": 406
    }
@@ -169,12 +152,6 @@
    },
    {
     "doc": "usc_107.txt",
-    "citation": "section 107",
-    "start": 1757,
-    "end": 1768
-   },
-   {
-    "doc": "usc_107.txt",
     "citation": "&sect;101",
     "start": 1279,
     "end": 1288
@@ -184,6 +161,12 @@
     "citation": "&sect;607",
     "start": 1353,
     "end": 1362
+   },
+   {
+    "doc": "usc_107.txt",
+    "citation": "section 107",
+    "start": 1757,
+    "end": 1768
    }
   ],
   "fl_stat_605.txt": [
