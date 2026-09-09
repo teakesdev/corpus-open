@@ -1,0 +1,210 @@
+{
+ "version": "holdout_v1",
+ "labeler": "adversarial-review-deepseek-agent",
+ "labeled_at": "2026-09-08",
+ "method": "independent manual labeling, programmatic offset verification",
+ "items": {
+  "usc_1983.txt": [
+   {
+    "doc": "usc_1983.txt",
+    "citation": "42 U.S. Code \u00a7 1983",
+    "start": 99,
+    "end": 118
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7 1983",
+    "start": 112,
+    "end": 118
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "R.S. \u00a7\u202f1979",
+    "start": 1092,
+    "end": 1103
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "R.S. \u00a7\u202f1979",
+    "start": 1268,
+    "end": 1279
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "Pub. L. 96\u2013170",
+    "start": 1105,
+    "end": 1119
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "Pub. L. 96\u2013170",
+    "start": 1768,
+    "end": 1782
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "Pub. L. 96\u2013170",
+    "start": 2026,
+    "end": 2040
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "Pub. L. 96\u2013170",
+    "start": 2207,
+    "end": 2221
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "Pub. L. 104\u2013317",
+    "start": 1159,
+    "end": 1174
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "Pub. L. 104\u2013317",
+    "start": 1446,
+    "end": 1461
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f1",
+    "start": 33,
+    "end": 36
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f1",
+    "start": 1097,
+    "end": 1100
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f1",
+    "start": 1121,
+    "end": 1124
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f1",
+    "start": 1273,
+    "end": 1276
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f1",
+    "start": 1320,
+    "end": 1323
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "\u00a7\u202f309(c)",
+    "start": 1187,
+    "end": 1195
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "section 43 of Title 8",
+    "start": 1376,
+    "end": 1397
+   },
+   {
+    "doc": "usc_1983.txt",
+    "citation": "section 1343 of Title 28",
+    "start": 2248,
+    "end": 2272
+   }
+  ],
+  "cfr_1026.txt": [
+   {
+    "doc": "cfr_1026.txt",
+    "citation": "12 CFR 1026.1",
+    "start": 8,
+    "end": 21
+   },
+   {
+    "doc": "cfr_1026.txt",
+    "citation": "1 CFR 1.1",
+    "start": 2545,
+    "end": 2554
+   }
+  ],
+  "usc_501.txt": [
+   {
+    "doc": "usc_501.txt",
+    "citation": "26 U.S. Code \u00a7 501",
+    "start": 62,
+    "end": 80
+   },
+   {
+    "doc": "usc_501.txt",
+    "citation": "section 401(a)",
+    "start": 285,
+    "end": 299
+   },
+   {
+    "doc": "usc_501.txt",
+    "citation": "section 502",
+    "start": 388,
+    "end": 399
+   },
+   {
+    "doc": "usc_501.txt",
+    "citation": "section 503",
+    "start": 403,
+    "end": 406
+   }
+  ],
+  "usc_107.txt": [
+   {
+    "doc": "usc_107.txt",
+    "citation": "Sec. 107",
+    "start": 30,
+    "end": 38
+   },
+   {
+    "doc": "usc_107.txt",
+    "citation": "sections 106 and 106A",
+    "start": 234,
+    "end": 255
+   },
+   {
+    "doc": "usc_107.txt",
+    "citation": "section 107",
+    "start": 1757,
+    "end": 1768
+   },
+   {
+    "doc": "usc_107.txt",
+    "citation": "&sect;101",
+    "start": 1279,
+    "end": 1288
+   },
+   {
+    "doc": "usc_107.txt",
+    "citation": "&sect;607",
+    "start": 1353,
+    "end": 1362
+   }
+  ],
+  "fl_stat_605.txt": [
+   {
+    "doc": "fl_stat_605.txt",
+    "citation": "F.S. 605.0101",
+    "start": 188,
+    "end": 201
+   },
+   {
+    "doc": "fl_stat_605.txt",
+    "citation": "605.0101 - 605.1108",
+    "start": 359,
+    "end": 378
+   },
+   {
+    "doc": "fl_stat_605.txt",
+    "citation": "s. 2, ch. 2013-180",
+    "start": 466,
+    "end": 484
+   }
+  ]
+ }
+}
