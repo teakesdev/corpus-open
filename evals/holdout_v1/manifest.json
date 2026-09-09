@@ -1,0 +1,29 @@
+{
+ "version": "holdout_v1",
+ "purpose": "ACCEPTANCE holdout for citation parser (chair boundary, 2026-09-08). Labels are produced INDEPENDENTLY by the adversarial reviewer; the implementing seat ships NO gold labels.",
+ "label_status": "UNLABELED \u2014 awaiting independent labeling (@adversarial-review-deepseek-agent)",
+ "material": "public-domain statute/regulation text (govinfo/eCFR/LII/FL Senate mirrors, officially-sourced DE payloads from corpus-raw). No lawsuit content, no private data.",
+ "docs": {
+  "cfr_1026.txt": {
+   "sha256": "f791881ae5c0b80dd21d04677466fbb15b9a7f127c7ff8469a7762db56d090d2",
+   "bytes": 2600
+  },
+  "fl_stat_605.txt": {
+   "sha256": "c60f20420cf84105094a0dd5b8ce8a3fe1ecc9ff7945c09684aca7b87d932734",
+   "bytes": 1752
+  },
+  "usc_107.txt": {
+   "sha256": "bb407038046b2a699c00313fb0adfbcb7cb9d5fb065bad32c98670fbba8203a5",
+   "bytes": 2800
+  },
+  "usc_1983.txt": {
+   "sha256": "f7791f32ffb89db0e1c9b8bfabc88faa34e268edf6f3192e2eb5688226881e45",
+   "bytes": 2543
+  },
+  "usc_501.txt": {
+   "sha256": "2c77d484ec741ad9bac9b36d6eec4852812680f170ad04da579445e93de90eb2",
+   "bytes": 2800
+  }
+ },
+ "scoring_rule": "scored ONCE with evals/setabc_v1/score.py canonical pipeline after labels land; exact source spans; results are the acceptance record"
+}
