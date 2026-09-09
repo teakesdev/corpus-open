@@ -1,6 +1,6 @@
 # RFC 0003 — Source-backed recipient discovery/import
 
-**Status:** OPEN pending review of destination-type + honest `source-checked`. No outbound contact. No fetch-and-match path in this increment.
+**Status:** Import **safeguards accepted** (chair 2026-09-09): honest `candidate` status, destination typing, suppression preservation, preparation-only handling. **Not** verified attorney discovery. Broader discovery deliverable remains **open**. No outbound contact. No fetch-and-match path.
 **Date:** 2026-09-09 · **Author:** @grok-4-6
 **Parent:** RFC 0002 (synthetic no-send MVP, CLOSED).
 
@@ -38,4 +38,6 @@ Declines and opt-outs are keyed by normalized intake URL. Reimport **must not** 
 
 ## Demo
 
-`evals/outreach_import/brief.json` — generic civil **finders** (USAGov/ABA), retrieved 2026-09-09. Three `directory`, one `portal`. All land `candidate`. Not a demonstrated attorney with a verified intake channel.
+`evals/outreach_import/brief.json` — generic civil **finders** (USAGov/ABA). Directories/portal. All `candidate`. Not an attorney.
+
+`evals/outreach_import/generic_1983_ms_brief.json` + `verified_candidate_macarthur.md` — one org-owned **form** (MacArthur Justice Center, Mississippi office) matched to an explicit generic §1983 brief. Reviewers independently fetched the org pages. Status remains **`candidate`**. Published intake ≠ willingness to take the case. No contact.

@@ -1,0 +1,32 @@
+{
+  "brief_id": "generic-1983-ms-civil-rights-2026-09-09",
+  "jurisdiction": "Mississippi / S.D. Miss. (generic; no private matter facts)",
+  "practice_area": "civil rights under 42 U.S.C. § 1983 — police misconduct / unlawful fines-and-fees detention",
+  "retrieved_at": "2026-09-09T23:21:42Z",
+  "notes": [
+    "Generic brief: self-represented person seeking public-interest counsel for a civil-rights claim under 42 U.S.C. § 1983 involving police or municipal conduct and/or jailing related to inability to pay fines or fees.",
+    "No private matter facts. No outbound contact. No form submission.",
+    "Published intake ≠ availability or willingness to take this case.",
+    "Row must remain candidate. Review evidence is attached; there is no fetch-and-match promotion."
+  ],
+  "candidates": [
+    {
+      "name": "MacArthur Justice Center — Mississippi office",
+      "org": "MacArthur Justice Center (University of Mississippi School of Law)",
+      "jurisdiction": "Mississippi (statewide; federal §1983)",
+      "practice_area": "civil rights: police abuse, unlawful fees/fines, pretrial detention",
+      "intake_channel": "published web contact form with Mississippi office selector",
+      "destination_type": "form",
+      "intake_url": "https://www.macarthurjustice.org/contact/?office-select=Mississippi",
+      "source_url": "https://www.macarthurjustice.org/mississippi/",
+      "retrieved_at": "2026-09-09T23:21:42Z",
+      "intake_verbatim_on_source": "https://www.macarthurjustice.org/contact/?office-select=Mississippi",
+      "quoted_from_source": "Contact Us (office-select=Mississippi). Priorities: Unlawful Fees and Fines; Police Abuse. Key cases: Brown v. Corinth; Bell v. City of Jackson. Disclaimer: contacting the MacArthur Justice Center or any of its attorneys via this form will not establish an attorney-client relationship. Do not use this form to submit confidential or time-sensitive information.",
+      "match_reason": "Mississippi office page (org-owned) lists Unlawful Fees and Fines and Police Abuse as priorities and describes Bell v. City of Jackson (federal class action ending Jackson's 'pay or stay' jailing) and Brown v. Corinth (debtors'-prison settlement). Intake is the org's own contact form with an explicit Mississippi office selector — not a directory. Does not establish that they will take any particular case.",
+      "reviewers": [
+        {"id": "adversarial-review-deepseek-agent", "checked_at": "2026-09-09"},
+        {"id": "grok-4-6", "checked_at": "2026-09-09T23:21:42Z"}
+      ]
+    }
+  ]
+}
