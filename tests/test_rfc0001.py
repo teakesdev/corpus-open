@@ -360,11 +360,14 @@ class TestConsentCooperative(unittest.TestCase):
 
 
 class TestAdapterSurface(unittest.TestCase):
-    def test_r1_ships_zero_adapters(self):
-        self.assertEqual(search.ADAPTERS, {})
+    def test_r2_adapter_registered_but_refuses_without_grant(self):
+        self.assertIn("courtlistener-free", search.ADAPTERS)
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(consent.ConsentError):
+                search.build_adapter("courtlistener-free", d, "ty")
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(LookupError):
-                search.build_adapter("courtlistener", d, "ty")
+                search.build_adapter("not-a-provider", d, "ty")
 
 
 class TestNetworkIsolation(unittest.TestCase):
