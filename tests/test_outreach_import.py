@@ -12,6 +12,8 @@ BRIEF = os.path.join(os.path.dirname(__file__), "..", "evals", "outreach_import"
 def _write(cands):
     d = tempfile.mkdtemp(prefix="mk-brief-")
     path = os.path.join(d, "brief.json")
+    for c in cands:
+        c.setdefault("destination_type", "form")
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"candidates": cands}, f)
     return path
@@ -26,14 +28,31 @@ class ImportTests(unittest.TestCase):
         result = discovery.import_brief(self.conn, BRIEF)
         self.assertEqual(len(result["rejected"]), 0)
         self.assertEqual(len(result["imported"]), 4)
-        rows = self.conn.execute("SELECT status FROM outreach_recipients").fetchall()
-        self.assertTrue(all(r["status"] == "source-checked" for r in rows))
+        rows = self.conn.execute(
+            "SELECT status, destination_type, flags_json FROM outreach_recipients").fetchall()
+        self.assertTrue(all(r["status"] == "candidate" for r in rows))
+        self.assertTrue(all("verbatim-unverified" in r["flags_json"] for r in rows))
+        dests = {r["destination_type"] for r in rows}
+        self.assertEqual(dests, {"directory", "portal"})
+        self.assertNotIn("source-checked", [r["status"] for r in rows])
         with self.assertRaises(ValueError):
             outreach.draft_all(self.conn, {"role": "a party"})
-        rid = result["imported"][0]
-        discovery.shortlist(self.conn, rid)
+        directory_id = self.conn.execute(
+            "SELECT id FROM outreach_recipients WHERE destination_type='directory' LIMIT 1"
+        ).fetchone()["id"]
+        discovery.shortlist(self.conn, directory_id)
+        with self.assertRaises(ValueError) as cm:
+            outreach.draft_all(self.conn, {"role": "a party"})
+        self.assertIn("directory", str(cm.exception))
+        portal_id = self.conn.execute(
+            "SELECT id FROM outreach_recipients WHERE destination_type='portal' LIMIT 1"
+        ).fetchone()["id"]
+        discovery.shortlist(self.conn, portal_id)
         ids = outreach.draft_all(self.conn, {"role": "a party"})
         self.assertEqual(len(ids), 1)
+        body = self.conn.execute("SELECT body FROM outreach_drafts").fetchone()["body"]
+        self.assertIn("PREPARATION ONLY", body)
+        self.assertIn("Destination-Type: portal", body)
 
     def test_guessed_email_refused(self):
         path = _write([{
@@ -61,7 +80,9 @@ class ImportTests(unittest.TestCase):
 
     def test_reimport_does_not_reset_suppression(self):
         discovery.import_brief(self.conn, BRIEF)
-        rid = self.conn.execute("SELECT id FROM outreach_recipients LIMIT 1").fetchone()["id"]
+        rid = self.conn.execute(
+            "SELECT id FROM outreach_recipients WHERE destination_type='portal' LIMIT 1"
+        ).fetchone()["id"]
         discovery.shortlist(self.conn, rid)
         outreach.draft_all(self.conn, {"role": "a party"})
         man = outreach.build_manifest(self.conn)
@@ -127,25 +148,68 @@ class ImportTests(unittest.TestCase):
         flags = json.loads(self.conn.execute("SELECT flags_json FROM outreach_recipients").fetchone()["flags_json"])
         self.assertIn("stale-evidence", flags)
         row = self.conn.execute("SELECT status FROM outreach_recipients").fetchone()
-        self.assertEqual(row["status"], "source-checked")
+        self.assertEqual(row["status"], "candidate")
 
     def test_cannot_shortlist_candidate(self):
-        # v3 contract: a candidate that imports WITHOUT a verbatim claim lands
-        # as `candidate` (with incomplete-source flag) and must refuse
-        # shortlisting. Missing required brief fields abort the whole brief
-        # pre-flight instead (test_discovery_atomicity covers that path).
+        # v3: no-verbatim still candidate; shortlist as a research lead is
+        # allowed. Directory/unknown remain non-draftable.
         path = _write([{
             "name": "Incomplete", "org": "Org", "jurisdiction": "US", "practice_area": "civil",
             "intake_channel": "web", "intake_url": "https://example.org/inc",
             "source_url": "https://example.org/s", "retrieved_at": "2026-09-09",
+            "destination_type": "directory",
             "match_reason": "x",
         }])
         result = discovery.import_brief(self.conn, path)
         rid = result["imported"][0]
         row = self.conn.execute("SELECT status FROM outreach_recipients").fetchone()
         self.assertEqual(row["status"], "candidate")
+        discovery.shortlist(self.conn, rid)
+        with self.assertRaises(ValueError) as cm:
+            outreach.draft_all(self.conn, {"role": "a party"})
+        self.assertIn("directory", str(cm.exception))
+
+    def test_fabricated_verbatim_stays_candidate(self):
+        path = _write([{
+            "name": "Fake Firm", "org": "Fake", "jurisdiction": "US", "practice_area": "civil",
+            "intake_channel": "web",
+            "intake_url": "https://fake-firm.example/contact",
+            "source_url": "https://nonexistent-source.example/about",
+            "retrieved_at": "2026-09-09T00:00:00Z",
+            "intake_verbatim_on_source": "Contact our firm for consultation.",
+            "destination_type": "form",
+            "match_reason": "fabricated",
+        }])
+        result = discovery.import_brief(self.conn, path)
+        self.assertEqual(len(result["imported"]), 1)
+        row = self.conn.execute(
+            "SELECT status, flags_json FROM outreach_recipients").fetchone()
+        self.assertEqual(row["status"], "candidate")
+        flags = json.loads(row["flags_json"])
+        self.assertIn("verbatim-unverified", flags)
+        self.assertNotEqual(row["status"], "source-checked")
+
+    def test_legacy_source_checked_downgraded(self):
+        rid = outreach.add_recipient(
+            self.conn, name="Legacy", org="Old", jurisdiction="US",
+            practice_area="civil", intake_channel="web",
+            intake_url="https://example.org/legacy",
+            match_reason="old import", source_url="https://example.org/s",
+            destination_type="unknown")
+        self.conn.execute(
+            "UPDATE outreach_recipients SET status='source-checked', flags_json='[]' WHERE id=?",
+            (rid,))
+        self.conn.commit()
+        outreach._ensure(self.conn)
+        row = self.conn.execute(
+            "SELECT status, destination_type, flags_json FROM outreach_recipients WHERE id=?",
+            (rid,)).fetchone()
+        self.assertEqual(row["status"], "candidate")
+        self.assertEqual(row["destination_type"], "unknown")
+        flags = json.loads(row["flags_json"])
+        self.assertIn("source-checked-revoked:unverified", flags)
         with self.assertRaises(ValueError):
-            discovery.shortlist(self.conn, rid)
+            outreach.draft_all(self.conn, {"role": "a party"})
 
 
 if __name__ == "__main__":

@@ -1,14 +1,21 @@
 """Source-backed recipient discovery/import. No outbound contact.
 
 Stages (distinct; hashing is integrity, not independent verification):
-  candidate              imported, not yet source-checked
-  source-checked         source URL + retrieval date + intake claimed verbatim
-                         on that source — does NOT mean available/willing
-  shortlisted            user-approved for contact (still unsendable until
-                         an approved message batch)
+  candidate              imported. Verbatim claims are evidence assertions.
+  source-checked         NOT granted on import. Requires a future fetch-and-match
+                         proving the exact intake channel belongs to the intended
+                         org on the cited source. Generic “contact our firm”
+                         matching is insufficient. There is no fetch path yet.
+  shortlisted            user-approved as a research lead / for contact tracking.
+                         Still unsendable until an approved message batch.
+                         Directory/unknown shortlists do not become To: addresses.
 
-Imported rows never skip to shortlisted. Guessed emails are refused.
-Reimport cannot clear declines/opt-outs or rewrite prior batches.
+destination_type ∈ {directory, portal, form, email}:
+  directory / unknown — research leads; draft refuses
+  portal / form       — draft is preparation only, never permission to submit
+  email               — draftable (transport remains nosend)
+
+Imported rows never skip to shortlisted or source-checked.
 """
 from __future__ import annotations
 
@@ -20,6 +27,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from . import outreach, store
 from .store import now_iso
+from .outreach import DESTINATION_TYPES
 
 STALE_AFTER = timedelta(days=90)
 CONTACT_STATES = {
@@ -108,13 +116,20 @@ def _validate_required(cands: list[dict]) -> None:
     brief aborts BEFORE any write (named error, nonzero CLI exit — chair
     check, 2026-09-08). Required per the brief contract: name, intake_url,
     source_url, intake_channel, retrieved_at."""
-    required = ("name", "intake_url", "source_url", "intake_channel", "retrieved_at")
+    required = ("name", "intake_url", "source_url", "intake_channel",
+                "retrieved_at", "destination_type")
     for i, cand in enumerate(cands):
-        missing = [f for f in required if not (cand.get(f) or "").strip()]
+        missing = [f for f in required if not str(cand.get(f) or "").strip()]
         if missing:
             raise ValueError(
                 f"candidate {i} ({cand.get('name') or 'unnamed'}) missing required "
                 f"field(s): {', '.join(missing)} — brief aborted, nothing imported")
+        dest = str(cand.get("destination_type") or "").strip()
+        if dest not in DESTINATION_TYPES:
+            raise ValueError(
+                f"candidate {i} ({cand.get('name') or 'unnamed'}) "
+                f"destination_type={dest!r} not in {DESTINATION_TYPES} — "
+                "brief aborted, nothing imported")
 
 
 def import_brief(conn, path: str) -> dict:
@@ -165,13 +180,15 @@ def _import_one(conn, cand: dict, seen_in_brief: dict):
     rid = stable_id(intake)
     seen_in_brief[key] = rid
     retrieved = cand.get("retrieved_at") or ""
-    verbatim = 1 if cand.get("intake_verbatim_on_source") else 0
-    flags = _flags(retrieved, [])
-    if not verbatim or not retrieved:
-        flags.append("incomplete-source")
-        stage = "candidate"
-    else:
-        stage = "source-checked"
+    claimed = bool(cand.get("intake_verbatim_on_source"))
+    extra = []
+    if claimed:
+        extra.append("verbatim-unverified")
+    flags = _flags(retrieved, extra)
+    # Nothing enters source-checked without a real fetch-and-match (not in
+    # this increment). Keep the verbatim claim as evidence only.
+    stage = "candidate"
+    dest = str(cand.get("destination_type") or "").strip()
     payload = {
         "name": cand.get("name"),
         "org": cand.get("org"),
@@ -191,20 +208,25 @@ def _import_one(conn, cand: dict, seen_in_brief: dict):
             return ("reused", rid, bool(flags))
         if existing["status"] in CONTACT_STATES:
             _add_evidence(conn, rid, cand)
-            # refresh flags/sha only; keep status
+            old_dest = (existing["destination_type"] if "destination_type" in existing.keys()
+                        else "") or "unknown"
+            dest, flags = _merge_dest(old_dest, dest, flags)
             conn.execute(
-                "UPDATE outreach_recipients SET flags_json=?, record_sha256=?, retrieved_at=? "
-                "WHERE id=?",
-                (json.dumps(flags), sha, retrieved or existing["retrieved_at"], rid))
+                "UPDATE outreach_recipients SET flags_json=?, record_sha256=?, retrieved_at=?, "
+                "destination_type=? WHERE id=?",
+                (json.dumps(flags), sha, retrieved or existing["retrieved_at"], dest, rid))
             return ("reused", rid, bool(flags))
+        old_dest = (existing["destination_type"] if "destination_type" in existing.keys()
+                    else "") or "unknown"
+        dest, flags = _merge_dest(old_dest, dest, flags)
         conn.execute(
             "UPDATE outreach_recipients SET name=?, org=?, jurisdiction=?, practice_area=?,"
             "intake_channel=?, match_reason=?, source_url=?, retrieved_at=?, flags_json=?,"
-            "record_sha256=?, status=? WHERE id=?",
+            "record_sha256=?, status=?, destination_type=? WHERE id=?",
             (cand.get("name"), cand.get("org"), cand.get("jurisdiction"),
              cand.get("practice_area"), cand.get("intake_channel"),
              cand.get("match_reason"), source, retrieved or None,
-             json.dumps(flags), sha, stage, rid))
+             json.dumps(flags), sha, stage, dest, rid))
         _add_evidence(conn, rid, cand)
         return ("reused", rid, bool(flags))
     status = stage
@@ -214,13 +236,24 @@ def _import_one(conn, cand: dict, seen_in_brief: dict):
         "INSERT INTO outreach_recipients "
         "(id,name,org,jurisdiction,practice_area,intake_channel,intake_url,"
         "match_reason,source_url,status,created_at,retrieved_at,flags_json,"
-        "record_sha256,email) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "record_sha256,email,destination_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, cand.get("name"), cand.get("org"), cand.get("jurisdiction"),
          cand.get("practice_area"), cand.get("intake_channel"), key,
          cand.get("match_reason") or "", source, status, now_iso(),
-         retrieved or None, json.dumps(flags), sha, cand.get("email") or None))
+         retrieved or None, json.dumps(flags), sha, cand.get("email") or None, dest))
     _add_evidence(conn, rid, cand)
     return ("imported", rid, bool(flags))
+
+
+def _merge_dest(existing: str, incoming: str, flags: list[str]) -> tuple[str, list[str]]:
+    existing = existing or "unknown"
+    if existing in ("", "unknown"):
+        return incoming, flags
+    if incoming and existing != incoming:
+        if "conflict:destination-mismatch" not in flags:
+            flags = list(flags) + ["conflict:destination-mismatch"]
+        return existing, flags
+    return existing, flags
 
 
 def _add_evidence(conn, rid: str, cand: dict) -> None:
@@ -268,7 +301,11 @@ def _flag_org_conflicts(conn) -> None:
 
 
 def shortlist(conn, recipient_id: str) -> None:
-    """User-approved for contact. Requires source-checked. Does not send."""
+    """Mark as a research lead / approved for contact tracking. Does not send.
+
+    Allowed from candidate. Does not earn source-checked. Directory shortlists
+    remain non-draftable.
+    """
     outreach._ensure(conn)
     row = conn.execute(
         "SELECT * FROM outreach_recipients WHERE id=?", (recipient_id,)).fetchone()
@@ -276,10 +313,9 @@ def shortlist(conn, recipient_id: str) -> None:
         raise ValueError(f"unknown recipient {recipient_id}")
     if row["status"] in SUPPRESSED or suppression_for(conn, row["intake_url"]):
         raise ValueError("suppressed — decline/opt-out is sticky; reimport cannot clear it")
-    if row["status"] != "source-checked":
+    if row["status"] not in ("candidate", "source-checked"):
         raise ValueError(
-            f"cannot shortlist from status={row['status']}; "
-            "need source-checked (user-approved-for-contact is a separate step)")
+            f"cannot shortlist from status={row['status']}")
     conn.execute("UPDATE outreach_recipients SET status='shortlisted' WHERE id=?",
                  (recipient_id,))
     conn.commit()
@@ -297,14 +333,15 @@ def candidate_report(conn) -> str:
         "_Published channel ≠ availability or willingness to take a case. "
         "record_sha256 is integrity of the import, not independent verification._",
         "",
-        "| ID | Stage | Name | Org | Intake | Source | Retrieved | Flags |",
-        "|---|---|---|---|---|---|---|---|",
+        "| ID | Stage | Dest | Name | Org | Intake | Source | Retrieved | Flags |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         flags = r["flags_json"] if "flags_json" in r.keys() else "[]"
         retrieved = r["retrieved_at"] if "retrieved_at" in r.keys() else ""
+        dest = r["destination_type"] if "destination_type" in r.keys() else "unknown"
         lines.append(
-            f"| {r['id']} | {r['status']} | {r['name']} | {r['org']} | "
+            f"| {r['id']} | {r['status']} | {dest or 'unknown'} | {r['name']} | {r['org']} | "
             f"{r['intake_url']} | {r['source_url']} | {retrieved or '—'} | {flags or '[]'} |")
     return "\n".join(lines) + "\n"
 
