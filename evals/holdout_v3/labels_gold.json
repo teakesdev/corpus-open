@@ -1,0 +1,40 @@
+{
+  "version": "holdout_v3",
+  "labeler": "adversarial-review-deepseek-agent",
+  "labeled_at": "2026-09-09",
+  "status": "FOR SECOND REVIEWER — NOT SCORED",
+  "label_method": "independent manual labeling; Python str char offsets (0-based, end-exclusive); offsets on exact input string per manifest (raw entities NOT decoded); longest non-overlapping spans; kinds per manifest taxonomy; ignored_intervals (plaw TOC [666,1637]) respected in gold",
+  "items": {
+    "usc_11_362_decoded.txt": [
+      {"doc": "usc_11_362_decoded.txt", "citation": "11 U.S. Code § 362", "start": 0, "end": 18, "kind": "statutory_citation"},
+      {"doc": "usc_11_362_decoded.txt", "citation": "section 301, 302, or 303", "start": 180, "end": 204, "kind": "statutory_citation"},
+      {"doc": "usc_11_362_decoded.txt", "citation": "section 5(a)(3)", "start": 250, "end": 265, "kind": "statutory_citation"},
+      {"doc": "usc_11_362_decoded.txt", "citation": "section 301, 302, or 303", "start": 2009, "end": 2033, "kind": "statutory_citation"},
+      {"doc": "usc_11_362_decoded.txt", "citation": "section 5(a)(3)", "start": 2076, "end": 2091, "kind": "statutory_citation"},
+      {"doc": "usc_11_362_decoded.txt", "citation": "section 466(a)(16)", "start": 3283, "end": 3301, "kind": "statutory_citation"},
+      {"doc": "usc_11_362_decoded.txt", "citation": "section 466(a)(7)", "start": 3439, "end": 3456, "kind": "statutory_citation"},
+      {"doc": "usc_11_362_decoded.txt", "citation": "sections 464 and 466(a)(3)", "start": 3545, "end": 3571, "kind": "statutory_citation"}
+    ],
+    "usc_18_201_raw.html": [
+      {"doc": "usc_18_201_raw.html", "citation": "&sect;201", "start": 25, "end": 34, "kind": "statutory_citation"}
+    ],
+    "del_8_102_decoded.txt": [
+      {"doc": "del_8_102_decoded.txt", "citation": "§\n 102", "start": 0, "end": 6, "kind": "statutory_citation"},
+      {"doc": "del_8_102_decoded.txt", "citation": "§ 103", "start": 869, "end": 874, "kind": "statutory_citation"},
+      {"doc": "del_8_102_decoded.txt", "citation": "§ 503(i)", "start": 948, "end": 956, "kind": "statutory_citation"},
+      {"doc": "del_8_102_decoded.txt", "citation": "§ 103", "start": 2250, "end": 2255, "kind": "statutory_citation"},
+      {"doc": "del_8_102_decoded.txt", "citation": "§ 395", "start": 3042, "end": 3047, "kind": "statutory_citation"}
+    ],
+    "cfr_16_255_1_decoded.txt": [
+      {"doc": "cfr_16_255_1_decoded.txt", "citation": "§ 255.1", "start": 0, "end": 7, "kind": "statutory_citation"},
+      {"doc": "cfr_16_255_1_decoded.txt", "citation": "§ 255.2(a) and (b)", "start": 280, "end": 298, "kind": "statutory_citation"},
+      {"doc": "cfr_16_255_1_decoded.txt", "citation": "§ 255.5", "start": 1949, "end": 1956, "kind": "statutory_citation"}
+    ],
+    "plaw_111_148_decoded.txt": [
+      {"doc": "plaw_111_148_decoded.txt", "citation": "124 STAT. 119", "start": 85, "end": 98, "kind": "statutory_citation"},
+      {"doc": "plaw_111_148_decoded.txt", "citation": "Public Law 111-148", "start": 102, "end": 120, "kind": "statutory_citation"},
+      {"doc": "plaw_111_148_decoded.txt", "citation": "H.R. 3590", "start": 233, "end": 242, "kind": "non_statutory_identifier"},
+      {"doc": "plaw_111_148_decoded.txt", "citation": "42 USC 18001", "start": 482, "end": 494, "kind": "statutory_citation"}
+    ]
+  }
+}
