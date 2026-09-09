@@ -254,7 +254,10 @@ def cmd_outreach(args):
             "representation": args.representation or "a consultation or limited-scope representation",
             "jurisdiction": args.jurisdiction or "this court",
         }
-        ids = ou.draft_all(conn, posture)
+        try:
+            ids = ou.draft_all(conn, posture)
+        except ValueError as e:
+            sys.exit(str(e))
         print(f"drafted {len(ids)} inquiries (no attachments, no Corpus marketing)")
         return
     if args.sub == "manifest":
@@ -285,6 +288,31 @@ def cmd_outreach(args):
         return
     if args.sub == "ledger":
         print(ou.ledger(conn))
+        return
+    if args.sub == "import":
+        from matterkit import discovery as disc
+        path = args.brief or disc.load_bundled_brief()
+        result = disc.import_brief(conn, path)
+        print(f"imported={len(result['imported'])} reused={len(result['reused'])} "
+              f"rejected={len(result['rejected'])} flagged={len(result['flagged'])}")
+        for r in result["rejected"]:
+            print(f"  rejected {r['name']}: {r['error']}")
+        print(disc.candidate_report(conn))
+        return
+    if args.sub == "shortlist":
+        from matterkit import discovery as disc
+        if not args.recipient:
+            sys.exit("shortlist needs --recipient ID")
+        try:
+            disc.shortlist(conn, args.recipient)
+        except ValueError as e:
+            sys.exit(str(e))
+        print(f"{args.recipient} → shortlisted (still unsendable until an approved batch)")
+        return
+    if args.sub == "candidates":
+        from matterkit import discovery as disc
+        print(disc.candidate_report(conn))
+        return
 
 
 def main():
@@ -342,7 +370,8 @@ def main():
     p.set_defaults(fn=cmd_search)
 
     p = sub.add_parser("outreach")
-    p.add_argument("sub", choices=["seed-demo", "draft", "manifest", "send", "respond", "ledger"])
+    p.add_argument("sub", choices=["seed-demo", "draft", "manifest", "send", "respond", "ledger",
+                                   "import", "shortlist", "candidates"])
     p.add_argument("case_dir")
     p.add_argument("--sha")
     p.add_argument("--issuer", default=os.environ.get("USER", "human"))
@@ -350,6 +379,7 @@ def main():
     p.add_argument("--recipient")
     p.add_argument("--state")
     p.add_argument("--note", default="")
+    p.add_argument("--brief")
     p.add_argument("--court")
     p.add_argument("--role")
     p.add_argument("--case-type", dest="case_type")

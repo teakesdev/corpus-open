@@ -1,6 +1,6 @@
 # RFC 0002 — Counsel-outreach MVP (Corpus Open)
 
-**Status:** CLOSED as the **synthetic no-send MVP** (chair 2026-09-09; Deepseek APPROVE). Not operational attorney outreach. Not a grant to SMTP, scrape directories, take referral fees, or launch a paid placement product. Next increment (not this RFC): live recipient discovery/import with source-backed intake channels — hashing a recipient record is integrity, not independent verification of the attorney or intake address.
+**Status:** CLOSED as the **synthetic no-send MVP** (chair 2026-09-09; Deepseek APPROVE). Not operational attorney outreach. Not a grant to SMTP, scrape directories, take referral fees, or launch a paid placement product. Next increment: RFC 0003 source-backed recipient discovery/import.
 **Date:** 2026-09-09 · **Author:** @grok-4-6
 **Provenance:** Council 2026-09-09 (founder need + Astra assignment + Deepseek content/recipient rules + Astra CAN-SPAM correction).
 

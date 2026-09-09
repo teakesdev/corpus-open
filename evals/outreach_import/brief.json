@@ -1,0 +1,62 @@
+{
+  "brief_id": "generic-civil-finders-2026-09-09",
+  "jurisdiction": "United States (generic; no matter facts)",
+  "practice_area": "civil legal aid / lawyer referral / limited-scope finders",
+  "retrieved_at": "2026-09-09T22:50:58Z",
+  "notes": [
+    "Self-represented civil litigant seeking published intake/finders.",
+    "No private matter facts. No outbound contact.",
+    "A published channel does not establish availability or willingness to take a case.",
+    "record hashes are integrity of this import, not independent verification of the attorney or address."
+  ],
+  "candidates": [
+    {
+      "name": "LSC Get Legal Help finder",
+      "org": "Legal Services Corporation",
+      "jurisdiction": "United States",
+      "practice_area": "civil legal aid (income-eligible)",
+      "intake_channel": "published web finder",
+      "intake_url": "https://www.lsc.gov/about-lsc/what-legal-aid/get-legal-help",
+      "source_url": "https://www.usa.gov/legal-aid",
+      "retrieved_at": "2026-09-09T22:50:58Z",
+      "intake_verbatim_on_source": true,
+      "match_reason": "USAGov lists this exact LSC finder for low-income civil legal aid. Finder only — not a promise any program will take a case."
+    },
+    {
+      "name": "LawHelp.org",
+      "org": "LawHelp / Pro Bono Net",
+      "jurisdiction": "United States",
+      "practice_area": "free/low-cost civil legal help directory",
+      "intake_channel": "published web finder",
+      "intake_url": "https://www.lawhelp.org/",
+      "source_url": "https://www.usa.gov/legal-aid",
+      "retrieved_at": "2026-09-09T22:50:58Z",
+      "intake_verbatim_on_source": true,
+      "match_reason": "USAGov lists LawHelp.org as a published free-legal-aid finder. Not an attorney inbox."
+    },
+    {
+      "name": "ABA Free Legal Answers",
+      "org": "American Bar Association Standing Committee on Pro Bono and Public Service",
+      "jurisdiction": "United States (participating states)",
+      "practice_area": "virtual civil legal-advice clinic (qualifying users)",
+      "intake_channel": "published web clinic",
+      "intake_url": "https://abafreelegalanswers.org/",
+      "source_url": "https://www.usa.gov/legal-aid",
+      "retrieved_at": "2026-09-09T22:50:58Z",
+      "intake_verbatim_on_source": true,
+      "match_reason": "USAGov lists ABA Free Legal Answers. Clinic intake is the published site; ABA itself does not take case referrals (their Find Legal Help page says do not send legal-help requests to the ABA)."
+    },
+    {
+      "name": "ABA Lawyer Referral directory",
+      "org": "American Bar Association Legal Services Division",
+      "jurisdiction": "United States",
+      "practice_area": "lawyer referral service directory",
+      "intake_channel": "published directory",
+      "intake_url": "https://www.americanbar.org/groups/lawyer_referral/resources/lawyer-referral-directory/",
+      "source_url": "https://www.americanbar.org/groups/legal_services/flh-home/flh-hire-a-lawyer/",
+      "retrieved_at": "2026-09-09T22:50:58Z",
+      "intake_verbatim_on_source": true,
+      "match_reason": "ABA Hire a Lawyer page publishes this Lawyer Referral directory as the public-service path to LRS programs. Directory ≠ a named attorney who has agreed to consult."
+    }
+  ]
+}

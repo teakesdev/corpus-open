@@ -86,11 +86,37 @@ CREATE TABLE IF NOT EXISTS outreach_batch_items (
   note TEXT,
   PRIMARY KEY (batch_id, recipient_id)
 );
+CREATE TABLE IF NOT EXISTS outreach_evidence (
+  id TEXT PRIMARY KEY,
+  recipient_id TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  intake_url TEXT NOT NULL,
+  retrieved_at TEXT NOT NULL,
+  verbatim INTEGER NOT NULL DEFAULT 0,
+  record_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS outreach_suppression (
+  key TEXT PRIMARY KEY,
+  reason TEXT NOT NULL,
+  recipient_id TEXT,
+  created_at TEXT NOT NULL
+);
 """
 
 
 def _ensure(conn) -> None:
     conn.executescript(SCHEMA)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(outreach_recipients)")]
+    if cols:
+        if "retrieved_at" not in cols:
+            conn.execute("ALTER TABLE outreach_recipients ADD COLUMN retrieved_at TEXT")
+        if "flags_json" not in cols:
+            conn.execute("ALTER TABLE outreach_recipients ADD COLUMN flags_json TEXT DEFAULT '[]'")
+        if "record_sha256" not in cols:
+            conn.execute("ALTER TABLE outreach_recipients ADD COLUMN record_sha256 TEXT")
+        if "email" not in cols:
+            conn.execute("ALTER TABLE outreach_recipients ADD COLUMN email TEXT")
     conn.commit()
 
 
@@ -284,6 +310,13 @@ def set_response(conn, recipient_id: str, state: str, note: str = "") -> None:
         (state, note, recipient_id))
     conn.execute("UPDATE outreach_recipients SET status=? WHERE id=?",
                  (state if state != "none" else "simulated", recipient_id))
+    if state in ("declined", "opted_out"):
+        row = conn.execute(
+            "SELECT intake_url FROM outreach_recipients WHERE id=?",
+            (recipient_id,)).fetchone()
+        if row:
+            from .discovery import remember_suppression
+            remember_suppression(conn, row["intake_url"], state, recipient_id)
     conn.commit()
 
 
