@@ -1,6 +1,8 @@
-"""Provider-neutral search interface (RFC 0001 §2.1). R1 ships the contract
-plus consent/egress scaffolding ONLY — zero adapters, zero network calls.
-Adapters land in R2 (courtlistener-free) and R3 (corpus, founder-gated).
+"""Provider-neutral search interface (RFC 0001 §2.1).
+
+R2: courtlistener-free adapter is registered by import path only — urllib
+lives in matterkit.adapters, not this file. Construction still fail-closed
+without a human-activated grant. Results are never source-checked.
 """
 import hashlib
 import json
@@ -35,23 +37,37 @@ class SearchResult:
 
 # R1 ships zero adapters by design (RFC §2.1/§2.5). R2/R3 register here only
 # after a grant exists — construction refuses without one, fail-closed.
-ADAPTERS: dict[str, type] = {}
+ADAPTERS: dict[str, str] = {
+    # name -> import path; urllib stays out of this file (isolation scan).
+    "courtlistener-free": "matterkit.adapters.courtlistener.CourtListenerFreeAdapter",
+}
+
+
+def _load_adapter(provider: str):
+    spec = ADAPTERS.get(provider)
+    if spec is None:
+        raise LookupError(
+            f"no adapter registered for {provider!r} — see RFC 0001 §6")
+    mod_name, _, cls_name = spec.rpartition(".")
+    import importlib
+    return getattr(importlib.import_module(mod_name), cls_name)
 
 
 def build_adapter(provider: str, matter_dir: str, caller_id: str):
-    """Construct a registered adapter under a valid grant — or refuse.
-
-    Refusal order: unknown provider first (honest R1 answer), then consent
-    (so R2+ adapters can never be constructed without a grant either).
-    """
-    cls = ADAPTERS.get(provider)
-    if cls is None:
-        raise LookupError(
-            f"no adapter registered for {provider!r} — R1 ships zero adapters "
-            "(RFC 0001 §2.1); see §6 R2/R3")
-    # Construction-time gate; every call re-checks too (consent.authorize).
+    """Construct a registered adapter under a valid grant — or refuse."""
+    cls = _load_adapter(provider)
     consent.authorize(matter_dir, provider, cls.endpoint, "query_text", caller_id)
     return cls(matter_dir=matter_dir)
+
+
+def manual_search(matter_dir: str, caller_id: str, text: str,
+                  provider: str = "courtlistener-free",
+                  limit: int = 5) -> list[SearchResult]:
+    """Manual query/citation lookup. Results are provenance records only —
+    never written as source-checked."""
+    adapter = build_adapter(provider, matter_dir, caller_id)
+    return adapter.search(SearchQuery(text=text, source_type="case", limit=limit),
+                          caller_id=caller_id)
 
 
 def log_egress(matter_dir: str, provider: str, endpoint: str,

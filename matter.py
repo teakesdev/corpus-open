@@ -15,6 +15,7 @@ Usage:
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
 """
 import argparse
+import json
 import os
 import sys
 
@@ -179,6 +180,60 @@ def cmd_auth_stage(args):
           f"via={row['checked_via']!r} evidence={'recorded' if row['check_evidence'] else '—'}")
 
 
+def cmd_consent(args):
+    from matterkit import consent
+    from matterkit.adapters.courtlistener import ENDPOINT_HOST
+    provider = "courtlistener-free"
+    endpoints = [ENDPOINT_HOST]
+    payloads = ["query_text"]
+    if args.sub == "propose":
+        g = consent.stage_proposal(
+            args.case_dir, provider, endpoints, payloads, args.as_user)
+        print(f"staged INERT proposal for {provider} by {g['created_by']!r} "
+              "(authorizes no one until human TTY activate)")
+    elif args.sub == "activate":
+        try:
+            g = consent.activate_human_grant(
+                args.case_dir, provider, endpoints, payloads, args.issuer,
+                authorized_callers=args.caller or [])
+        except consent.ConsentError as e:
+            sys.exit(f"refused: {e}")
+        print(f"activated human grant issuer={g['created_by']!r} "
+              f"callers={g['authorized_callers']}")
+
+
+def cmd_search(args):
+    from matterkit import search as S
+    from matterkit.consent import ConsentError
+    try:
+        rows = S.manual_search(
+            args.case_dir, args.caller, args.query, limit=args.limit)
+    except (LookupError, ConsentError, RuntimeError, ValueError) as e:
+        sys.exit(f"refused: {e}")
+    print(f"{len(rows)} CourtListener hit(s) for {args.query!r} "
+          "(lookup only — not source-checked, not good law)")
+    for r in rows:
+        print(f"  {r.citation}  {r.name}")
+        print(f"    {r.provenance.get('url')}")
+        if r.snippet:
+            print(f"    {r.snippet[:160]}")
+    if args.record_resolved and rows:
+        conn = store.connect(args.case_dir)
+        from matterkit.store import new_id
+        from matterkit.citations import now_iso
+        for r in rows:
+            aid = new_id("auth_")
+            via = f"{r.provenance.get('provider')}:{r.authority_id}"
+            note = json.dumps({"url": r.provenance.get("url"),
+                               "retrieved_at": r.provenance.get("retrieved_at")})
+            conn.execute(
+                "INSERT INTO authorities (id,citation,status,checked_via,note) "
+                "VALUES (?,?,?,?,?)",
+                (aid, r.citation or r.name, "resolved", via, note))
+        conn.commit()
+        print(f"recorded {len(rows)} authorities as resolved (not source-checked)")
+
+
 def main():
     ap = argparse.ArgumentParser(prog="matter")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -217,6 +272,20 @@ def main():
     p = sub.add_parser("packet"); p.add_argument("case_dir")
     p.add_argument("--layer", default="3min", choices=["30s", "3min", "15min"])
     p.add_argument("--out"); p.set_defaults(fn=cmd_packet)
+
+    p = sub.add_parser("consent"); p.add_argument("sub", choices=["propose", "activate"])
+    p.add_argument("case_dir")
+    p.add_argument("--as-user", dest="as_user", default="agent")
+    p.add_argument("--issuer", default=os.environ.get("USER", "human"))
+    p.add_argument("--caller", action="append", default=[])
+    p.set_defaults(fn=cmd_consent)
+
+    p = sub.add_parser("search"); p.add_argument("case_dir")
+    p.add_argument("query")
+    p.add_argument("--caller", default=os.environ.get("USER", "human"))
+    p.add_argument("--limit", type=int, default=5)
+    p.add_argument("--record-resolved", action="store_true")
+    p.set_defaults(fn=cmd_search)
 
     args = ap.parse_args()
     args.fn(args)

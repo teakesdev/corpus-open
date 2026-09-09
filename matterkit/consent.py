@@ -144,3 +144,80 @@ def require_escalation(matter_dir: str, provider: str, endpoint: str,
     grant must explicitly name the sensitive payload type — defaults never
     imply it."""
     return authorize(matter_dir, provider, endpoint, payload_type, caller_id)
+
+
+def save_grants(matter_dir: str, grants: list[dict]) -> None:
+    path = consent_path(matter_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({"grants": grants}, f, indent=2)
+        f.write("\n")
+
+
+def stage_proposal(matter_dir: str, provider: str, endpoints: list[str],
+                   payload_types: list[str], created_by: str,
+                   daily_budget: int = 20) -> dict:
+    """Agent-callable: write an INERT kind=agent proposal. Authorizes no one."""
+    from .citations import now_iso
+    g = {
+        "provider": provider,
+        "endpoints": list(endpoints),
+        "payload_types": list(payload_types),
+        "daily_budget": daily_budget,
+        "created_by": created_by,
+        "kind": "agent",
+        "authorized_callers": [],
+        "created_at": now_iso(),
+        "status": "proposal",
+    }
+    grants = load_grants(matter_dir)
+    grants.append(g)
+    save_grants(matter_dir, grants)
+    return g
+
+
+def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
+                         payload_types: list[str], issuer: str,
+                         daily_budget: int = 20,
+                         authorized_callers: list[str] | None = None) -> dict:
+    """Human TTY activation. Opens /dev/tty — stdin pipes do not count.
+
+    A confirmation string typed on the controlling terminal is the out-of-band
+    step this kit ships. It is still cooperative (a compromised runtime with
+    TTY access can fake it). kind=human is never written by stage_proposal.
+    """
+    from .citations import now_iso
+    try:
+        tty = open("/dev/tty", "r+", encoding="utf-8")
+    except OSError as e:
+        raise ConsentError(
+            "activation requires a human controlling TTY (/dev/tty); "
+            "agent-staged proposals stay inert") from e
+    try:
+        tty.write(
+            f"Activate CourtListener query_text for {matter_dir!r} as human "
+            f"issuer {issuer!r}? Type ACTIVATE then Enter.\n> ")
+        tty.flush()
+        line = (tty.readline() or "").strip()
+    finally:
+        tty.close()
+    if line != "ACTIVATE":
+        raise ConsentError(f"activation aborted (got {line!r}, wanted 'ACTIVATE')")
+    g = {
+        "provider": provider,
+        "endpoints": list(endpoints),
+        "payload_types": list(payload_types),
+        "daily_budget": daily_budget,
+        "created_by": issuer,
+        "kind": "human",
+        "authorized_callers": list(authorized_callers or []),
+        "created_at": now_iso(),
+        "activated_via": "tty",
+        "status": "active",
+    }
+    grants = [x for x in load_grants(matter_dir)
+              if not (x.get("provider") == provider and x.get("kind") == "agent"
+                      and x.get("status") == "proposal")]
+    grants.append(g)
+    save_grants(matter_dir, grants)
+    return g
