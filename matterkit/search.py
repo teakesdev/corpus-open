@@ -53,19 +53,20 @@ def _load_adapter(provider: str):
     return getattr(importlib.import_module(mod_name), cls_name)
 
 
-def build_adapter(provider: str, matter_dir: str, caller_id: str):
+def build_adapter(provider: str, matter_dir: str, caller_id: str,
+                  auth_mode: str = "anonymous"):
     """Construct a registered adapter under a valid grant — or refuse."""
     cls = _load_adapter(provider)
     consent.authorize(matter_dir, provider, cls.endpoint, "query_text", caller_id)
-    return cls(matter_dir=matter_dir)
+    return cls(matter_dir=matter_dir, auth_mode=auth_mode)
 
 
 def manual_search(matter_dir: str, caller_id: str, text: str,
                   provider: str = "courtlistener-free",
-                  limit: int = 5) -> list[SearchResult]:
+                  limit: int = 5, auth_mode: str = "anonymous") -> list[SearchResult]:
     """Manual query/citation lookup. Results are provenance records only —
     never written as source-checked."""
-    adapter = build_adapter(provider, matter_dir, caller_id)
+    adapter = build_adapter(provider, matter_dir, caller_id, auth_mode=auth_mode)
     return adapter.search(SearchQuery(text=text, source_type="case", limit=limit),
                           caller_id=caller_id)
 

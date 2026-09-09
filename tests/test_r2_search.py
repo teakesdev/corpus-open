@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.request
 from unittest import mock
 
 import sys
@@ -95,19 +96,13 @@ class TestR2Search(unittest.TestCase):
             }],
         }
 
-        class Resp:
-            def read(self):
-                return json.dumps(payload).encode()
-            def __enter__(self):
-                return self
-            def __exit__(self, *a):
-                return False
-
-        with mock.patch("urllib.request.urlopen", return_value=Resp()):
-            rows = search.manual_search(self.dir, "ty", "347 U.S. 483", limit=3)
+        with mock.patch("matterkit.adapters.courtlistener.get_json", return_value=payload):
+            rows = search.manual_search(self.dir, "ty", "347 U.S. 483", limit=3,
+                                        auth_mode="anonymous")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].citation, "347 U.S. 483")
         self.assertTrue(rows[0].provenance["url"].startswith("https://www.courtlistener.com/"))
+        self.assertFalse(rows[0].provenance["authenticated"])
         # never source-checked
         conn = store.connect(self.dir)
         n = conn.execute("SELECT COUNT(*) c FROM authorities WHERE status='source-checked'").fetchone()["c"]
@@ -115,6 +110,93 @@ class TestR2Search(unittest.TestCase):
         log = open(consent.egress_path(self.dir)).read()
         self.assertIn("courtlistener-free", log)
         self.assertNotIn("347 U.S. 483", log)  # hash-only
+
+    def test_authenticated_without_token_fails_before_egress(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("COURTLISTENER_TOKEN", None)
+            called = []
+            with mock.patch("matterkit.adapters.courtlistener.get_json",
+                            side_effect=lambda *a, **k: called.append(1)):
+                with self.assertRaises(consent.ConsentError) as ctx:
+                    search.manual_search(self.dir, "ty", "347 U.S. 483",
+                                        auth_mode="authenticated")
+        self.assertIn("COURTLISTENER_TOKEN", str(ctx.exception))
+        self.assertEqual(called, [])
+        self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
+
+
+class TestR2Transport(unittest.TestCase):
+    """Cross-host redirect must error with no second request and no token leak."""
+
+    def test_cross_host_redirect_no_second_request(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from matterkit.adapters import courtlistener as cl
+
+        stolen = []
+
+        class Steal(BaseHTTPRequestHandler):
+            def do_GET(self):
+                stolen.append({
+                    "path": self.path,
+                    "authorization": self.headers.get("Authorization"),
+                    "host": self.headers.get("Host"),
+                })
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        box = {"steal": ""}
+
+        class Bounce(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", box["steal"])
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        steal = HTTPServer(("127.0.0.1", 0), Steal)
+        bounce = HTTPServer(("127.0.0.1", 0), Bounce)
+        box["steal"] = f"http://127.0.0.1:{steal.server_port}/exfil"
+        bounce_url = f"http://127.0.0.1:{bounce.server_port}/search"
+        t1 = threading.Thread(target=steal.handle_request, daemon=True)
+        t2 = threading.Thread(target=bounce.handle_request, daemon=True)
+        t1.start(); t2.start()
+        with self.assertRaises(consent.ConsentError) as ctx:
+            cl.get_json(bounce_url, auth_mode="authenticated", token="secret-token")
+        t1.join(timeout=2)
+        t2.join(timeout=2)
+        steal.server_close(); bounce.server_close()
+        self.assertIn("redirect", str(ctx.exception).lower())
+        self.assertEqual(stolen, [], "destination received a request — redirect was followed")
+
+    def test_authenticated_mode_sends_token_only_when_set(self):
+        from matterkit.adapters import courtlistener as cl
+        seen = []
+
+        class Capture(urllib.request.HTTPHandler):
+            def http_open(self, req):
+                seen.append(req)
+                raise consent.ConsentError("stop")
+
+        # anonymous: no Authorization
+        op = urllib.request.build_opener(cl._RefuseRedirects, Capture())
+        with mock.patch.object(cl, "opener", lambda: op):
+            with self.assertRaises(consent.ConsentError):
+                cl.get_json("http://127.0.0.1/x", auth_mode="anonymous", token="")
+        self.assertTrue(seen)
+        self.assertIsNone(seen[0].get_header("Authorization"))
+
+    def test_get_json_authenticated_without_token_no_request(self):
+        from matterkit.adapters import courtlistener as cl
+        with mock.patch.object(cl, "opener", side_effect=AssertionError("egress")):
+            with self.assertRaises(consent.ConsentError):
+                cl.get_json("http://127.0.0.1/x", auth_mode="authenticated", token="")
 
 
 if __name__ == "__main__":
