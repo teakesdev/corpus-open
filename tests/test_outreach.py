@@ -1,0 +1,91 @@
+"""Counsel-outreach MVP: sourced shortlist → drafts → sha-gated nosend → ledger."""
+import os
+import tempfile
+import unittest
+
+from matterkit import outreach, store
+
+
+SYNTH_POSTURE = {
+    "court": "Example District Court",
+    "role": "a self-represented plaintiff",
+    "case_type": "a civil matter",
+    "issue_general": "a civil dispute",
+    "deadline": "2026-10-15",
+    "deadline_label": "next known date (synthetic)",
+    "fee": "limited-scope consult",
+    "representation": "a consultation or limited-scope representation",
+    "jurisdiction": "N.D. Example",
+}
+
+
+class OutreachTests(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="mk-ou-")
+        self.conn = store.connect(self.d)
+
+    def test_end_to_end_nosend_synthetic(self):
+        ids = outreach.seed_synthetic(self.conn)
+        self.assertEqual(len(ids), 3)
+        drafts = outreach.draft_all(self.conn, SYNTH_POSTURE)
+        self.assertEqual(len(drafts), 3)
+        man = outreach.build_manifest(self.conn)
+        self.assertEqual(man["n"], 3)
+        path = outreach.write_manifest(self.d, man)
+        self.assertTrue(os.path.isfile(path))
+        bid = outreach.approve_and_simulate(
+            self.conn, self.d, issuer="test", expected_sha=man["sha256"])
+        self.assertTrue(bid.startswith("ob_"))
+        outbox = os.path.join(self.d, ".matter", "outreach", "outbox")
+        self.assertEqual(len(os.listdir(outbox)), 3)
+        led = outreach.ledger(self.conn)
+        self.assertIn("SYNTHETIC", led)
+        self.assertIn("send=simulated", led)
+        rid = ids[0]
+        outreach.set_response(self.conn, rid, "declined", "not taking this kind of matter")
+        led2 = outreach.ledger(self.conn)
+        self.assertIn("declined", led2)
+
+    def test_wrong_sha_refuses(self):
+        outreach.seed_synthetic(self.conn)
+        outreach.draft_all(self.conn, SYNTH_POSTURE)
+        with self.assertRaises(ValueError):
+            outreach.approve_and_simulate(
+                self.conn, self.d, issuer="test", expected_sha="0" * 64)
+
+    def test_smtp_transport_not_implemented(self):
+        outreach.seed_synthetic(self.conn)
+        outreach.draft_all(self.conn, SYNTH_POSTURE)
+        man = outreach.build_manifest(self.conn)
+        with self.assertRaises(ValueError):
+            outreach.approve_and_simulate(
+                self.conn, self.d, issuer="test", expected_sha=man["sha256"],
+                transport="smtp")
+
+    def test_refuse_invented_intake(self):
+        with self.assertRaises(ValueError):
+            outreach.add_recipient(
+                self.conn, name="X", org="Y", jurisdiction="Z",
+                practice_area="civil", intake_channel="guess",
+                intake_url="not-a-url", match_reason="nope",
+                source_url="https://example.org/x")
+
+    def test_refuse_evidence_dump(self):
+        outreach.refuse_if_unsafe("hello", "Can we talk about dates?")
+        with self.assertRaises(ValueError):
+            outreach.refuse_if_unsafe("hello", "I have strong evidence that the defendant lied")
+        with self.assertRaises(ValueError):
+            outreach.refuse_if_unsafe("hello", "See attached Exhibit A")
+        with self.assertRaises(ValueError):
+            outreach.refuse_if_unsafe("hello", "Please visit corpuslaw.us to form your LLC")
+
+    def test_no_smtplib_in_module(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "matterkit", "outreach.py")
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        self.assertNotIn("import smtplib", src)
+        self.assertNotIn("from smtplib", src)
+
+
+if __name__ == "__main__":
+    unittest.main()

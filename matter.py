@@ -235,6 +235,58 @@ def cmd_search(args):
         print(f"recorded {len(rows)} authorities as resolved (not source-checked)")
 
 
+def cmd_outreach(args):
+    from matterkit import outreach as ou
+    conn = store.connect(args.case_dir)
+    if args.sub == "seed-demo":
+        ids = ou.seed_synthetic(conn)
+        print(f"seeded {len(ids)} SYNTHETIC recipients (example.org — not real attorneys)")
+        return
+    if args.sub == "draft":
+        posture = {
+            "court": args.court or "Example District Court",
+            "role": args.role or "a self-represented plaintiff",
+            "case_type": args.case_type or "a civil matter",
+            "issue_general": args.issue or "a civil dispute",
+            "deadline": args.deadline or "unknown",
+            "deadline_label": args.deadline_label or "next known date",
+            "fee": args.fee or "limited-scope / consult; to be discussed",
+            "representation": args.representation or "a consultation or limited-scope representation",
+            "jurisdiction": args.jurisdiction or "this court",
+        }
+        ids = ou.draft_all(conn, posture)
+        print(f"drafted {len(ids)} inquiries (no attachments, no Corpus marketing)")
+        return
+    if args.sub == "manifest":
+        man = ou.build_manifest(conn)
+        path = ou.write_manifest(args.case_dir, man)
+        print(f"approval manifest: {path}")
+        print(f"sha256: {man['sha256']}")
+        print(f"recipients: {man['n']}")
+        for it in man["items"]:
+            print(f"  - {it['name']} <{it['intake_url']}>")
+            print(f"    why: {it['match_reason']}")
+            print(f"    source: {it['source_url']}")
+            print(f"    subject: {it['subject']}")
+        return
+    if args.sub == "send":
+        if not args.sha:
+            sys.exit("pass --sha <manifest sha256> after inspecting approval.json")
+        bid = ou.approve_and_simulate(
+            conn, args.case_dir, issuer=args.issuer, expected_sha=args.sha,
+            transport=args.transport)
+        print(f"batch {bid} transport={args.transport} (not delivered unless later transport exists)")
+        return
+    if args.sub == "respond":
+        if not args.recipient or not args.state:
+            sys.exit("respond needs --recipient ID --state declined|consultation|conflict_check|follow_up|opted_out")
+        ou.set_response(conn, args.recipient, args.state, args.note)
+        print(f"{args.recipient} → {args.state}")
+        return
+    if args.sub == "ledger":
+        print(ou.ledger(conn))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="matter")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -288,6 +340,26 @@ def main():
     p.add_argument("--auth", choices=["anonymous", "authenticated"], default="anonymous")
     p.add_argument("--record-resolved", action="store_true")
     p.set_defaults(fn=cmd_search)
+
+    p = sub.add_parser("outreach")
+    p.add_argument("sub", choices=["seed-demo", "draft", "manifest", "send", "respond", "ledger"])
+    p.add_argument("case_dir")
+    p.add_argument("--sha")
+    p.add_argument("--issuer", default=os.environ.get("USER", "human"))
+    p.add_argument("--transport", default="nosend")
+    p.add_argument("--recipient")
+    p.add_argument("--state")
+    p.add_argument("--note", default="")
+    p.add_argument("--court")
+    p.add_argument("--role")
+    p.add_argument("--case-type", dest="case_type")
+    p.add_argument("--issue")
+    p.add_argument("--deadline")
+    p.add_argument("--deadline-label", dest="deadline_label")
+    p.add_argument("--fee")
+    p.add_argument("--representation")
+    p.add_argument("--jurisdiction")
+    p.set_defaults(fn=cmd_outreach)
 
     args = ap.parse_args()
     args.fn(args)
