@@ -110,6 +110,41 @@ class OutreachTests(unittest.TestCase):
         bodies = " ".join(it["body"] for it in second["items"])
         self.assertIn("2026-11-01", bodies)
         self.assertNotIn("2026-10-15", bodies)
+        with self.assertRaises(ValueError) as cm:
+            outreach.approve_and_simulate(
+                self.conn, self.d, issuer="test", expected_sha=first["sha256"])
+        self.assertIn("mismatch", str(cm.exception).lower())
+        bid = outreach.approve_and_simulate(
+            self.conn, self.d, issuer="test", expected_sha=second["sha256"])
+        n_items = self.conn.execute(
+            "SELECT COUNT(*) c FROM outreach_batch_items WHERE batch_id=?",
+            (bid,)).fetchone()["c"]
+        self.assertEqual(n_items, 3)
+
+    def test_completed_batch_records_survive_later_redraft(self):
+        outreach.seed_synthetic(self.conn)
+        outreach.draft_all(self.conn, SYNTH_POSTURE)
+        man = outreach.build_manifest(self.conn)
+        bid = outreach.approve_and_simulate(
+            self.conn, self.d, issuer="test", expected_sha=man["sha256"])
+        old_drafts = {r["draft_id"] for r in self.conn.execute(
+            "SELECT draft_id FROM outreach_batch_items WHERE batch_id=?", (bid,))}
+        self.assertEqual(len(old_drafts), 3)
+        outreach.add_recipient(
+            self.conn, name="Alex Ng, Esq.", org="Ng Clinic (SYNTHETIC)",
+            jurisdiction="N.D. Example", practice_area="civil",
+            intake_channel="published web form",
+            intake_url="https://example.org/ng/intake",
+            match_reason="clinic listing civil intake",
+            source_url="https://example.org/ng/about")
+        outreach.draft_all(self.conn, SYNTH_POSTURE)
+        still = {r["draft_id"] for r in self.conn.execute(
+            "SELECT draft_id FROM outreach_batch_items WHERE batch_id=?", (bid,))}
+        self.assertEqual(still, old_drafts)
+        n_old = self.conn.execute(
+            "SELECT COUNT(*) c FROM outreach_drafts WHERE id IN ({})".format(
+                ",".join("?" * len(old_drafts))), tuple(old_drafts)).fetchone()["c"]
+        self.assertEqual(n_old, 3)
 
 
 if __name__ == "__main__":
