@@ -130,10 +130,15 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(row["status"], "source-checked")
 
     def test_cannot_shortlist_candidate(self):
+        # v3 contract: a candidate that imports WITHOUT a verbatim claim lands
+        # as `candidate` (with incomplete-source flag) and must refuse
+        # shortlisting. Missing required brief fields abort the whole brief
+        # pre-flight instead (test_discovery_atomicity covers that path).
         path = _write([{
             "name": "Incomplete", "org": "Org", "jurisdiction": "US", "practice_area": "civil",
             "intake_channel": "web", "intake_url": "https://example.org/inc",
-            "source_url": "https://example.org/s", "match_reason": "x",
+            "source_url": "https://example.org/s", "retrieved_at": "2026-09-09",
+            "match_reason": "x",
         }])
         result = discovery.import_brief(self.conn, path)
         rid = result["imported"][0]

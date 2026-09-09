@@ -103,25 +103,47 @@ def _refuse_guessed_email(cand: dict) -> None:
         raise ValueError("guessed email refused: email channel without verbatim-on-source")
 
 
+def _validate_required(cands: list[dict]) -> None:
+    """Pre-flight: every candidate carries the required fields, or the whole
+    brief aborts BEFORE any write (named error, nonzero CLI exit — chair
+    check, 2026-09-08). Required per the brief contract: name, intake_url,
+    source_url, intake_channel, retrieved_at."""
+    required = ("name", "intake_url", "source_url", "intake_channel", "retrieved_at")
+    for i, cand in enumerate(cands):
+        missing = [f for f in required if not (cand.get(f) or "").strip()]
+        if missing:
+            raise ValueError(
+                f"candidate {i} ({cand.get('name') or 'unnamed'}) missing required "
+                f"field(s): {', '.join(missing)} — brief aborted, nothing imported")
+
+
 def import_brief(conn, path: str) -> dict:
     """Load a research brief JSON. No HTTP. Returns counts + ids."""
     outreach._ensure(conn)
     with open(path, encoding="utf-8") as f:
         brief = json.load(f)
     cands = brief.get("candidates") or []
+    _validate_required(cands)
     result = {"imported": [], "reused": [], "rejected": [], "flagged": []}
     seen_in_brief = {}
-    for cand in cands:
-        try:
-            rid = _import_one(conn, cand, seen_in_brief)
-        except ValueError as e:
-            result["rejected"].append({"name": cand.get("name"), "error": str(e)})
-            continue
-        kind = rid[0]
-        result[kind].append(rid[1])
-        if rid[2]:
-            result["flagged"].append(rid[1])
-    _flag_org_conflicts(conn)
+    try:
+        for cand in cands:
+            try:
+                rid = _import_one(conn, cand, seen_in_brief)
+            except ValueError as e:
+                result["rejected"].append({"name": cand.get("name"), "error": str(e)})
+                continue
+            kind = rid[0]
+            result[kind].append(rid[1])
+            if rid[2]:
+                result["flagged"].append(rid[1])
+        _flag_org_conflicts(conn)
+    except Exception:
+        # Unexpected error mid-brief: leave NO partial import behind. (Without
+        # this, a long-lived caller's next commit() would silently persist a
+        # half-imported brief.)
+        conn.rollback()
+        raise
     conn.commit()
     return result
 
