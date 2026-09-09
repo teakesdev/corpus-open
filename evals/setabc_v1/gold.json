@@ -1,0 +1,975 @@
+{
+ "version": "setabc_v1",
+ "frozen_before_scoring": true,
+ "material": "synthetic text embedding real public citation formats; no lawsuit or private content",
+ "set_b": {
+  "target": "statutory/codes, 12 styles x 15 = 180 gold",
+  "items": [
+   {
+    "style": "usc",
+    "text": "29 U.S.C. \u00a7 100b",
+    "doc": "stat_00_0.txt"
+   },
+   {
+    "style": "usc",
+    "text": "26 U.S.C. \u00a7 101b",
+    "doc": "stat_00_1.txt"
+   },
+   {
+    "style": "usc",
+    "text": "29 U.S.C. \u00a7 102f",
+    "doc": "stat_00_2.txt"
+   },
+   {
+    "style": "usc",
+    "text": "11 U.S.C. \u00a7 103c",
+    "doc": "stat_00_0.txt"
+   },
+   {
+    "style": "usc",
+    "text": "18 U.S.C. \u00a7 104a",
+    "doc": "stat_00_1.txt"
+   },
+   {
+    "style": "usc",
+    "text": "7 U.S.C. \u00a7 105d",
+    "doc": "stat_00_2.txt"
+   },
+   {
+    "style": "usc",
+    "text": "42 U.S.C. \u00a7 106e",
+    "doc": "stat_00_0.txt"
+   },
+   {
+    "style": "usc",
+    "text": "29 U.S.C. \u00a7 107d",
+    "doc": "stat_00_1.txt"
+   },
+   {
+    "style": "usc",
+    "text": "5 U.S.C. \u00a7 108e",
+    "doc": "stat_00_2.txt"
+   },
+   {
+    "style": "usc",
+    "text": "29 U.S.C. \u00a7 109b",
+    "doc": "stat_00_0.txt"
+   },
+   {
+    "style": "usc",
+    "text": "5 U.S.C. \u00a7 110f",
+    "doc": "stat_00_1.txt"
+   },
+   {
+    "style": "usc",
+    "text": "5 U.S.C. \u00a7 111c",
+    "doc": "stat_00_2.txt"
+   },
+   {
+    "style": "usc",
+    "text": "5 U.S.C. \u00a7 112a",
+    "doc": "stat_00_0.txt"
+   },
+   {
+    "style": "usc",
+    "text": "15 U.S.C. \u00a7 113f",
+    "doc": "stat_00_1.txt"
+   },
+   {
+    "style": "usc",
+    "text": "5 U.S.C. \u00a7 114f",
+    "doc": "stat_00_2.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 100",
+    "doc": "stat_01_0.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "8 Del. C. \u00a7 101",
+    "doc": "stat_01_1.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "8 Del. C. \u00a7 102",
+    "doc": "stat_01_2.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 103",
+    "doc": "stat_01_0.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "10 Del. C. \u00a7 104",
+    "doc": "stat_01_1.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "8 Del. C. \u00a7 105",
+    "doc": "stat_01_2.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 106",
+    "doc": "stat_01_0.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 107",
+    "doc": "stat_01_1.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 108",
+    "doc": "stat_01_2.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 109",
+    "doc": "stat_01_0.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "8 Del. C. \u00a7 110",
+    "doc": "stat_01_1.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "8 Del. C. \u00a7 111",
+    "doc": "stat_01_2.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "8 Del. C. \u00a7 112",
+    "doc": "stat_01_0.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 113",
+    "doc": "stat_01_1.txt"
+   },
+   {
+    "style": "delaware",
+    "text": "6 Del. C. \u00a7 114",
+    "doc": "stat_01_2.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 79-0-319",
+    "doc": "stat_02_0.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 79-1-319",
+    "doc": "stat_02_1.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 79-2-319",
+    "doc": "stat_02_2.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 79-3-319",
+    "doc": "stat_02_0.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 57-4-319",
+    "doc": "stat_02_1.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 57-5-319",
+    "doc": "stat_02_2.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 75-6-319",
+    "doc": "stat_02_0.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 75-7-319",
+    "doc": "stat_02_1.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 75-8-319",
+    "doc": "stat_02_2.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 79-9-319",
+    "doc": "stat_02_0.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 79-10-319",
+    "doc": "stat_02_1.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 57-11-319",
+    "doc": "stat_02_2.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 85-12-319",
+    "doc": "stat_02_0.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 79-13-319",
+    "doc": "stat_02_1.txt"
+   },
+   {
+    "style": "ms_ann",
+    "text": "Miss. Code Ann. \u00a7 85-14-319",
+    "doc": "stat_02_2.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-800",
+    "doc": "stat_03_0.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-801",
+    "doc": "stat_03_1.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-802",
+    "doc": "stat_03_2.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-803",
+    "doc": "stat_03_0.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-804",
+    "doc": "stat_03_1.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-805",
+    "doc": "stat_03_2.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-806",
+    "doc": "stat_03_0.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-807",
+    "doc": "stat_03_1.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-808",
+    "doc": "stat_03_2.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-809",
+    "doc": "stat_03_0.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-810",
+    "doc": "stat_03_1.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-811",
+    "doc": "stat_03_2.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-812",
+    "doc": "stat_03_0.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-813",
+    "doc": "stat_03_1.txt"
+   },
+   {
+    "style": "wy_ann",
+    "text": "Wyo. Stat. Ann. \u00a7 17-29-814",
+    "doc": "stat_03_2.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1500",
+    "doc": "stat_04_0.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1501",
+    "doc": "stat_04_1.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1502",
+    "doc": "stat_04_2.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1503",
+    "doc": "stat_04_0.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1504",
+    "doc": "stat_04_1.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1505",
+    "doc": "stat_04_2.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1506",
+    "doc": "stat_04_0.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1507",
+    "doc": "stat_04_1.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1508",
+    "doc": "stat_04_2.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1509",
+    "doc": "stat_04_0.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1510",
+    "doc": "stat_04_1.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1511",
+    "doc": "stat_04_2.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1512",
+    "doc": "stat_04_0.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1513",
+    "doc": "stat_04_1.txt"
+   },
+   {
+    "style": "ca",
+    "text": "Cal. Civ. Code \u00a7 1514",
+    "doc": "stat_04_2.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17200",
+    "doc": "stat_05_0.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17201",
+    "doc": "stat_05_1.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17202",
+    "doc": "stat_05_2.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17203",
+    "doc": "stat_05_0.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17204",
+    "doc": "stat_05_1.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17205",
+    "doc": "stat_05_2.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17206",
+    "doc": "stat_05_0.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17207",
+    "doc": "stat_05_1.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17208",
+    "doc": "stat_05_2.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17209",
+    "doc": "stat_05_0.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17210",
+    "doc": "stat_05_1.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17211",
+    "doc": "stat_05_2.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17212",
+    "doc": "stat_05_0.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17213",
+    "doc": "stat_05_1.txt"
+   },
+   {
+    "style": "ca_bp",
+    "text": "Cal. Bus. & Prof. Code \u00a7 17214",
+    "doc": "stat_05_2.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 0.005",
+    "doc": "stat_06_0.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 1.005",
+    "doc": "stat_06_1.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 2.005",
+    "doc": "stat_06_2.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 3.005",
+    "doc": "stat_06_0.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 4.005",
+    "doc": "stat_06_1.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 5.005",
+    "doc": "stat_06_2.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 6.005",
+    "doc": "stat_06_0.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 7.005",
+    "doc": "stat_06_1.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 8.005",
+    "doc": "stat_06_2.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 9.005",
+    "doc": "stat_06_0.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 10.005",
+    "doc": "stat_06_1.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 11.005",
+    "doc": "stat_06_2.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 12.005",
+    "doc": "stat_06_0.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 13.005",
+    "doc": "stat_06_1.txt"
+   },
+   {
+    "style": "tx",
+    "text": "Tex. Gov't Code \u00a7 14.005",
+    "doc": "stat_06_2.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.50",
+    "doc": "stat_07_0.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.51",
+    "doc": "stat_07_1.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.52",
+    "doc": "stat_07_2.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.53",
+    "doc": "stat_07_0.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.54",
+    "doc": "stat_07_1.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.55",
+    "doc": "stat_07_2.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.56",
+    "doc": "stat_07_0.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.57",
+    "doc": "stat_07_1.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.58",
+    "doc": "stat_07_2.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.59",
+    "doc": "stat_07_0.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.60",
+    "doc": "stat_07_1.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.61",
+    "doc": "stat_07_2.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.62",
+    "doc": "stat_07_0.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.63",
+    "doc": "stat_07_1.txt"
+   },
+   {
+    "style": "tx_bo",
+    "text": "Tex. Bus. & Orgs. Code \u00a7 101.64",
+    "doc": "stat_07_2.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.100",
+    "doc": "stat_08_0.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.101",
+    "doc": "stat_08_1.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.102",
+    "doc": "stat_08_2.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.103",
+    "doc": "stat_08_0.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.104",
+    "doc": "stat_08_1.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.105",
+    "doc": "stat_08_2.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.106",
+    "doc": "stat_08_0.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.107",
+    "doc": "stat_08_1.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.108",
+    "doc": "stat_08_2.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.109",
+    "doc": "stat_08_0.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.110",
+    "doc": "stat_08_1.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.111",
+    "doc": "stat_08_2.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.112",
+    "doc": "stat_08_0.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.113",
+    "doc": "stat_08_1.txt"
+   },
+   {
+    "style": "fla",
+    "text": "Fla. Stat. \u00a7 605.114",
+    "doc": "stat_08_2.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 400",
+    "doc": "stat_09_0.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 401",
+    "doc": "stat_09_1.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 402",
+    "doc": "stat_09_2.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 403",
+    "doc": "stat_09_0.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 404",
+    "doc": "stat_09_1.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 405",
+    "doc": "stat_09_2.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 406",
+    "doc": "stat_09_0.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 407",
+    "doc": "stat_09_1.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 408",
+    "doc": "stat_09_2.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 409",
+    "doc": "stat_09_0.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 410",
+    "doc": "stat_09_1.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 411",
+    "doc": "stat_09_2.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 412",
+    "doc": "stat_09_0.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 413",
+    "doc": "stat_09_1.txt"
+   },
+   {
+    "style": "ny",
+    "text": "N.Y. Bus. Corp. Law \u00a7 414",
+    "doc": "stat_09_2.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/0.10",
+    "doc": "stat_10_0.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/1.10",
+    "doc": "stat_10_1.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/2.10",
+    "doc": "stat_10_2.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/3.10",
+    "doc": "stat_10_0.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/4.10",
+    "doc": "stat_10_1.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/5.10",
+    "doc": "stat_10_2.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/6.10",
+    "doc": "stat_10_0.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/7.10",
+    "doc": "stat_10_1.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/8.10",
+    "doc": "stat_10_2.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/9.10",
+    "doc": "stat_10_0.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/10.10",
+    "doc": "stat_10_1.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/11.10",
+    "doc": "stat_10_2.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/12.10",
+    "doc": "stat_10_0.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/13.10",
+    "doc": "stat_10_1.txt"
+   },
+   {
+    "style": "ill",
+    "text": "805 Ill. Comp. Stat. 5/14.10",
+    "doc": "stat_10_2.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-0",
+    "doc": "stat_11_0.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-1",
+    "doc": "stat_11_1.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-2",
+    "doc": "stat_11_2.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-3",
+    "doc": "stat_11_0.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-4",
+    "doc": "stat_11_1.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-5",
+    "doc": "stat_11_2.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-6",
+    "doc": "stat_11_0.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-7",
+    "doc": "stat_11_1.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-8",
+    "doc": "stat_11_2.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-9",
+    "doc": "stat_11_0.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-10",
+    "doc": "stat_11_1.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-11",
+    "doc": "stat_11_2.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-12",
+    "doc": "stat_11_0.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-13",
+    "doc": "stat_11_1.txt"
+   },
+   {
+    "style": "cfr",
+    "text": "17 C.F.R. \u00a7 240.10b-14",
+    "doc": "stat_11_2.txt"
+   }
+  ]
+ },
+ "set_a": {
+  "target": "case reporter cites x12 + short/id forms (short forms are EXPECTED-FAILED, not gold)",
+  "items": [
+   {
+    "style": "reporter",
+    "text": "347 U.S. 483",
+    "doc": "case_0.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "163 U.S. 537",
+    "doc": "case_1.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "384 U.S. 436",
+    "doc": "case_2.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "410 U.S. 113",
+    "doc": "case_3.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "946 So. 2d 851",
+    "doc": "case_0.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "536 U.S. 121",
+    "doc": "case_1.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "448 U.S. 448",
+    "doc": "case_2.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "505 U.S. 833",
+    "doc": "case_3.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "424 U.S. 1",
+    "doc": "case_0.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "468 U.S. 727",
+    "doc": "case_1.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "405 U.S. 330",
+    "doc": "case_2.txt"
+   },
+   {
+    "style": "reporter",
+    "text": "391 U.S. 367",
+    "doc": "case_3.txt"
+   }
+  ]
+ }
+}

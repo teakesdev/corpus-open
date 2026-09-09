@@ -1,0 +1,65 @@
+{
+ "tpA": 12,
+ "nA": 12,
+ "tpB": 75,
+ "nB": 180,
+ "junk_unknown_tokens": 66,
+ "fp_negatives": 0,
+ "per_style": {
+  "usc": [
+   0,
+   15
+  ],
+  "delaware": [
+   0,
+   15
+  ],
+  "ms_ann": [
+   15,
+   15
+  ],
+  "wy_ann": [
+   15,
+   15
+  ],
+  "ca": [
+   0,
+   15
+  ],
+  "ca_bp": [
+   0,
+   15
+  ],
+  "tx": [
+   0,
+   15
+  ],
+  "tx_bo": [
+   0,
+   15
+  ],
+  "fla": [
+   15,
+   15
+  ],
+  "ny": [
+   15,
+   15
+  ],
+  "ill": [
+   0,
+   15
+  ],
+  "cfr": [
+   15,
+   15
+  ]
+ },
+ "class_histogram": {
+  "FullLawCitation": 105,
+  "FullCaseCitation": 12,
+  "IdCitation": 1,
+  "SupraCitation": 1,
+  "ShortCaseCitation": 1
+ }
+}
