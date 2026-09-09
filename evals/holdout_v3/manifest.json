@@ -1,0 +1,91 @@
+{
+  "version": "holdout_v3",
+  "purpose": "FRESH acceptance after kit-cite-0.4. holdout_v1 and holdout_v2 are development data.",
+  "label_status": "UNLABELED — @adversarial-review-deepseek-agent labels; @grok-4-6 second-reviews BEFORE any predictions",
+  "parser_at_freeze": "fd6a362",
+  "not_in_this_tree": [
+    "labels",
+    "predictions",
+    "scores"
+  ],
+  "material": "public-domain statute/regulation/session-law text. None of the holdout_v1 or v2 primary sections.",
+  "input_contract": {
+    "offset_unit": "Python str character index (len/slicing), NOT bytes",
+    "indexing": "zero-based, end-exclusive: text[start:end] == citation",
+    "hash": "utf8_sha256 hashes exact UTF-8 file bytes; not an offset base",
+    "input_representation": {
+      "decoded_unicode": "file is the exact Unicode string the parser must receive",
+      "raw_html_entities": "file is the exact HTML fragment; do not unescape before labeling/scoring"
+    }
+  },
+  "ignored_intervals": {
+    "plaw_111_148_decoded.txt": [
+      {
+        "start": 666,
+        "end": 1637,
+        "reason": "this Act table of contents — chrome; exclude gold AND predictions (chair 2026-09-09)"
+      }
+    ]
+  },
+  "scoring_rules": {
+    "gold": "all in-scope citations; none inside ignored_intervals",
+    "fp": "predictions whose span is outside ignored_intervals and not gold — not hand-picked negatives",
+    "kinds": {
+      "statutory_citation": "codes, session laws, Pub. L. / Public Law, CFR, short-form §",
+      "non_statutory_identifier": "H.R. / similar bill numbers — gold but scored separately; does not gate statutory acceptance",
+      "bare_section_reference": "gold only if anchored by § or a semantic class"
+    },
+    "parser_capability": "experimental — preserve actual extraction rows; EXTRACTION_FAILED is occurrence-level only"
+  },
+  "taxonomy_notes_for_labeler": [
+    "Session-law N Stat. P / N STAT. P are gold statutory citations.",
+    "H.R. N is gold kind non_statutory_identifier, not statute, not negative.",
+    "TOC/chrome only inside declared ignored_intervals.",
+    "Longest non-overlapping spans; no nested prefixes as separate gold.",
+    "Coordinated refs are one span if that is the surface form."
+  ],
+  "docs": {
+    "usc_11_362_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://www.law.cornell.edu/uscode/text/11/362",
+      "source": "Cornell LII HTML, tags stripped, Unicode preserved",
+      "utf8_sha256": "afd3957c09df178909c6bb994b1a81e9d18f1137c242e0f491110ed496ab59fe",
+      "char_len": 3801,
+      "bytes": 3812
+    },
+    "usc_18_201_raw.html": {
+      "input_representation": "raw_html_entities",
+      "source_url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title18-section201&num=0&edition=prelim",
+      "source": "OLRC HTML fragment stored WITHOUT entity decoding",
+      "utf8_sha256": "1b588ec123567813f89b87592398fd3d3ec79181b043d75692b8b9c85c532ddf",
+      "char_len": 5201,
+      "bytes": 5201
+    },
+    "del_8_102_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://delcode.delaware.gov/title8/c001/sc01/index.html#102",
+      "source": "Delaware Code Online Title 8 § 102, tags stripped",
+      "utf8_sha256": "b939296ea469f06841c0df4423a134c5ee2076dcddcff6a9f0f18556d9b03ed4",
+      "char_len": 3201,
+      "bytes": 3262
+    },
+    "cfr_16_255_1_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://www.law.cornell.edu/cfr/text/16/255.1",
+      "source": "Cornell LII CFR HTML 16 CFR 255.1, tags stripped (eCFR page was chrome-only)",
+      "utf8_sha256": "6bfb13f51ebcfe8582baf4fcd765bee6695ea0e74c3a77ae74f3fd93f9a6296b",
+      "char_len": 2601,
+      "bytes": 2608
+    },
+    "plaw_111_148_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://www.govinfo.gov/content/pkg/PLAW-111publ148/html/PLAW-111publ148.htm",
+      "source": "GPO HTML Public Law 111-148 excerpt. TOC is ignored_intervals.",
+      "utf8_sha256": "530b92618434a61cd7347324852f5946dbdd78ba780adf2a1e801496b45f4064",
+      "char_len": 1637,
+      "bytes": 1637
+    }
+  },
+  "frozen_by": "grok-4-6",
+  "frozen_at": "2026-09-09T15:46:37Z"
+}
