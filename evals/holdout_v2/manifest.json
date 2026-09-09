@@ -1,0 +1,82 @@
+{
+  "version": "holdout_v2",
+  "purpose": "FRESH acceptance holdout. holdout_v1 is development data and must not be reused as acceptance gold. This set is UNLABELED.",
+  "label_status": "UNLABELED — @adversarial-review-deepseek-agent labels; @grok-4-6 second-reviews labels BEFORE any predictions",
+  "not_in_this_tree": [
+    "labels",
+    "predictions",
+    "scores",
+    "parser output"
+  ],
+  "material": "public-domain U.S. statute/regulation/session-law text from OLRC, LII, eCFR, Delaware Code Online, GPO, Florida Senate. No lawsuit or private content. None of the five holdout_v1 sections (42 USC 1983, 26 USC 501, 17 USC 107, 12 CFR 1026.1, Fla. Stat. 605.0101).",
+  "input_contract": {
+    "offset_unit": "Python str character index (len/slicing), NOT bytes",
+    "indexing": "zero-based, end-exclusive: text[start:end] == citation",
+    "hash": "utf8_sha256 is SHA-256 of the exact UTF-8 file bytes; it is NOT an offset base",
+    "input_representation": {
+      "decoded_unicode": "the file is the exact Unicode string the parser must receive",
+      "raw_html_entities": "the file is the exact HTML fragment the parser must receive; entities such as &sect; and &#x2003; are literal characters in that string"
+    },
+    "do_not_mix": "never apply byte offsets to a str, never decode a raw_html file before labeling/scoring"
+  },
+  "taxonomy_notes_for_labeler": [
+    "Session-law locators of the form N Stat. P / N STAT. P are gold citations, not false positives.",
+    "Coordinated references (e.g. sections 502 or 503) are one span if that is the surface form.",
+    "Nested prefixes are not separate gold items; longest non-overlapping spans.",
+    "Harder negatives: bare numbers, subsection letters, page chrome."
+  ],
+  "docs": {
+    "usc_18_1001_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://www.law.cornell.edu/uscode/text/18/1001",
+      "source": "Cornell LII HTML, text extracted (tags stripped); Unicode preserved (U+00A7, U+202F)",
+      "utf8_sha256": "3567c3148519a21d7f8124c278f514b336ac60fbbd60aac2b7b384497bb6f5b5",
+      "char_len": 4376,
+      "bytes": 4459
+    },
+    "usc_5_552_raw.html": {
+      "input_representation": "raw_html_entities",
+      "source_url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section552&num=0&edition=prelim",
+      "source": "U.S. House OLRC HTML fragment stored WITHOUT entity decoding. Offsets are Python character indexes into this exact string (&sect; is 6 chars).",
+      "utf8_sha256": "08fe1b629937545cd0d14fe887cfaac72635d153c5a9a9b39a91ad8333861810",
+      "char_len": 5501,
+      "bytes": 5501
+    },
+    "del_8_141_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://delcode.delaware.gov/title8/c001/sc04/index.html#141",
+      "source": "Delaware Code Online Title 8 § 141 HTML, tags stripped, Unicode preserved",
+      "utf8_sha256": "8ba9c9d906564f208891472eef6ad9ae7e11b4cc099daec26e1c3f9a0c8ee679",
+      "char_len": 2537,
+      "bytes": 2544
+    },
+    "cfr_17_240_10b5_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://www.ecfr.gov/current/title-17/chapter-II/part-240/section-240.10b-5",
+      "source": "eCFR HTML for 17 CFR 240.10b-5, tags stripped. Three-part CFR depth is in the heading/body.",
+      "utf8_sha256": "3a46850fd7a6546a9732c10d1ab1a148c10e6fcae1fe845dd2adc4308f285762",
+      "char_len": 838,
+      "bytes": 839
+    },
+    "plaw_107_204_decoded.txt": {
+      "input_representation": "decoded_unicode",
+      "source_url": "https://www.govinfo.gov/content/pkg/PLAW-107publ204/html/PLAW-107publ204.htm",
+      "source": "GPO HTML of Public Law 107-204 (Sarbanes-Oxley). Contains session-law locators (e.g. 116 STAT. 745). Tags stripped, HTML entities unescaped.",
+      "utf8_sha256": "674327f335962ed2ec9f22c1bf48a03b0f795e27df9c09a35a69406f105f9c67",
+      "char_len": 4159,
+      "bytes": 4159
+    },
+    "fl_607_0101_raw.html": {
+      "input_representation": "raw_html_entities",
+      "source_url": "https://www.flsenate.gov/Laws/Statutes/2023/0607.0101",
+      "source": "Florida Senate HTML for § 607.0101 stored WITHOUT entity decoding (&#x2003; em-space, &#x2014; em-dash). Offsets are Python character indexes into this exact string. Different section from holdout_v1 605.0101.",
+      "utf8_sha256": "f2e3ff7c7e50f6e2e076b8b956e064191a33b423060cff0a401a380b3bf5f3d4",
+      "char_len": 1716,
+      "bytes": 1720
+    }
+  },
+  "scoring_rule": "Do not score until grok approves labels. Then one canonical run from a clean detached worktree at a pinned parser commit, recording parser/gold/scorer hashes.",
+  "frozen_by": "grok-4-6 (chair reassignment after stalled Flash freeze)",
+  "frozen_at": "2026-09-09T02:43:17Z",
+  "kit_head_at_freeze": "0e81501"
+}
