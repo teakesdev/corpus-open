@@ -150,11 +150,20 @@ def seed_synthetic(conn) -> list[str]:
 
 
 def draft_all(conn, posture: dict) -> list[str]:
-    """Minimal individualized drafts. Individualization = name/org/intake only."""
+    """Minimal individualized drafts. Individualization = name/org/intake only.
+
+    Replaces any prior *pending* draft for each shortlisted recipient so a
+    posture typo-fix cannot put two emails to the same intake on the manifest.
+    """
     _ensure(conn)
-    ids = []
     recips = conn.execute(
         "SELECT * FROM outreach_recipients WHERE status='shortlisted'").fetchall()
+    if not recips:
+        raise ValueError("no shortlisted recipients — seed or add before drafting")
+    conn.execute(
+        "DELETE FROM outreach_drafts WHERE recipient_id IN "
+        "(SELECT id FROM outreach_recipients WHERE status='shortlisted')")
+    ids = []
     for r in recips:
         filled = DRAFT_TEMPLATE.format(
             representation=posture.get(
@@ -192,7 +201,11 @@ def build_manifest(conn) -> dict:
     q = """SELECT d.id AS draft_id, d.subject, d.body, r.id AS recipient_id,
                   r.name, r.org, r.intake_url, r.intake_channel, r.source_url, r.match_reason
            FROM outreach_drafts d JOIN outreach_recipients r ON r.id=d.recipient_id
-           WHERE r.status='shortlisted' ORDER BY r.name"""
+           WHERE r.status='shortlisted'
+             AND d.created_at = (
+               SELECT MAX(d2.created_at) FROM outreach_drafts d2
+               WHERE d2.recipient_id = d.recipient_id)
+           ORDER BY r.name"""
     for row in conn.execute(q):
         items.append({
             "recipient_id": row["recipient_id"],
@@ -224,6 +237,10 @@ def approve_and_simulate(conn, matter_dir: str, *, issuer: str, expected_sha: st
                          transport: str = "nosend") -> str:
     """Record an approved batch. `nosend` writes outbox files; never SMTP."""
     man = build_manifest(conn)
+    if man["n"] == 0:
+        raise ValueError(
+            "empty manifest — no shortlisted recipients with drafts; "
+            "outreach did not happen. Seed/add recipients, then draft, then approve.")
     if man["sha256"] != expected_sha:
         raise ValueError(
             f"manifest sha mismatch: got {man['sha256'][:12]}… wanted {expected_sha[:12]}… "
@@ -276,11 +293,11 @@ def ledger(conn) -> str:
     recips = conn.execute("SELECT * FROM outreach_recipients ORDER BY name").fetchall()
     if not recips:
         return "# Counsel-outreach ledger\n\n_(no recipients)_"
-    lines += ["| Name | Org | Status | Intake | Why | Source |",
-              "|---|---|---|---|---|---|"]
+    lines += ["| ID | Name | Org | Status | Intake | Why | Source |",
+              "|---|---|---|---|---|---|---|"]
     for r in recips:
         lines.append(
-            f"| {r['name']} | {r['org']} | {r['status']} | {r['intake_url']} | "
+            f"| {r['id']} | {r['name']} | {r['org']} | {r['status']} | {r['intake_url']} | "
             f"{r['match_reason']} | {r['source_url']} |")
     items = conn.execute(
         "SELECT i.response_state, i.send_status, r.name FROM outreach_batch_items i "
