@@ -1,7 +1,7 @@
 {
   "version": "holdout_v3",
   "purpose": "FRESH acceptance after kit-cite-0.4. holdout_v1 and holdout_v2 are development data.",
-  "label_status": "UNLABELED — @adversarial-review-deepseek-agent labels; @grok-4-6 second-reviews BEFORE any predictions",
+  "label_status": "UNLABELED \u2014 @adversarial-review-deepseek-agent labels; @grok-4-6 second-reviews BEFORE any predictions",
   "parser_at_freeze": "fd6a362",
   "not_in_this_tree": [
     "labels",
@@ -23,19 +23,27 @@
       {
         "start": 666,
         "end": 1637,
-        "reason": "this Act table of contents — chrome; exclude gold AND predictions (chair 2026-09-09)"
+        "reason": "this Act table of contents \u2014 chrome; exclude gold AND predictions (chair 2026-09-09)"
+      },
+      {
+        "start": 419,
+        "end": 431,
+        "reason": "SECTION 1. SHORT TITLE; TABLE OF CONTENTS. \u2014 Act heading chrome; amendment 2026-09-09 per Astra (frozen ignored_intervals did not cover it; prior-session chrome discussion is not a scoring rule)"
       }
     ]
   },
   "scoring_rules": {
     "gold": "all in-scope citations; none inside ignored_intervals",
-    "fp": "predictions whose span is outside ignored_intervals and not gold — not hand-picked negatives",
+    "fp": "predictions whose span is outside ignored_intervals and not gold \u2014 not hand-picked negatives",
     "kinds": {
-      "statutory_citation": "codes, session laws, Pub. L. / Public Law, CFR, short-form §",
-      "non_statutory_identifier": "H.R. / similar bill numbers — gold but scored separately; does not gate statutory acceptance",
-      "bare_section_reference": "gold only if anchored by § or a semantic class"
+      "statutory_citation": "codes, session laws, Pub. L. / Public Law, CFR, short-form \u00a7",
+      "non_statutory_identifier": "H.R. / similar bill numbers \u2014 gold but scored separately; does not gate statutory acceptance",
+      "bare_section_reference": "gold only if anchored by \u00a7 or a semantic class"
     },
-    "parser_capability": "experimental — preserve actual extraction rows; EXTRACTION_FAILED is occurrence-level only"
+    "parser_capability": "experimental \u2014 preserve actual extraction rows; EXTRACTION_FAILED is occurrence-level only",
+    "out_of_scope_references": {
+      "named_acts_and_structural_refs": "Named acts without locators (e.g. 'Securities Investor Protection Act of 1970') and structural references (e.g. 'title IV of the Social Security Act', 'subsection (b)') are OUT OF SCOPE: neither gold nor spurious; a parser emitting them is not penalized as FP, and a parser missing them is not penalized as miss."
+    }
   },
   "taxonomy_notes_for_labeler": [
     "Session-law N Stat. P / N STAT. P are gold statutory citations.",
@@ -64,7 +72,7 @@
     "del_8_102_decoded.txt": {
       "input_representation": "decoded_unicode",
       "source_url": "https://delcode.delaware.gov/title8/c001/sc01/index.html#102",
-      "source": "Delaware Code Online Title 8 § 102, tags stripped",
+      "source": "Delaware Code Online Title 8 \u00a7 102, tags stripped",
       "utf8_sha256": "b939296ea469f06841c0df4423a134c5ee2076dcddcff6a9f0f18556d9b03ed4",
       "char_len": 3201,
       "bytes": 3262
@@ -87,5 +95,9 @@
     }
   },
   "frozen_by": "grok-4-6",
-  "frozen_at": "2026-09-09T15:46:37Z"
+  "frozen_at": "2026-09-09T15:46:37Z",
+  "label_contract_amendments": [
+    "2026-09-09 (Astra): SECTION 1 heading added to ignored_intervals [419,431] \u2014 chrome exclusion must be explicit, not inherited from prior-session discussion.",
+    "2026-09-09 (Astra): out-of-scope references (named acts, structural refs) are neither gold nor FP."
+  ]
 }
