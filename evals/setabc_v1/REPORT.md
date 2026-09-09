@@ -29,6 +29,20 @@ Union computed from stored matched-ID sets: kit-only 30, eyecite-only 60, shared
 - **Development vs acceptance data (chair, binding):** v1 examples (and any v2 additions motivated by these failures) are **development data**. The keep/fix/hybrid acceptance decision requires a **separately frozen, independently labeled holdout** — public-document excerpts plus harder negatives — scored once, after parser changes are complete.
 - Set A stays a regression gate (n=12, both parsers 1.000, no discrimination).
 
+## v2 dev-data result (parser changes applied 2026-09-08; STILL development data)
+
+Kit parser extended (pattern-4 replaced by left-anchored dotted-chain patterns with `(?<![\w.])` mid-acronym guard; `Gov't`, `Fla. Stat.`-style, `Comp. Stat.`, C.F.R.-depth families added). Rescored with the same canonical scorer:
+
+| Set B (dev deck) | kit v2 | eyecite | union |
+|---|---|---|---|
+| recall | **1.000 (180/180)** | 0.500 (90/180) | 1.000 |
+| false positives | **0** | 18 | — |
+| pollution telemetry | 2 (nested-string cross-talk: `…10b-1` ⊂ `…10b-10` across same-doc golds — telemetry artifact, spans correct) | — | — |
+
+All 35 kit tests + 10 scorer self-tests green after the change.
+
+**What this proves and what it does not:** it proves the v2 patterns cover every format family the dev deck contains — i.e., **regression coverage over the motivating examples** (chair's exact words). It does **not** establish general retrieval readiness: the patterns were built from these very examples, real-world text (OCR noise, footnotes, tables, odd spacing) is untested, and normalization/resolution remain unmeasured. **The keep/fix/hybrid acceptance decision still waits on the separately frozen, independently labeled holdout** (public-document excerpts + harder negatives), scored once with this same canonical pipeline.
+
 ## v2 queue (not started)
 
 Kit parser: pattern-4 left-anchoring (45 FPs), `Gov't`-apostrophe, `Fla. Stat.`-style dotted states, `Comp. Stat.` multi-part, C.F.R. depth. eyecite path (if hybrid): only as optional extra, BSD-2 pin, source-span output already proven feasible here. Then: frozen holdout construction (public excerpts + harder negatives, independent labeling), single canonical scoring, acceptance decision.
