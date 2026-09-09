@@ -35,6 +35,11 @@ AUTHORITY_STAGES = {
 }
 LEGACY_VERIFICATION = {"verified-official"}  # readable, never written by kit code
 
+# Capability-level label (chair 2026-09-09): the extractor is experimental until
+# a fresh holdout_v3 acceptance pass. Do NOT mark every row extraction-failed.
+PARSER_CAPABILITY = "experimental"
+PARSER_ID = "kit-cite-0.4"
+
 
 class StageOrderError(ValueError):
     """A status transition skipped required prior stage evidence (RFC 0001 §2.2c)."""
@@ -49,8 +54,12 @@ def now_iso() -> str:
 # span already claimed by an earlier pattern is never re-claimed)
 # --------------------------------------------------------------------------
 _PATTERNS = [
-    # Public laws (en dash or hyphen):   Pub. L. 96–170 / Pub. L. 104-317
+    # Public laws spelled out:           Public Law 107-204
+    re.compile(r"\bPublic\s+Law\s+\d+\s*[–\-—]\s*\d+\b"),
+    # Public laws abbreviated:           Pub. L. 96–170 / Pub. L. 104-317
     re.compile(r"\bPub\.\s*L\.\s*\d+\s*[–\-—]\s*\d+\b"),
+    # House bills (identifier, not statute): H.R. 3763
+    re.compile(r"\bH\.R\.\s*\d+\b"),
     # Revised Statutes:                  R.S. § 1979 (Unicode space tolerated by \s)
     re.compile(r"\bR\.S\.\s*§+\s*[\dA-Za-z.\-]+"),
     # Florida short:                     F.S. 605.0101 / F.S. § 605.0101
@@ -58,9 +67,11 @@ _PATTERNS = [
     # Code of Federal Regulations — dotted or undotted, § optional:
     #   17 C.F.R. § 240.10b-5 / 12 CFR 1026.1
     re.compile(r"\b\d+\s+C\.?F\.?R\.?\s*(?:§+\s*)?[\dA-Za-z.\-]+"),
-    # U.S. Code — abbreviated or spelled out:
+    # U.S. Code — abbreviated or spelled out, with section sign:
     #   15 U.S.C. § 1681a / 42 U.S. Code § 1983
-    re.compile(r"\b\d+\s+(?:U\.?S\.?C\.?|U\.?S\.?\s+Code)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
+    re.compile(r"\b\d+\s+(?:U\.?S\.?C\.?|U\.?S\.?\s+Code)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))*"),
+    # U.S. Code without section sign:    15 U.S.C. 78j
+    re.compile(r"\b\d+\s+U\.?S\.?C\.?\s+(?!§)[\dA-Za-z][\dA-Za-z.\-]*\b"),
     # Code of Federal Regulations (full depth):  17 C.F.R. § 240.10b-5
     re.compile(r"\b\d+\s+C\.F\.R\.\s*§+\s*[\dA-Za-z.\-]+"),
     # Delaware:            8 Del. C. § 141
@@ -81,18 +92,32 @@ _PATTERNS = [
     re.compile(r"\b\d+\s+[A-Z][\w'.]*\.(?:\s*[A-Z][\w'.]*\.)+\s*\d+(?:\.\d+)?/\d+(?:\.\d+)?\b"),
     # Reporter cites:      347 U.S. 483   /   946 So. 2d 851
     re.compile(r"\b\d+\s+[A-Z][A-Za-z.]*(?:\.\s*\d+[a-z]*)?\s+\d+\b"),
-    # Cross-reference word family (holdout labels): section 43 of Title 8 ·
-    # sections 106 and 106A · section 401(a) · Sec. 107
-    re.compile(r"\b(?:sections?|Sec\.)\s+\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?(?:\s+(?:and|or|through|to)\s+\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)*(?:\s+of\s+Title\s+\d+)?"),
     # Statute-range cite:                605.0101 - 605.1108
     re.compile(r"\b\d+\.\d{3,5}\s*[-–—]\s*\d+\.\d{3,5}\b"),
-    # Florida session-law cite:          s. 2, ch. 2013-180
-    re.compile(r"\bs\.\s*\d+\s*,\s*ch\.\s*\d{4}\s*[-–—]\s*\d+\b"),
-    # Short-form section cite (v3 — holdout labels establish these are real
-    # citations, not extraction failures): § 1983 / § 309(c). Digit-start is
-    # mandatory ('§ for' is not a citation). HTML entities and Unicode spaces
-    # in the gap are tolerated so offsets never shift.
-    re.compile(r"(?:§|&sect;|&#x00A7;|&#167;)\s*(?:&nbsp;|&#x2003;|&#8194;|&#8195;|&#8239;|\s)*\d[\dA-Za-z.\-]*(?:\s*\([^)]{1,24}\))?"),
+    # Florida session-law cite:          s. 2, ch. 2013-180 / s. 1, ch. 89-154
+    re.compile(r"\bs\.\s*\d+\s*,\s*ch\.\s*\d{2,4}\s*[–\-—]\s*\d+\b"),
+    # Coordinated chapter lists:         chapter 109A, 109B, 110, or 117
+    re.compile(
+        r"\b[Cc]hapters?\s+\d+[A-Za-z]?"
+        r"(?:\s*,\s*\d+[A-Za-z]?)+(?:\s*,?\s+(?:and|or)\s+\d+[A-Za-z]?)?"
+    ),
+    # Chapter abbreviation:              ch. 645
+    re.compile(r"\bch\.\s+\d+[A-Za-z]?\b"),
+    # Cross-reference word family: section 43 of Title 8 · Section 80 ·
+    # sections 106 and 106A · section 401(a) · Sec. 107
+    re.compile(
+        r"\b(?:[Ss]ections?|Sec\.)\s+\d+[A-Za-z]?"
+        r"(?:\s*\([^)]{1,24}\))*(?:\s+(?:and|or|through|to)\s+\d+[A-Za-z]?"
+        r"(?:\s*\([^)]{1,24}\))*)*(?:\s+of\s+Title\s+\d+)?"
+    ),
+    # Short-form section cite: § 1983 / § 309(c) / § 330016(1)(L). Digit-start
+    # is mandatory. Multiple parentheticals allowed. HTML entities / Unicode
+    # spaces in the gap are tolerated so offsets never shift.
+    re.compile(
+        r"(?:§|&sect;|&#x00A7;|&#167;)\s*"
+        r"(?:&nbsp;|&#x2003;|&#8194;|&#8195;|&#8239;|\s)*"
+        r"\d[\dA-Za-z.\-]*(?:\s*\([^)]{1,24}\))*"
+    ),
     # Bare § followed by a NON-number: recorded as extraction-failed evidence
     # (honest-failure path preserved for genuinely unparsable fragments).
     re.compile(r"(?:§|&sect;|&#x00A7;|&#167;)\s*(?:&nbsp;|&#x2003;|\s)*[A-Za-z][\dA-Za-z.\-]*"),
@@ -117,7 +142,7 @@ def _looks_complete(fragment: str) -> bool:
 
 
 def extract_citations(text: str, document_sha256: str | None = None,
-                      parser: str = "kit-cite-0.1") -> list[dict]:
+                      parser: str = PARSER_ID) -> list[dict]:
     """Parse `text`; return rows ready for citation_extractions. Local-only."""
     text_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
     found: list[dict] = []
