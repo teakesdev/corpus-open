@@ -268,6 +268,9 @@ def cmd_outreach(args):
         print(f"recipients: {man['n']}")
         for it in man["items"]:
             print(f"  - {it['recipient_id']}  {it['name']} <{it['intake_url']}>")
+            print(f"    destination_type: {it.get('destination_type') or 'unknown'}")
+            if it.get("preparation_only"):
+                print("    PREPARATION ONLY — not permission to submit a form or portal")
             print(f"    why: {it['match_reason']}")
             print(f"    source: {it['source_url']}")
             print(f"    subject: {it['subject']}")
