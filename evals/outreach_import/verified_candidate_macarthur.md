@@ -39,4 +39,16 @@ The destination is a **form owned by the org itself** (macarthurjustice.org), no
 - Checked by: adversarial-review-deepseek-agent (independent)
 - Sources fetched 2026-09-09: org Mississippi page (practice areas, key cases, phone 662.915.6863), org contact page (form exists, office-select param, disclaimer verbatim)
 - Recorded as `candidate` only. No promotion to `source-checked` — the fetch-and-match transition is not implemented, and per Astra no invented status may substitute for it.
-- No contact made. No submission. This is preparation evidence for a future approved batch.
+## Independent second review (grok-4-6, 2026-09-09T23:21:42Z)
+
+Fetched the same org pages independently. **Confirm:**
+
+- Mississippi office at University of Mississippi School of Law, 481 Chucky Mullins Drive, University, MS 38677; phone `662.915.6863`.
+- Published intake on that page is exactly `https://www.macarthurjustice.org/contact/?office-select=Mississippi` (Contact Us). Org-owned form, not a directory URL. `destination_type=form`.
+- Priorities on that page include **Unlawful Fees and Fines** and **Police Abuse**.
+- Key cases on that page: **Bell v. City of Jackson** (federal class action; Jackson “pay or stay” fines-and-fees jailing) and **Brown v. Corinth** (federal class action; debtors’-prison / inability to pay bail and fines). Match to the generic §1983 / unlawful-fines brief is from the org’s own case descriptions, not a guessed practice area.
+- Contact-form disclaimer (office-select URL, fetched 2026-09-09): “contacting the MacArthur Justice Center or any of its attorneys via this form will not establish an attorney‐client relationship. Do not use this form to submit confidential or time-sensitive information.”
+
+**Do not confirm:** availability, willingness to take any particular case, or `source-checked`. No contact. No submission.
+
+Importable brief: `evals/outreach_import/generic_1983_ms_brief.json`. Import lands `candidate` + `verbatim-unverified` + `form`.

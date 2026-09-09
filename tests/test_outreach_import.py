@@ -7,6 +7,8 @@ import unittest
 from matterkit import discovery, outreach, store
 
 BRIEF = os.path.join(os.path.dirname(__file__), "..", "evals", "outreach_import", "brief.json")
+MAC_BRIEF = os.path.join(os.path.dirname(__file__), "..", "evals", "outreach_import",
+                         "generic_1983_ms_brief.json")
 
 
 def _write(cands):
@@ -208,6 +210,20 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(row["destination_type"], "unknown")
         flags = json.loads(row["flags_json"])
         self.assertIn("source-checked-revoked:unverified", flags)
+        with self.assertRaises(ValueError):
+            outreach.draft_all(self.conn, {"role": "a party"})
+
+    def test_macarthur_generic_brief_stays_candidate(self):
+        result = discovery.import_brief(self.conn, MAC_BRIEF)
+        self.assertEqual(len(result["rejected"]), 0)
+        self.assertEqual(len(result["imported"]), 1)
+        row = self.conn.execute(
+            "SELECT status, destination_type, intake_url, flags_json FROM outreach_recipients"
+        ).fetchone()
+        self.assertEqual(row["status"], "candidate")
+        self.assertEqual(row["destination_type"], "form")
+        self.assertIn("office-select=Mississippi", row["intake_url"])
+        self.assertIn("verbatim-unverified", row["flags_json"])
         with self.assertRaises(ValueError):
             outreach.draft_all(self.conn, {"role": "a party"})
 
