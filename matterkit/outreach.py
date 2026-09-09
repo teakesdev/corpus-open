@@ -180,6 +180,18 @@ PREP_BANNER = (
 )
 
 
+def format_to_line(name: str, org: str) -> str:
+    """Avoid 'Name (Org)' when name already carries the org (Flash P3)."""
+    name = (name or "").strip()
+    org = (org or "").strip()
+    if not org:
+        return f"To: {name}"
+    if org.lower() in name.lower() or name.lower() in org.lower():
+        longer = name if len(name) >= len(org) else org
+        return f"To: {longer}"
+    return f"To: {name} ({org})"
+
+
 def destination_type_of(row) -> str:
     if "destination_type" not in row.keys() or not row["destination_type"]:
         return "unknown"
@@ -278,7 +290,7 @@ def draft_all(conn, posture: dict) -> list[str]:
         dest = destination_type_of(r)
         banner = PREP_BANNER if dest in PREP_ONLY else ""
         body = (
-            f"To: {r['name']} ({r['org']})\n"
+            f"{format_to_line(r['name'], r['org'])}\n"
             f"Intake: {r['intake_channel']} — {r['intake_url']}\n"
             f"Destination-Type: {dest}\n\n"
             + banner
@@ -299,7 +311,8 @@ def build_manifest(conn) -> dict:
     _ensure(conn)
     items = []
     q = """SELECT d.id AS draft_id, d.subject, d.body, r.id AS recipient_id,
-                  r.name, r.org, r.intake_url, r.intake_channel, r.source_url, r.match_reason
+                  r.name, r.org, r.intake_url, r.intake_channel, r.source_url, r.match_reason,
+                  r.destination_type
            FROM outreach_drafts d JOIN outreach_recipients r ON r.id=d.recipient_id
            WHERE r.status='shortlisted'
              AND d.created_at = (
@@ -307,6 +320,7 @@ def build_manifest(conn) -> dict:
                WHERE d2.recipient_id = d.recipient_id)
            ORDER BY r.name"""
     for row in conn.execute(q):
+        dest = destination_type_of(row)
         items.append({
             "recipient_id": row["recipient_id"],
             "name": row["name"],
@@ -318,6 +332,8 @@ def build_manifest(conn) -> dict:
             "draft_id": row["draft_id"],
             "subject": row["subject"],
             "body": row["body"],
+            "destination_type": dest,
+            "preparation_only": dest in PREP_ONLY,
         })
     raw = json.dumps(items, sort_keys=True, ensure_ascii=False).encode("utf-8")
     sha = hashlib.sha256(raw).hexdigest()

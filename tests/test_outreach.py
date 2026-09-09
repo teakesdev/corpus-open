@@ -147,6 +147,23 @@ class OutreachTests(unittest.TestCase):
                 ",".join("?" * len(old_drafts))), tuple(old_drafts)).fetchone()["c"]
         self.assertEqual(n_old, 2)
 
+    def test_to_line_does_not_repeat_org(self):
+        self.assertEqual(
+            outreach.format_to_line("Portal Co (SYNTHETIC)", "Portal Co (SYNTHETIC) (SYNTHETIC)"),
+            "To: Portal Co (SYNTHETIC) (SYNTHETIC)")
+        self.assertEqual(
+            outreach.format_to_line("Pat Rivera, Esq.", "Example County Legal Aid"),
+            "To: Pat Rivera, Esq. (Example County Legal Aid)")
+
+    def test_manifest_shows_prep_only(self):
+        outreach.seed_synthetic(self.conn)
+        outreach.draft_all(self.conn, SYNTH_POSTURE)
+        man = outreach.build_manifest(self.conn)
+        self.assertTrue(all(it["destination_type"] == "form" for it in man["items"]))
+        self.assertTrue(all(it["preparation_only"] for it in man["items"]))
+        self.assertTrue(all("PREPARATION ONLY" in it["body"] for it in man["items"]))
+        self.assertTrue(all("Destination-Type: form" in it["body"] for it in man["items"]))
+
 
 if __name__ == "__main__":
     unittest.main()
