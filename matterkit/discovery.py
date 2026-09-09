@@ -75,6 +75,10 @@ def _flags(retrieved_at: str, extra: list[str]) -> list[str]:
     flags = list(extra)
     try:
         ts = datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
+        # Date-only briefs (the documented format) parse naive — treat as UTC
+        # midnight; a naive timestamp never means local time.
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
         if datetime.now(timezone.utc) - ts > STALE_AFTER:
             flags.append("stale-evidence")
     except ValueError:
