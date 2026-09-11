@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS citation_extractions (
   status TEXT NOT NULL CHECK (status IN ('extracted','extraction-failed')),
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS document_pages (
+  document_sha256 TEXT NOT NULL,
+  page_number INTEGER NOT NULL,
+  text_sha256 TEXT,
+  text TEXT,
+  status TEXT NOT NULL CHECK (status IN ('extracted','extraction-failed')),
+  PRIMARY KEY (document_sha256, page_number)
+);
 """
 
 VALID_STATUS = {"DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"}
