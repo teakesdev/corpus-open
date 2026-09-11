@@ -5,6 +5,10 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml/badge.svg)](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml)
 
+<p align="center">
+  <img src="assets/CorpusOpenLegalKit.png" alt="Corpus Open Legal Kit — open-source legal tools for humans and AI agents" width="100%">
+</p>
+
 The public project name is **Corpus Open**. The code, CLI, and skill stay `matter-kit`. Live case files never belong in this repository.
 
 Matter Kit turns a folder of case files into a *matter*: hashed, tamper-evident
