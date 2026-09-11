@@ -35,7 +35,7 @@ Every substantive assertion gets exactly one epistemic label:
 - `UNKNOWN` — explicitly unknown beats silently assumed.
 
 Agents may NOT upgrade a label without adding a new source. Custody status for
-documents uses the same five words as the Mississippi Corruption workspace rules:
+documents uses the same five words:
 `verified / needs-source / unverified / superseded / excluded`.
 
 ## Working rules learned the hard way (follow these)
@@ -47,14 +47,14 @@ documents uses the same five words as the Mississippi Corruption workspace rules
 5. **Keep speculative theories out of anything that leaves the matter** (packets, filings, outreach). They live in Research/ under HYPOTHESIS until proven.
 6. **Never expose raw IPs, emails, phone numbers, account identifiers** in anything public-facing.
 7. **Secondary docket indexes are leads, not records.** Mark deadlines from them `working-estimate` + `secondary-source` until an official document lands in the store.
-8. **Wrong-entity naming kills claims.** Naming "X Police Department" instead of "City of X" got a municipal defendant dismissed unopposed in a real S.D. Miss. case (*Macon*, 3:24-cv-00807). Check party capacity carefully.
+8. **Wrong-entity naming kills claims.** Naming "X Police Department" instead of "City of X" has gotten municipal defendants dismissed unopposed. Check party capacity carefully.
 
 ## Facts & deadlines
 
 ```bash
-matter fact add <dir> --text "Connie owns both 1102 and 1104 Range Ave" --status DOCUMENTED-FACT --source "Evidence/EVIDENCE_INVENTORY.md@Tier 1 #6"
+matter fact add <dir> --text "Property records show plaintiff owns both parcels" --status DOCUMENTED-FACT --source "Evidence/EVIDENCE_INVENTORY.md@Tier 1 #6"
 matter fact list <dir> [--status ALLEGATION]     # unsupported rows render **[UNSUPPORTED]**
-matter deadline add <dir> --label "Rule 4(m) service deadline" --due 2026-10-14 --rule "Fed. R. Civ. P. 4(m); IFP granted 7/16" --confidence hard --verification secondary-source
+matter deadline add <dir> --label "Rule 4(m) service deadline" --due 2026-10-14 --rule "Fed. R. Civ. P. 4(m)" --confidence hard --verification secondary-source
 ```
 
 An assertion with no recognized source renders `[UNSUPPORTED]` everywhere. That

@@ -5,7 +5,7 @@
   "type": "object",
   "$defs": {
     "StatusLabel": {
-      "description": "Evidence/record custody status (from the Mississippi Corruption operating rules, proven in practice).",
+      "description": "Evidence/record custody status.",
       "enum": ["verified", "needs-source", "unverified", "superseded", "excluded"]
     },
     "AssertionLabel": {
