@@ -1,6 +1,11 @@
-# Matter Kit
+# Corpus Open
 
-**Provenance-enforced case organization for people litigating without a lawyer — operable by any AI agent.**
+**Matter Kit** — provenance-enforced case organization for people litigating without a lawyer — operable by any AI agent.
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml/badge.svg)](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml)
+
+The public project name is **Corpus Open**. The code, CLI, and skill stay `matter-kit`. Live case files never belong in this repository.
 
 Matter Kit turns a folder of case files into a *matter*: hashed, tamper-evident
 source documents plus a structured store where every substantive assertion is
@@ -70,8 +75,8 @@ See `rfcs/0001-provider-neutral-search-adapters.md`.
 
 `skills/matter-kit/SKILL.md` teaches agents the operating discipline: the five
 epistemic labels, media-before-strategy rule, citation-verification habit,
-date-discrepancy preservation, and the folder taxonomy proven on a live federal
-civil-rights matter. Copy or symlink it into your agent's skill directory:
+date-discrepancy preservation, and the folder taxonomy. Copy or symlink it into
+your agent's skill directory:
 
 ```bash
 ln -s /path/to/matter-kit/skills/matter-kit ~/.hermes/skills/matter-kit
@@ -91,3 +96,7 @@ v0.1 — dogfooding stage. Schema may change; hashing is stable.
 
 License: Apache-2.0. Not affiliated with any bar association; nothing here is
 legal advice or a substitute for a licensed attorney.
+
+Built while running [Corpus](https://corpuslaw.us). The kit is free and local;
+optional `law.*` search against Corpus is the only paid hook, never required
+to organize a matter.

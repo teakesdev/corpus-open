@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 .matter/
+.pytest_cache/
+.DS_Store
