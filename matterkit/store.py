@@ -67,6 +67,30 @@ CREATE TABLE IF NOT EXISTS document_pages (
   status TEXT NOT NULL CHECK (status IN ('extracted','extraction-failed')),
   PRIMARY KEY (document_sha256, page_number)
 );
+-- RFC 0005: DOCX content, addressed by STRUCTURAL locator.
+-- Deliberately a sibling of document_pages rather than a reuse of it: DOCX
+-- has no rendered page numbers (pagination is produced by the renderer, not
+-- stored in the file), so a page_number here would be a fabricated citation.
+-- There is therefore no page_number column, and locator_scheme is constrained
+-- to the one scheme this table can honestly hold. Purely additive: existing
+-- stores gain the table on next connect; no data migration, and nothing in
+-- document_pages is read or rewritten.
+CREATE TABLE IF NOT EXISTS document_blocks (
+  document_sha256 TEXT NOT NULL,
+  locator_scheme TEXT NOT NULL CHECK (locator_scheme IN ('docx-structural')),
+  part TEXT NOT NULL,                -- OOXML part, e.g. word/document.xml
+  locator TEXT NOT NULL,             -- canonical path, e.g. word/document.xml#b3/r1/c0/b0
+  block_index INTEGER NOT NULL,      -- reading-order ordinal; -1 on a failure row
+  container_type TEXT NOT NULL
+    CHECK (container_type IN ('paragraph','table-cell','part')),
+  path TEXT NOT NULL,                -- JSON array of the locator's integer path
+  char_start INTEGER, char_end INTEGER,   -- offsets into the extracted part text
+  text TEXT,
+  text_sha256 TEXT,
+  status TEXT NOT NULL CHECK (status IN ('extracted','extraction-failed')),
+  reason TEXT,
+  PRIMARY KEY (document_sha256, part, locator)
+);
 """
 
 VALID_STATUS = {"DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"}
