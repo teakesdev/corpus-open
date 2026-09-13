@@ -793,7 +793,10 @@ _BLOCK_COLUMNS = (
 
 
 def record_blocks(conn, document_sha256: str, doc: DocumentText) -> int:
-    """Persist a DOCX extraction into `document_blocks`. Returns rows written.
+    """Write a DOCX extraction into `document_blocks` on `conn`. Returns rows written.
+
+    The caller owns the transaction — this function never commits, so the
+    write can be rolled back with the rest of the caller's unit of work.
 
     A failed extraction writes exactly one row — status `extraction-failed`,
     no text, the reason kept — so the store records that the document was
@@ -833,5 +836,4 @@ def record_blocks(conn, document_sha256: str, doc: DocumentText) -> int:
     conn.executemany(
         f"INSERT OR REPLACE INTO document_blocks ({','.join(_BLOCK_COLUMNS)}) "
         f"VALUES ({placeholders})", rows)
-    conn.commit()
     return len(rows)
