@@ -165,10 +165,15 @@ def cmd_cite(args):
 
 
 def cmd_pages(args):
-    """pages <dir> [path] — extract document text with page locators (RFC 0004).
+    """pages <dir> [path] — extract document text with source locators.
 
     Stdlib-only. Scanned/LZW/CID-font PDFs fail honestly per page; nothing is
-    ever silently empty. Results write to document_pages keyed by sha256+page.
+    ever silently empty. PDF/text results write to document_pages keyed by
+    sha256+page (RFC 0004).
+
+    DOCX (RFC 0005) is routed to structural locators and written to
+    document_blocks instead. A DOCX never produces a document_pages row: the
+    format carries no rendered page numbers, so one would have to be invented.
     """
     conn = store.connect(args.case_dir)
     from matterkit import extract, ingest
@@ -190,6 +195,24 @@ def cmd_pages(args):
     total_ok = total_fail = 0
     for path, sha in files:
         doc = extract.extract_text(path)
+        if doc.locator_scheme == extract.LOCATOR_SCHEME_DOCX:
+            extract.record_blocks(conn, sha, doc)
+            name = os.path.basename(path)
+            if doc.status == "extracted":
+                total_ok += len(doc.blocks)
+                print(f"✓ {name}: {len(doc.blocks)} block(s) "
+                      f"[{doc.locator_scheme}; DOCX carries no page numbers]")
+                if doc.parts and doc.parts.skipped:
+                    print(f"   · skipped by design: "
+                          f"{', '.join(doc.parts.skipped)}")
+                if doc.parts and doc.parts.unhandled:
+                    print(f"   ⚠ not descended into: "
+                          f"{', '.join(doc.parts.unhandled)}")
+            else:
+                total_fail += 1
+                print(f"✗ {name}: extraction failed (0 block(s))")
+                print(f"   ⚠ {doc.reason}")
+            continue
         for pg in doc.pages:
             conn.execute(
                 "INSERT OR REPLACE INTO document_pages "
@@ -208,7 +231,8 @@ def cmd_pages(args):
             if pg.status == "extraction-failed":
                 print(f"   ⚠ page {pg.number}: {pg.reason}")
     conn.commit()
-    print(f"pages: {total_ok} extracted · {total_fail} failed (never silently empty)")
+    print(f"located units: {total_ok} extracted · {total_fail} failed "
+          f"(never silently empty)")
 
 
 def cmd_auth_stage(args):
