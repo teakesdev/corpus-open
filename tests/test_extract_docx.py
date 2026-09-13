@@ -574,6 +574,20 @@ class TestBlockStorage(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(count, 2)
 
+    def test_record_blocks_does_not_commit_caller_transaction(self):
+        """The caller owns the transaction: record_blocks never commits."""
+        with docx_file(para("A") + para("B")) as p:
+            doc = extract.extract_docx(p)
+            sha = hashlib.sha256(Path(p).read_bytes()).hexdigest()
+        self.conn.execute("BEGIN")
+        n = extract.record_blocks(self.conn, sha, doc)
+        self.assertEqual(n, len(doc.blocks))
+        self.conn.rollback()
+        count = self.conn.execute(
+            "SELECT COUNT(*) FROM document_blocks"
+        ).fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_failed_extraction_records_one_failure_row_and_no_content(self):
         with DocxFixture(b"not a zip at all") as p:
             doc = extract.extract_docx(p)
