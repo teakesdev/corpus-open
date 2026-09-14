@@ -233,6 +233,96 @@ a row would collapse cases 2 and 3. Both are lies about the evidence, so both ar
 - **Nothing is written.** No part is extracted to disk, so archive path traversal is not
   reachable. The source is opened read-only, and a test re-hashes it after extraction.
 
+### 4a. Resource bounds
+
+`MAX_PART_BYTES` guards a single member. Nothing bounds the archive, and the obvious
+fix — checking `len(zf.namelist())` inside `_extract_docx_open` — is no guard at all:
+`ZipFile.__init__` has already read the whole central directory and materialised one
+`ZipInfo` per entry before that line runs (measured, CPython 3.11: 100,000 tiny members
+≈ 55 MB of `ZipInfo` heap, ≈ 0.27 s of parsing). A real bound must run **before
+`ZipFile` is constructed**.
+
+#### The pre-open member bound — the GUARD
+
+Read the End Of Central Directory record straight off the file's tail: seek to EOF,
+read at most `22 + 65,535 = 65,557` bytes (fixed EOCD length plus maximum comment
+length), scan right-to-left for signature `0x06054b50`, and accept a candidate only if
+its comment-length field puts the record's end exactly at EOF. Anything else fails as
+corrupt/truncated — we do not go fishing for another record. Offsets are from the
+record's first byte, little-endian (APPNOTE 4.3.16):
+
+- `10` — total entries in the central directory (2 bytes) ← the bounded field
+- `12` — size of central directory (4 bytes)
+- `20` — comment length (2 bytes)
+
+A saturated classic field holds the sentinel `0xFFFF` (2-byte) or `0xFFFFFFFF`
+(4-byte), meaning "consult ZIP64" (APPNOTE 4.4.1.4). The ZIP64 EOCD **locator**
+(`0x07064b50`, 20 bytes) sits immediately before the EOCD and gives the ZIP64 EOCD
+record's offset at locator offset `8` (8 bytes). That **record** (`0x06064b50`, 56-byte
+fixed portion, APPNOTE 4.3.14) carries:
+
+- `32` — total entries in the central directory (8 bytes) ← the bounded field
+- `40` — size of central directory (8 bytes)
+- `4` — size of this record (8 bytes); `value + 12` must equal the fixed portion plus
+  any extensible-data sector
+
+**Forged EOCDs.** What is provable pre-open is structural, and all of it is refused as
+corrupt/truncated before `ZipFile` exists: a sentinel with no locator at
+`eocd_start − 20`; a locator pointing at bytes that are not `0x06064b50`; a ZIP64
+record whose declared size does not end at the locator; `cd_offset + cd_size` beyond
+EOF; a count that cannot fit in `cd_size` (a central-directory entry is ≥ 46 bytes, so
+`count × 46 > cd_size` is a lie). What is *not* provable pre-open: an internally
+consistent but false count. No field is authenticated, and we will not claim
+otherwise. So one cheap post-open reconciliation is added — `len(zf.namelist())` must
+equal the pre-open count; a mismatch is refused as corrupt, never silently trusted —
+labelled as what it is: an honesty check, not a resource guard. The guard already ran.
+
+**`MAX_ARCHIVE_MEMBERS = 10_000`.** A real Word `.docx` is ~10–40 parts (a minimal
+package is ~10; media- and annotation-heavy documents reach the hundreds). 10,000 is
+two to three orders of magnitude of headroom, and it caps what a hostile archive that
+passes the guard can force `ZipFile` to materialise at the measured ~5 MB / ~20 ms.
+
+#### Aggregate uncompressed bytes — an acceptance limit, not a guard
+
+**No: an aggregate-uncompressed bound is not achievable pre-open.** Per-member
+uncompressed sizes live in the central-directory entries; the EOCD gives only the
+directory's *size* and *count*, and no tail record sums member sizes. Obtaining the sum
+requires parsing the directory — the very cost the guard exists to avoid. The honest
+split, and the labels must not be blurred:
+
+- **GUARD (pre-open):** the member bound above. Refuses before any `ZipFile` exists.
+- **ACCEPTANCE LIMIT (post-open):** `MAX_ARCHIVE_UNCOMPRESSED_BYTES = 256 MiB`
+  (8 × `MAX_PART_BYTES`), a checked sum of every member's declared `file_size` in
+  `_extract_docx_open`, before any part read. It refuses *after* the directory was
+  already parsed, and it is a declared-size sanity check: we never decompress members
+  other than `word/document.xml`, so their real inflation is never realised
+  in-process, and the existing declared-plus-bounded-read pair stays the only
+  per-member enforcement.
+
+#### Residual exposure
+
+- A `members` refusal reads ≤ `4` head bytes + ≤ `65,557` tail bytes, plus ≤ `20`
+  (locator — widen the tail window to `65,577` so it is always inside) and ≤ `56`
+  (ZIP64 EOCD) when sentinels are present: **worst case ≤ 65,637 bytes, zero
+  central-directory bytes, zero `ZipInfo` allocations.**
+- An `aggregate` refusal cannot prevent what already happened: `ZipFile.__init__` read
+  the declared `cd_size` and built every `ZipInfo`. The guard bounds it — ≤ 10,000
+  entries, `cd_size` ≤ file size — so the residual is ~5 MB / ~20 ms plus one
+  directory-sized read, paid before the sum exists. The acceptance limit does not
+  remove it; nothing post-open can.
+- Unavoidable on every accepted path: the tail window itself, and `zipfile`'s own
+  re-parse of the EOCD after our guard passes.
+
+#### Failure vocabulary (§3 style)
+
+| Condition | Reason starts | Fires |
+|---|---|---|
+| total-entry count > `MAX_ARCHIVE_MEMBERS` | `size_limit:members` | pre-open — the GUARD; no `ZipFile` constructed |
+| Σ declared `file_size` > `MAX_ARCHIVE_UNCOMPRESSED_BYTES` | `size_limit:aggregate` | post-open — acceptance limit; directory already parsed |
+
+Both exit through `_docx_failed`: `status='extraction-failed'`, zero blocks, zero
+pages, reason preserved.
+
 ---
 
 ## 5. Part-set policy
