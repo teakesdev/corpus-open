@@ -490,6 +490,28 @@ PRIMARY_PART = "word/document.xml"
 #: cannot get past it either.
 MAX_PART_BYTES = 32 * 1024 * 1024
 
+#: ============================================================================
+#: ARCHIVE BOUNDS (RFC 0005 §4a). Two limits, two labels, and the labels are
+#: load-bearing -- do not blur them:
+#:
+#:   MAX_ARCHIVE_MEMBERS is the GUARD. It is enforced PRE-OPEN, straight off
+#:   the archive's tail records, BEFORE `zipfile.ZipFile` is constructed --
+#:   because `ZipFile.__init__` reads the whole central directory and
+#:   materialises one `ZipInfo` per entry before any in-process check could
+#:   run. A refusal here has allocated no `ZipInfo` objects and read no
+#:   central-directory bytes. `size_limit:members` failures fire before a
+#:   ZipFile object exists.
+#:
+#:   MAX_ARCHIVE_UNCOMPRESSED_BYTES is the ACCEPTANCE LIMIT, NOT a guard. It
+#:   is enforced POST-OPEN, inside `_extract_docx_open`, after `ZipFile` has
+#:   already parsed the directory -- per-member uncompressed sizes live in
+#:   central-directory entries and no tail record sums them, so the sum is
+#:   unobtainable without paying the parse the guard exists to avoid. It is a
+#:   declared-size sanity check; nothing post-open can undo the parse.
+#: ============================================================================
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+
 #: Local-file-header and end-of-central-directory signatures. Checked before
 #: handing the file to `zipfile`, so a renamed .txt/.pdf is refused on its own
 #: bytes rather than on a downstream parse error.
@@ -518,6 +540,136 @@ _INERT_BLOCK_TAGS = frozenset({
 #: Table nesting beyond this is pathological rather than a real document;
 #: descending stops and the fact is recorded instead of silently dropped.
 _MAX_TABLE_DEPTH = 24
+
+#: Zip tail-record signatures (APPNOTE): End Of Central Directory, ZIP64 EOCD
+#: locator, ZIP64 EOCD record.
+_SIG_EOCD = b"PK\x05\x06"
+_SIG_Z64_LOCATOR = b"PK\x06\x07"
+_SIG_Z64_EOCD = b"PK\x06\x06"
+
+#: Fixed record lengths, in bytes.
+_EOCD_LEN = 22
+_Z64_LOCATOR_LEN = 20
+_Z64_EOCD_FIXED_LEN = 56
+
+#: Tail window read by the GUARD: the widest comment the EOCD can declare
+#: (65,535) plus the EOCD itself (22) plus the ZIP64 locator (20), so the
+#: locator always sits inside the single read. The guard's whole worst case is
+#: 4 head bytes + this window + one 56-byte ZIP64-EOCD read = 65,637 bytes;
+#: not one central-directory byte is touched.
+_TAIL_WINDOW = 65_535 + _EOCD_LEN + _Z64_LOCATOR_LEN   # 65,577
+
+#: Minimum fixed length of one central-directory file header (APPNOTE 4.3.12).
+#: An entry can carry extra name/extra/comment bytes on top of this, never
+#: fewer, so `entries_total * 46 > cd_size` is a provable structural lie.
+_CD_HEADER_MIN = 46
+
+
+def _tail_record_error(detail: str) -> str:
+    """Every pre-open structural lie exits as corrupt/truncated (§3 style)."""
+    return f"corrupt or truncated zip archive: {detail}"
+
+
+def _read_zip_tail_records(p: Path, file_size: int):
+    """Pre-open reader for the GUARD. Returns (entries_total, cd_size) or a
+    reason string; a str return means refuse, before any ZipFile exists.
+
+    Reads only the file's tail: at most _TAIL_WINDOW (65,577) bytes, scanned
+    right-to-left for the EOCD signature. A candidate is accepted only if its
+    comment-length field puts the record's end exactly at EOF -- we do not go
+    fishing for another record. A saturated classic field (0xFFFF / 0xFFFFFFFF)
+    means "consult ZIP64" (APPNOTE 4.4.1.4); the sentinels fire INDEPENDENTLY
+    PER FIELD, so an archive with entries_total == 0xFFFF and a perfectly
+    normal 32-bit cd_size is a real case, not a hypothetical one -- each
+    saturated field is replaced from the ZIP64 record and each unsaturated
+    field is kept as-is. Every structural lie found here is refused as
+    corrupt/truncated rather than passed on to `zipfile` to interpret.
+    """
+    if file_size < _EOCD_LEN:
+        return _tail_record_error(
+            f"file is {file_size} bytes, too short to hold a {_EOCD_LEN}-byte "
+            f"end-of-central-directory record")
+    try:
+        with p.open("rb") as fh:
+            fh.seek(file_size - _TAIL_WINDOW if file_size > _TAIL_WINDOW else 0)
+            tail = fh.read(_TAIL_WINDOW)
+            tail_start = file_size - len(tail)
+            # One candidate, the rightmost: if its comment length does not put
+            # the record's end exactly at EOF, the archive is corrupt and we
+            # refuse -- we do not go fishing for another record.
+            eocd_off = tail.rfind(_SIG_EOCD)
+            if (eocd_off < 0 or eocd_off + _EOCD_LEN > len(tail)
+                    or (tail_start + eocd_off + _EOCD_LEN
+                        + int.from_bytes(tail[eocd_off + 20:eocd_off + 22],
+                                         "little")) != file_size):
+                return _tail_record_error(
+                    "no end-of-central-directory record ends exactly at EOF")
+            entries16 = int.from_bytes(tail[eocd_off + 10:eocd_off + 12], "little")
+            cd_size = int.from_bytes(tail[eocd_off + 12:eocd_off + 16], "little")
+            cd_offset = int.from_bytes(tail[eocd_off + 16:eocd_off + 20], "little")
+
+            # Sentinels fire INDEPENDENTLY PER FIELD: any relevant field
+            # saturated on its own forces the ZIP64 consult (an archive can
+            # have entries_total == 0xFFFF while cd_offset is a perfectly
+            # normal 32-bit value). Once consulted, the ZIP64 record carries
+            # the actual values: total entries at +32, cd_size at +40; a
+            # saturated cd_offset is replaced from +48, an unsaturated
+            # 32-bit cd_offset stays as the EOCD declared it.
+            entries_sentinel = entries16 == 0xFFFF
+            size_sentinel = cd_size == 0xFFFFFFFF
+            offset_sentinel = cd_offset == 0xFFFFFFFF
+            entries_total = entries16
+            if entries_sentinel or size_sentinel or offset_sentinel:
+                loc_off = eocd_off - _Z64_LOCATOR_LEN
+                if loc_off < 0 or tail[loc_off:loc_off + 4] != _SIG_Z64_LOCATOR:
+                    return _tail_record_error(
+                        "zip64 sentinel field in the EOCD but no zip64 EOCD "
+                        "locator immediately before it")
+                locator_start = tail_start + loc_off
+                z64_offset = int.from_bytes(tail[loc_off + 8:loc_off + 16], "little")
+                if z64_offset < 0 or z64_offset + _Z64_EOCD_FIXED_LEN > file_size:
+                    return _tail_record_error(
+                        f"zip64 EOCD locator points at offset {z64_offset}, "
+                        f"outside the archive")
+                z64_off = z64_offset - tail_start
+                if 0 <= z64_off and z64_off + _Z64_EOCD_FIXED_LEN <= len(tail):
+                    rec = tail[z64_off:z64_off + _Z64_EOCD_FIXED_LEN]
+                else:
+                    # ZIP64 record sits before the tail window (only possible
+                    # behind a near-maximal EOCD comment): one extra bounded
+                    # read of exactly the 56-byte fixed portion.
+                    fh.seek(z64_offset)
+                    rec = fh.read(_Z64_EOCD_FIXED_LEN)
+                if rec[:4] != _SIG_Z64_EOCD:
+                    return _tail_record_error(
+                        f"zip64 EOCD locator points at offset {z64_offset}, "
+                        f"which does not begin a zip64 EOCD record")
+                # record-size field (ZIP64 EOCD +4): `value + 12` is the whole
+                # record, and the record must end exactly at the locator.
+                rec_size = int.from_bytes(rec[4:12], "little")
+                if z64_offset + rec_size + 12 != locator_start:
+                    return _tail_record_error(
+                        f"zip64 EOCD record declares size {rec_size}; size+12 "
+                        f"does not end at the locator")
+                if entries_sentinel:
+                    entries_total = int.from_bytes(rec[32:40], "little")
+                if size_sentinel:
+                    cd_size = int.from_bytes(rec[40:48], "little")
+                if offset_sentinel:
+                    cd_offset = int.from_bytes(rec[48:56], "little")
+
+            if cd_offset + cd_size > file_size:
+                return _tail_record_error(
+                    f"central directory claims offset {cd_offset} + size "
+                    f"{cd_size}, past end of file ({file_size} bytes)")
+            if entries_total * _CD_HEADER_MIN > cd_size:
+                return _tail_record_error(
+                    f"central directory claims {entries_total} entries but is "
+                    f"only {cd_size} bytes; at {_CD_HEADER_MIN} bytes minimum "
+                    f"per entry the count is a structural lie")
+            return entries_total, cd_size
+    except OSError as exc:
+        return _tail_record_error(f"cannot read archive tail: {exc}")
 
 
 def _local(tag: str) -> str:
@@ -654,6 +806,7 @@ def extract_docx(path: str, *, max_part_bytes: int = MAX_PART_BYTES) -> Document
     try:
         with p.open("rb") as fh:
             head = fh.read(4)
+        file_size = p.stat().st_size
     except OSError as exc:
         return _docx_failed(path, f"cannot read file: {exc}")
     if head not in ZIP_MAGICS:
@@ -661,9 +814,24 @@ def extract_docx(path: str, *, max_part_bytes: int = MAX_PART_BYTES) -> Document
             path, f"not a zip archive: leading bytes {head!r} are not a zip "
                   f"signature, so the .docx extension does not match the content")
 
+    # THE GUARD (RFC 0005 §4a): the member bound runs HERE, before
+    # `zipfile.ZipFile` is constructed, because `ZipFile.__init__` reads the
+    # whole central directory and materialises one `ZipInfo` per entry before
+    # any in-process check could run. A `size_limit:members` refusal means no
+    # ZipFile object ever existed. Do not move this below the `with`.
+    tail = _read_zip_tail_records(p, file_size)
+    if isinstance(tail, str):                       # a structural lie: refuse
+        return _docx_failed(path, tail)
+    preopen_entries, _cd_size = tail
+    if preopen_entries > MAX_ARCHIVE_MEMBERS:
+        return _docx_failed(
+            path, f"size_limit:members — archive declares {preopen_entries} "
+                  f"entries, over the {MAX_ARCHIVE_MEMBERS}-member guard; "
+                  f"refused pre-open, before any ZipFile was constructed")
+
     try:
         with zipfile.ZipFile(p, "r") as zf:
-            return _extract_docx_open(path, zf, max_part_bytes)
+            return _extract_docx_open(path, zf, max_part_bytes, preopen_entries)
     except zipfile.BadZipFile as exc:
         return _docx_failed(path, f"corrupt or truncated zip archive: {exc}")
     except (EOFError, zlib.error) as exc:
@@ -675,10 +843,37 @@ def extract_docx(path: str, *, max_part_bytes: int = MAX_PART_BYTES) -> Document
 
 
 def _extract_docx_open(path: str, zf: zipfile.ZipFile,
-                       max_part_bytes: int) -> DocumentText:
+                       max_part_bytes: int, preopen_entries: int) -> DocumentText:
     names = tuple(zf.namelist())
     skipped = tuple(n for n in names if _SKIPPED_PART_RE.match(n))
     inv = PartInventory(seen=names, skipped=skipped)
+
+    # Honesty check, NOT a resource guard — the guard already ran pre-open
+    # (`size_limit:members`, before ZipFile existed). No field of the tail
+    # records is authenticated, so an internally consistent but false count is
+    # not provable pre-open; this reconciliation is the honest follow-up. The
+    # directory `ZipFile` actually materialised must equal the pre-open count.
+    if len(names) != preopen_entries:
+        return _docx_failed(
+            path, f"corrupt or truncated zip archive: end-of-central-directory "
+                  f"declares {preopen_entries} entries but the central "
+                  f"directory holds {len(names)}; the tail records lie about "
+                  f"the archive they describe", inv)
+
+    # ACCEPTANCE LIMIT, not a guard (RFC 0005 §4a): `ZipFile.__init__` has
+    # already parsed the whole directory before this line runs, and nothing
+    # post-open can undo that — the pre-open guard is what bounded it. This is
+    # a checked sum of every member's declared uncompressed size, before any
+    # part is read; a declared-size sanity check, not per-member enforcement
+    # (the declared-plus-bounded-read pair on the one part we open stays that).
+    total_declared = sum(zi.file_size for zi in zf.infolist())
+    if total_declared > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+        return _docx_failed(
+            path, f"size_limit:aggregate — members declare {total_declared} "
+                  f"uncompressed bytes in total, over the "
+                  f"{MAX_ARCHIVE_UNCOMPRESSED_BYTES}-byte acceptance limit; "
+                  f"refused after the directory was parsed, which is why "
+                  f"this is an acceptance limit and not a guard", inv)
 
     if PRIMARY_PART not in names:
         return _docx_failed(

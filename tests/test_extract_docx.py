@@ -11,11 +11,13 @@ import hashlib
 import io
 import os
 import sqlite3
+import struct
 import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -717,6 +719,370 @@ class TestHostileInput(unittest.TestCase):
         inner = build_docx_bytes(standard_parts(para("Hidden")))
         with DocxFixture(b"%PDF-1.4\n" + inner) as p:
             self.assert_failed(extract.extract_docx(p), "zip")
+
+
+# --------------------------------------------------------------------------
+# Resource bounds (RFC 0005 §4a): the pre-open GUARD vs the post-open
+# ACCEPTANCE LIMIT. The spy below is the whole point of these tests:
+# `size_limit:members` must refuse with ZERO ZipFile constructions (the guard
+# ran before `ZipFile.__init__` materialised a ZipInfo per entry), while
+# `size_limit:aggregate` must refuse with AT LEAST ONE (the acceptance limit
+# runs post-open, after the directory was already parsed). If the two labels
+# were swapped, the construction counts would swap with them.
+# --------------------------------------------------------------------------
+class ZipFileSpy:
+    """Replaces `zipfile.ZipFile` AS SEEN BY `matterkit.extract` and counts
+    constructions, delegating to the real class so post-open paths still run.
+
+    Captures the real class at construction time -- build the spy BEFORE the
+    patch is active, and build any fixture bytes with `zipfile` before too.
+    """
+
+    def __init__(self):
+        self._real = zipfile.ZipFile
+        self.constructions = 0
+
+    def __call__(self, *args, **kwargs):
+        self.constructions += 1
+        return self._real(*args, **kwargs)
+
+
+def hand_eocd(entries: int, cd_size: int, cd_offset: int) -> bytes:
+    """Hand-built End Of Central Directory record, 22 bytes (APPNOTE 4.3.16).
+    Entries total at +10 (2B), cd_size at +12 (4B), cd_offset at +16 (4B)."""
+    return (b"PK\x05\x06"
+            + struct.pack("<HHHHIIH", 0, 0, entries, entries,
+                          cd_size, cd_offset, 0))
+
+
+def hand_z64_locator(z64_offset: int) -> bytes:
+    """Hand-built ZIP64 EOCD locator, 20 bytes; record offset at +8 (8B)."""
+    return b"PK\x06\x07" + struct.pack("<IQI", 0, z64_offset, 1)
+
+
+def hand_z64_eocd(entries_total: int, cd_size: int, cd_offset: int,
+                  rec_size: int = 44) -> bytes:
+    """Hand-built ZIP64 EOCD record, 56-byte fixed portion (APPNOTE 4.3.14).
+    Record size at +4 (8B), total entries at +32 (8B), cd_size at +40 (8B),
+    cd_offset at +48 (8B)."""
+    return (b"PK\x06\x06"
+            + struct.pack("<QHHIIQQQQ", rec_size, 45, 45, 0, 0,
+                          entries_total, entries_total, cd_size, cd_offset))
+
+
+def synthetic_zip(tail: bytes, filler_len: int) -> bytes:
+    """A file whose head is a zip signature and whose tail is hand-built.
+
+    The pre-open reader sees only head magic + tail records, so synthetic
+    bytes test the guard faithfully -- no need for 65,536+ real members
+    (`zipfile` will not emit ZIP64 for few entries, and a real ZIP64 fixture
+    would be ~6 MB and slow). Every fixture here is refused pre-open or
+    parsed by the reader directly, so the filler is never interpreted.
+    """
+    return b"PK\x03\x04" + b"\x00" * filler_len + tail
+
+
+def many_member_zip(n: int) -> bytes:
+    """A real (non-ZIP64) zip with `n` tiny members. ~0.05 s for 10k."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for i in range(n):
+            zf.writestr(f"m{i:05d}", b"x")
+    return buf.getvalue()
+
+
+def zip64_declared_sizes(raw: bytes, declared: int) -> bytes:
+    """Rewrite every central-directory entry to declare `declared` uncompressed
+    bytes the ZIP64 way: the classic 4-byte field saturated to 0xFFFFFFFF and
+    the true 64-bit size carried in an extra field (header 0x0001, APPNOTE
+    4.5.3) -- exactly how a member over 4 GiB declares itself.
+
+    Only the directory is rewritten; no member is remotely that large, which is
+    the point: the acceptance limit sums DECLARED sizes. A reader that took the
+    saturated 32-bit field at face value would compute a different (smaller)
+    total, so the asserted total is what proves the ZIP64 field was honoured.
+    """
+    eocd = raw.rfind(b"PK\x05\x06")
+    count, = struct.unpack("<H", raw[eocd + 10:eocd + 12])
+    cd_offset, = struct.unpack("<I", raw[eocd + 16:eocd + 20])
+    cd, pos = bytearray(), cd_offset
+    for _ in range(count):
+        assert raw[pos:pos + 4] == b"PK\x01\x02", "not a central-directory entry"
+        name_len, extra_len, comment_len = struct.unpack("<HHH", raw[pos + 28:pos + 34])
+        head = bytearray(raw[pos:pos + 46])
+        name = raw[pos + 46:pos + 46 + name_len]
+        comment = raw[pos + 46 + name_len + extra_len:
+                      pos + 46 + name_len + extra_len + comment_len]
+        head[24:28] = b"\xff\xff\xff\xff"          # uncompressed size -> sentinel
+        extra = struct.pack("<HHQ", 0x0001, 8, declared)
+        head[30:32] = struct.pack("<H", len(extra))  # extra field length
+        cd += bytes(head) + name + extra + comment
+        pos += 46 + name_len + extra_len + comment_len
+    # The directory grew, so the EOCD's cd_size must follow it; cd_offset is
+    # unchanged (the directory still starts where the member data ends).
+    return raw[:cd_offset] + bytes(cd) + hand_eocd(count, len(cd), cd_offset)
+
+
+class TestArchiveMembersGuard(unittest.TestCase):
+    """The GUARD: `size_limit:members`, pre-open, no ZipFile constructed."""
+
+    def assert_failed(self, doc, needle):
+        self.assertEqual(doc.status, "extraction-failed")
+        self.assertEqual(doc.blocks, [])
+        self.assertEqual(doc.pages, [])
+        self.assertIsNotNone(doc.reason)
+        self.assertIn(needle, doc.reason.lower())
+
+    def test_10001_tiny_members_refused_pre_open_spy_untouched(self):
+        data = many_member_zip(extract.MAX_ARCHIVE_MEMBERS + 1)
+        # sanity: a real 10,001-member zip is NOT ZIP64, so this exercises
+        # the classic EOCD path (entries total at EOCD+10).
+        self.assertNotIn(b"PK\x06\x07", data[-64:])
+        spy = ZipFileSpy()
+        with DocxFixture(data) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assertIsNotNone(doc.reason)
+        self.assertTrue(doc.reason.startswith("size_limit:members"), doc.reason)
+        self.assert_failed(doc, "size_limit:members")
+        # THE POINT: the guard fired before `zipfile.ZipFile` was constructed.
+        self.assertEqual(spy.constructions, 0)
+
+    def test_zip64_handbuilt_tail_declaring_10001_refused_spy_untouched(self):
+        # Sentinel EOCD (entries 0xFFFF, cd_size 0xFFFFFFFF; cd_offset a
+        # perfectly normal 32-bit value -- sentinels fire per field) +
+        # locator + ZIP64 EOCD record declaring count 10,001.
+        filler = 460_000
+        z64_off = 4 + filler
+        cd_size = (extract.MAX_ARCHIVE_MEMBERS + 1) * 46
+        tail = (hand_z64_eocd(extract.MAX_ARCHIVE_MEMBERS + 1, cd_size, 4)
+                + hand_z64_locator(z64_off)
+                + hand_eocd(0xFFFF, 0xFFFFFFFF, 4))
+        spy = ZipFileSpy()
+        with DocxFixture(synthetic_zip(tail, filler)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assertIsNotNone(doc.reason)
+        self.assertTrue(doc.reason.startswith("size_limit:members"), doc.reason)
+        self.assert_failed(doc, "size_limit:members")
+        self.assertEqual(spy.constructions, 0)
+
+    def test_exactly_max_archive_members_passes_the_guard_then_fails_part_policy(self):
+        data = many_member_zip(extract.MAX_ARCHIVE_MEMBERS)
+        spy = ZipFileSpy()
+        with DocxFixture(data) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        # The guard does NOT fire at exactly the limit; ZipFile IS constructed,
+        # and the archive then fails on part policy (no word/document.xml).
+        self.assertEqual(spy.constructions, 1)
+        self.assert_failed(doc, "word/document.xml")
+        self.assertFalse(doc.reason.startswith("size_limit:"))
+
+    def test_sentinel_without_locator_is_corrupt_spy_untouched(self):
+        data = bytearray(build_docx_bytes(standard_parts(para("x"))))
+        eocd = data.rfind(b"PK\x05\x06")
+        data[eocd + 10:eocd + 12] = struct.pack("<H", 0xFFFF)  # lie: sentinel
+        spy = ZipFileSpy()
+        with DocxFixture(bytes(data)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assert_failed(doc, "corrupt or truncated")
+        self.assert_failed(doc, "locator")
+        self.assertEqual(spy.constructions, 0)
+
+    def test_locator_pointing_at_garbage_is_corrupt_spy_untouched(self):
+        filler = 2_000
+        z64_off = 4 + filler
+        tail = (b"\x00" * 56                      # locator target: garbage
+                + hand_z64_locator(z64_off)
+                + hand_eocd(0xFFFF, 0xFFFFFFFF, 4))
+        spy = ZipFileSpy()
+        with DocxFixture(synthetic_zip(tail, filler)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assert_failed(doc, "corrupt or truncated")
+        self.assertEqual(spy.constructions, 0)
+
+    def test_zip64_record_size_arithmetic_failure_is_corrupt_spy_untouched(self):
+        filler = 2_000
+        z64_off = 4 + filler
+        # Valid signature and fields, but the declared record size does not
+        # put the record's end at the locator (rec_size 999 != 44).
+        tail = (hand_z64_eocd(3, 138, 4, rec_size=999)
+                + hand_z64_locator(z64_off)
+                + hand_eocd(0xFFFF, 0xFFFFFFFF, 4))
+        spy = ZipFileSpy()
+        with DocxFixture(synthetic_zip(tail, filler)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assert_failed(doc, "corrupt or truncated")
+        self.assert_failed(doc, "locator")
+        self.assertEqual(spy.constructions, 0)
+
+    def test_count_times_46_over_cd_size_is_a_provable_lie_spy_untouched(self):
+        # 100 entries cannot live in 1,000 bytes: a central-directory file
+        # header is >= 46 bytes, so the count is provably false.
+        tail = hand_eocd(100, 1_000, 0)
+        spy = ZipFileSpy()
+        with DocxFixture(synthetic_zip(tail, 3_000)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assert_failed(doc, "corrupt or truncated")
+        self.assert_failed(doc, "structural lie")
+        self.assertEqual(spy.constructions, 0)
+
+    def test_cd_offset_plus_size_past_eof_is_corrupt_spy_untouched(self):
+        tail = hand_eocd(1, 100_000, 0)           # 0 + 100,000 > file size
+        spy = ZipFileSpy()
+        with DocxFixture(synthetic_zip(tail, 100)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assert_failed(doc, "corrupt or truncated")
+        self.assertEqual(spy.constructions, 0)
+
+
+class TestAggregateAcceptanceLimit(unittest.TestCase):
+    """The ACCEPTANCE LIMIT: `size_limit:aggregate`, post-open. ZipFile HAS
+    been constructed by the time it fires -- that is the honest difference
+    from the guard, and the spy asserts it."""
+
+    def assert_failed(self, doc, needle):
+        self.assertEqual(doc.status, "extraction-failed")
+        self.assertEqual(doc.blocks, [])
+        self.assertEqual(doc.pages, [])
+        self.assertIsNotNone(doc.reason)
+        self.assertIn(needle, doc.reason.lower())
+
+    def test_small_per_part_big_aggregate_refused_after_open(self):
+        # 9 members, each DECLARED 31 MiB (< the 32 MiB per-part cap), sum
+        # 279 MiB > the 256 MiB aggregate limit. The members on disk are
+        # tiny: only the declared uncompressed-size fields are forged, which
+        # is exactly what the acceptance limit sums.
+        declared = 31 * 1024 * 1024
+        parts = {
+            "[Content_Types].xml": "<Types/>",
+            "_rels/.rels": "<Relationships/>",
+            "word/document.xml": document_xml(para("tiny")),
+        }
+        for i in range(6):
+            parts[f"word/media/img{i}.bin"] = "x"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, data in parts.items():
+                zf.writestr(name, data)
+        raw = bytearray(buf.getvalue())
+        for sig, size_off in ((b"PK\x03\x04", 22), (b"PK\x01\x02", 24)):
+            idx = raw.find(sig)
+            while idx != -1:
+                raw[idx + size_off:idx + size_off + 4] = struct.pack("<I", declared)
+                idx = raw.find(sig, idx + 1)
+        self.assertEqual(len(parts) * declared, 9 * declared)
+        self.assertLess(declared, extract.MAX_PART_BYTES)
+        self.assertGreater(len(parts) * declared, extract.MAX_ARCHIVE_UNCOMPRESSED_BYTES)
+
+        spy = ZipFileSpy()
+        with DocxFixture(bytes(raw)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assertIsNotNone(doc.reason)
+        self.assertTrue(doc.reason.startswith("size_limit:aggregate"), doc.reason)
+        self.assert_failed(doc, "size_limit:aggregate")
+        # THE POINT: post-open by necessity -- the directory was already
+        # parsed, which is why this is an acceptance limit and not a guard.
+        self.assertGreaterEqual(spy.constructions, 1)
+
+
+    def test_zip64_declared_sizes_are_summed_from_the_64_bit_field(self):
+        # The ZIP64 half of the pair: each member declares 5 GiB through a
+        # ZIP64 extra field, over the 32-bit field's whole range. The exact
+        # total in the reason is the assertion that matters -- a reader that
+        # summed the 0xFFFFFFFF sentinels would report 12,884,901,885, not
+        # this, and would still have "refused", which is the silent failure
+        # this test exists to catch.
+        declared = 5 * 1024 ** 3
+        base = build_docx_bytes(standard_parts(para("tiny")))
+        data = zip64_declared_sizes(base, declared)
+        total = 3 * declared                      # 3 parts in standard_parts
+        self.assertGreater(declared, 0xFFFFFFFF)
+        self.assertGreater(total, extract.MAX_ARCHIVE_UNCOMPRESSED_BYTES)
+
+        spy = ZipFileSpy()
+        with DocxFixture(data) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assertIsNotNone(doc.reason)
+        self.assertTrue(doc.reason.startswith("size_limit:aggregate"), doc.reason)
+        self.assertIn(str(total), doc.reason)
+        self.assert_failed(doc, "size_limit:aggregate")
+        self.assertGreaterEqual(spy.constructions, 1)
+
+
+class TestPostOpenCountReconciliation(unittest.TestCase):
+    """The honesty check: a structurally valid but false pre-open count is
+    reconciled against the directory `zipfile` actually materialised."""
+
+    def test_eocd_claiming_fewer_entries_than_the_directory_holds_is_corrupt(self):
+        data = bytearray(build_docx_bytes(standard_parts(para("Hello"))))
+        eocd = data.rfind(b"PK\x05\x06")
+        # 3 real members, EOCD claims 2: internally consistent enough to pass
+        # every pre-open structural check, and false. Never silently trusted.
+        data[eocd + 10:eocd + 12] = struct.pack("<H", 2)
+        spy = ZipFileSpy()
+        with DocxFixture(bytes(data)) as p:
+            with mock.patch.object(extract.zipfile, "ZipFile", spy):
+                doc = extract.extract_docx(p)
+        self.assertEqual(doc.status, "extraction-failed")
+        self.assertEqual(doc.blocks, [])
+        self.assertIsNotNone(doc.reason)
+        self.assertIn("corrupt or truncated", doc.reason.lower())
+        self.assertIn("declares 2", doc.reason)
+        self.assertIn("holds 3", doc.reason)
+        # A post-open refusal: the guard passed, ZipFile was constructed, and
+        # the reconciliation caught the lie.
+        self.assertGreaterEqual(spy.constructions, 1)
+
+
+class TestPreOpenTailReaderOffsets(unittest.TestCase):
+    """Offset regression on the reader itself: distinctive values at EOCD+10
+    /+12 and ZIP64+32/+40 must come back from exactly those offsets, and the
+    per-field sentinels must fire independently."""
+
+    def read_tail(self, data: bytes):
+        with DocxFixture(data) as p:
+            return extract._read_zip_tail_records(Path(p), os.path.getsize(p))
+
+    def test_classic_eocd_reads_count_at_plus10_and_cd_size_at_plus12(self):
+        # 1,234 * 46 = 56,764 <= 56,789, so the pair is structurally sound
+        # and both distinctive values must survive verbatim.
+        data = synthetic_zip(hand_eocd(1234, 56_789, 0), 57_000)
+        self.assertEqual(self.read_tail(data), (1234, 56_789))
+
+    def test_entries_sentinel_alone_takes_count_from_zip64_plus32_only(self):
+        # entries16 == 0xFFFF but cd_size is a perfectly normal 32-bit value:
+        # the count comes from ZIP64+32 and cd_size stays the EOCD+12 value.
+        # The ZIP64 cd_size field holds a poison value that would blow the
+        # EOF check if the reader wrongly consulted it.
+        filler = 600_100
+        z64_off = 4 + filler
+        tail = (hand_z64_eocd(12_345, 0xFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF)
+                + hand_z64_locator(z64_off)
+                + hand_eocd(0xFFFF, 600_000, 0))
+        self.assertEqual(self.read_tail(synthetic_zip(tail, filler)),
+                         (12_345, 600_000))
+
+    def test_cd_size_sentinel_alone_takes_size_from_zip64_plus40_only(self):
+        # cd_size == 0xFFFFFFFF but the entry count is a normal 16-bit value:
+        # cd_size comes from ZIP64+40 and the count stays the EOCD+10 value.
+        # The ZIP64 entries field holds a poison count that would fail the
+        # count*46 check if the reader wrongly consulted it.
+        filler = 5_000
+        z64_off = 4 + filler
+        tail = (hand_z64_eocd(20_000, 4_600, 0)
+                + hand_z64_locator(z64_off)
+                + hand_eocd(100, 0xFFFFFFFF, 0))
+        self.assertEqual(self.read_tail(synthetic_zip(tail, filler)),
+                         (100, 4_600))
 
 
 class TestEmptyDocumentIsRecordedExplicitly(unittest.TestCase):
