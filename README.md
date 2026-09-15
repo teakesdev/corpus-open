@@ -55,6 +55,28 @@ python3 matter.py packet ~/cases/my-case --layer 3min --out COUNSEL_PACKET.md
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.deadline_list` · `matter.packet_render` · `matter.cite_extract`.
 
+## Document extraction and locators (RFC 0004, RFC 0005)
+
+```bash
+python3 matter.py pages ~/cases/my-case                       # every ingested document
+python3 matter.py pages ~/cases/my-case Filings/motion.docx    # one file
+```
+
+Stdlib only — no pypdf, no python-docx. Each format gets the locator its own
+bytes can support, and the two never mix:
+
+| scheme | format | locator | stored in |
+|---|---|---|---|
+| `pdf-page` | PDF | 1-based page number read from the file's structure | `document_pages` |
+| `docx-structural` | DOCX | path through the OOXML block tree, e.g. `word/document.xml#b3/r1/c0/b0` | `document_blocks` |
+| `whole-file` | `.txt` / `.md` | the file is one unit | `document_pages` |
+
+**DOCX never gets a page number.** Pagination is produced by the renderer at
+layout time and is not in the file, so one would have to be invented — see
+RFC 0005. Extraction that cannot be done honestly fails and says why
+(`extraction-failed` with a reason); it is never a silent empty string.
+Sources are read-only and are never rewritten.
+
 ## Citations and stages (v0.2, RFC 0001)
 
 ```bash
