@@ -235,14 +235,20 @@ a row would collapse cases 2 and 3. Both are lies about the evidence, so both ar
 
 ### 4a. Resource bounds
 
-`MAX_PART_BYTES` guards a single member. Nothing bounds the archive, and the obvious
-fix — checking `len(zf.namelist())` inside `_extract_docx_open` — is no guard at all:
-`ZipFile.__init__` has already read the whole central directory and materialised one
-`ZipInfo` per entry before that line runs (measured, CPython 3.11: 100,000 tiny members
-≈ 55 MB of `ZipInfo` heap, ≈ 0.27 s of parsing). A real bound must run **before
-`ZipFile` is constructed**.
+`MAX_PART_BYTES` guards a single member. Checking `len(zf.namelist())` inside
+`_extract_docx_open` is no guard at all: `ZipFile.__init__` has already read the
+whole central directory and materialised one `ZipInfo` per entry before that line
+runs (measured, CPython 3.11: 100,000 tiny members ≈ 55 MB of `ZipInfo` heap,
+≈ 0.27 s of parsing). A real bound must run **before `ZipFile` is constructed**.
 
-#### The pre-open member bound — the GUARD
+What the pre-open bound actually is: **honest-or-overstated tail records** (declared
+entry count + declared directory bytes + file geometry). Lying records are a
+**post-open detection**. Allocation in between is bounded only by file size. There is
+no amplification — this is a local-file threat model. The declared-directory byte cap
+bounds parser *input* and constrains allocation; it is **not** an exact RAM ceiling
+and **not** proof of a pre-open actual-member limit.
+
+#### The pre-open tail-record bound — the GUARD
 
 Read the End Of Central Directory record straight off the file's tail: seek to EOF,
 read at most `22 + 65,535 = 65,557` bytes (fixed EOCD length plus maximum comment
@@ -251,18 +257,22 @@ its comment-length field puts the record's end exactly at EOF. Anything else fai
 corrupt/truncated — we do not go fishing for another record. Offsets are from the
 record's first byte, little-endian (APPNOTE 4.3.16):
 
-- `10` — total entries in the central directory (2 bytes) ← the bounded field
-- `12` — size of central directory (4 bytes)
+- `10` — total entries in the central directory (2 bytes) ← member-count field
+- `12` — size of central directory (4 bytes) ← directory-byte field
+- `16` — offset of central directory (4 bytes)
 - `20` — comment length (2 bytes)
 
 A saturated classic field holds the sentinel `0xFFFF` (2-byte) or `0xFFFFFFFF`
-(4-byte), meaning "consult ZIP64" (APPNOTE 4.4.1.4). The ZIP64 EOCD **locator**
-(`0x07064b50`, 20 bytes) sits immediately before the EOCD and gives the ZIP64 EOCD
-record's offset at locator offset `8` (8 bytes). That **record** (`0x06064b50`, 56-byte
-fixed portion, APPNOTE 4.3.14) carries:
+(4-byte), meaning "consult ZIP64" (APPNOTE 4.4.1.4). Sentinels fire **independently
+per field**: an archive can saturate the count while leaving `cd_size` a normal
+32-bit value. The ZIP64 EOCD **locator** (`0x07064b50`, 20 bytes) sits immediately
+before the EOCD and gives the ZIP64 EOCD record's offset at locator offset `8`
+(8 bytes). That **record** (`0x06064b50`, 56-byte fixed portion, APPNOTE 4.3.14)
+carries:
 
-- `32` — total entries in the central directory (8 bytes) ← the bounded field
+- `32` — total entries in the central directory (8 bytes)
 - `40` — size of central directory (8 bytes)
+- `48` — offset of central directory (8 bytes)
 - `4` — size of this record (8 bytes); `value + 12` must equal the fixed portion plus
   any extensible-data sector
 
@@ -272,15 +282,24 @@ corrupt/truncated before `ZipFile` exists: a sentinel with no locator at
 record whose declared size does not end at the locator; `cd_offset + cd_size` beyond
 EOF; a count that cannot fit in `cd_size` (a central-directory entry is ≥ 46 bytes, so
 `count × 46 > cd_size` is a lie). What is *not* provable pre-open: an internally
-consistent but false count. No field is authenticated, and we will not claim
-otherwise. So one cheap post-open reconciliation is added — `len(zf.namelist())` must
-equal the pre-open count; a mismatch is refused as corrupt, never silently trusted —
-labelled as what it is: an honesty check, not a resource guard. The guard already ran.
+consistent but false count, or a downward lie about `cd_size` that still fits
+`count × 46`. No field is authenticated, and we will not claim otherwise. So one
+cheap post-open reconciliation is added — `len(zf.namelist())` must equal the
+pre-open count; a mismatch is refused as corrupt, never silently trusted — labelled
+as what it is: an honesty check, not a resource guard. The guard already ran.
 
 **`MAX_ARCHIVE_MEMBERS = 10_000`.** A real Word `.docx` is ~10–40 parts (a minimal
 package is ~10; media- and annotation-heavy documents reach the hundreds). 10,000 is
-two to three orders of magnitude of headroom, and it caps what a hostile archive that
-passes the guard can force `ZipFile` to materialise at the measured ~5 MB / ~20 ms.
+two to three orders of magnitude of headroom. It bounds the declared count on
+honest-or-overstated tails; a hostile archive that *understates* the count still
+reaches `ZipFile`.
+
+**`MAX_CD_BYTES = 32 MiB`.** Same order as `MAX_PART_BYTES`. A real Word directory is
+kilobytes; 32 MiB is tens of megabytes of headroom and is the number CPython 3.11
+`zipfile._RealGetContents` will `fp.read()` if we let construction start. It bounds
+parser input for honest-or-overstated `cd_size`. It does not bound RAM, and it does
+not bound the actual member count. A 6 MB directory under a lying count of 5 is
+under this cap and is detected post-open.
 
 #### Aggregate uncompressed bytes — an acceptance limit, not a guard
 
@@ -290,7 +309,8 @@ directory's *size* and *count*, and no tail record sums member sizes. Obtaining 
 requires parsing the directory — the very cost the guard exists to avoid. The honest
 split, and the labels must not be blurred:
 
-- **GUARD (pre-open):** the member bound above. Refuses before any `ZipFile` exists.
+- **GUARD (pre-open):** the member-count bound and the declared-directory byte cap
+  above. Refuses before any `ZipFile` exists, and only for honest-or-overstated tails.
 - **ACCEPTANCE LIMIT (post-open):** `MAX_ARCHIVE_UNCOMPRESSED_BYTES = 256 MiB`
   (8 × `MAX_PART_BYTES`), a checked sum of every member's declared `file_size` in
   `_extract_docx_open`, before any part read. It refuses *after* the directory was
@@ -301,27 +321,63 @@ split, and the labels must not be blurred:
 
 #### Residual exposure
 
-- A `members` refusal reads ≤ `4` head bytes + ≤ `65,557` tail bytes, plus ≤ `20`
-  (locator — widen the tail window to `65,577` so it is always inside) and ≤ `56`
-  (ZIP64 EOCD) when sentinels are present: **worst case ≤ 65,637 bytes, zero
-  central-directory bytes, zero `ZipInfo` allocations.**
-- An `aggregate` refusal cannot prevent what already happened: `ZipFile.__init__` read
-  the declared `cd_size` and built every `ZipInfo`. The guard bounds it — ≤ 10,000
-  entries, `cd_size` ≤ file size — so the residual is ~5 MB / ~20 ms plus one
-  directory-sized read, paid before the sum exists. The acceptance limit does not
-  remove it; nothing post-open can.
+- A `members` or `central_directory` refusal reads ≤ `4` head bytes + ≤ `65,557` tail
+  bytes, plus ≤ `20` (locator — widen the tail window to `65,577` so it is always
+  inside) and ≤ `56` (ZIP64 EOCD) when sentinels are present: **worst case ≤ 65,637
+  bytes, zero central-directory bytes, zero `ZipFile` constructor attempts.**
+- A lying tail (understated count with an honest `cd_size` still under `MAX_CD_BYTES`;
+  or a downward `cd_size` lie that still passes `count × 46`) is not preventable
+  pre-open. `ZipFile.__init__` then `fp.read`s the declared `cd_size` (CPython 3.11
+  `_RealGetContents`) and either materialises the directory or raises `BadZipFile`
+  mid-construction. On the measured downward-`cd_size` fixture the message is
+  `"Bad magic number for central directory"`: patching size but not offset shifts
+  CPython's `concat`, so the bounded read is taken from the wrong place. A short
+  file can instead raise `"Truncated central directory"`. Either way the declared
+  size bounds parser input; zero successful constructor returns is not proof of
+  zero allocation. Allocation on that path is typical, bounded by file size, not
+  an enforced ceiling. Post-open detection (count reconciliation, or the
+  `except BadZipFile` handler) does not undo it.
+- An `aggregate` refusal cannot prevent what already happened: the directory parse
+  the guard allowed. The acceptance limit does not remove it; nothing post-open can.
 - Unavoidable on every accepted path: the tail window itself, and `zipfile`'s own
   re-parse of the EOCD after our guard passes.
+
+#### Parser agreement (tests, not a cross-version fact)
+
+The pre-open reader and CPython `zipfile`'s `_EndRecData` / `_EndRecData64` are
+checked against each other by test: honest EOCD, and ZIP64 locator+record with every
+classic field saturated. Agreement means the same effective
+`(entries_total, cd_size, cd_offset)`. These checks are pinned to the CPython 3.11
+implementation they were read against (`_EndRecData` takes `rfind(stringEndArchive)`
+— rightmost — and assumes the magic does not appear in the comment). They carry
+forward as tests, not as a settled property of every Python.
+
+Documented divergences, all fail-closed on our side, none a defect:
+
+- **Magic in the EOCD comment (`PK\x05\x06`).** CPython selects the in-comment
+  occurrence. No right-to-left repair scan restores agreement, and none is
+  implemented (P3-1: withdrawn). We refuse because that occurrence's comment-length
+  field does not put a record at EOF. Tests assert *our refusal only*.
+- **Comment-length field that does not land on EOF.** We refuse. CPython still
+  returns the classic count/size/offset and `ZipFile` opens. Same class as P3-1.
+- **Per-field sentinels vs CPython's all-fields overwrite.** APPNOTE 4.4.1.4
+  saturates independently per field; we keep unsaturated classic values. CPython
+  `_EndRecData64`, once a locator is present, replaces count, size, and offset from
+  the ZIP64 record together. Agreement tests use the common all-sentinel ZIP64
+  shape; mixed-sentinel fixtures pin *our* APPNOTE behaviour, not CPython's.
 
 #### Failure vocabulary (§3 style)
 
 | Condition | Reason starts | Fires |
 |---|---|---|
 | total-entry count > `MAX_ARCHIVE_MEMBERS` | `size_limit:members` | pre-open — the GUARD; no `ZipFile` constructed |
+| declared `cd_size` > `MAX_CD_BYTES` | `size_limit:central_directory` | pre-open — the GUARD; no `ZipFile` constructed |
 | Σ declared `file_size` > `MAX_ARCHIVE_UNCOMPRESSED_BYTES` | `size_limit:aggregate` | post-open — acceptance limit; directory already parsed |
 
-Both exit through `_docx_failed`: `status='extraction-failed'`, zero blocks, zero
-pages, reason preserved.
+All three exit through `_docx_failed`: `status='extraction-failed'`, zero blocks, zero
+pages, reason preserved. A downward `cd_size` lie that reaches `ZipFile` and raises
+`BadZipFile` is `corrupt or truncated zip archive: …`, distinguishable from
+`size_limit:central_directory`.
 
 ---
 

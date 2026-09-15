@@ -491,16 +491,27 @@ PRIMARY_PART = "word/document.xml"
 MAX_PART_BYTES = 32 * 1024 * 1024
 
 #: ============================================================================
-#: ARCHIVE BOUNDS (RFC 0005 §4a). Two limits, two labels, and the labels are
-#: load-bearing -- do not blur them:
+#: ARCHIVE BOUNDS (RFC 0005 §4a). Three limits, three labels, and the labels
+#: are load-bearing -- do not blur them:
 #:
-#:   MAX_ARCHIVE_MEMBERS is the GUARD. It is enforced PRE-OPEN, straight off
-#:   the archive's tail records, BEFORE `zipfile.ZipFile` is constructed --
-#:   because `ZipFile.__init__` reads the whole central directory and
+#:   MAX_ARCHIVE_MEMBERS and MAX_CD_BYTES are the GUARD. Both are enforced
+#:   PRE-OPEN, straight off the archive's tail records, BEFORE
+#:   `zipfile.ZipFile` is constructed -- because `ZipFile.__init__` reads the
+#:   declared central directory (`fp.read(size_cd)` on CPython 3.11) and
 #:   materialises one `ZipInfo` per entry before any in-process check could
 #:   run. A refusal here has allocated no `ZipInfo` objects and read no
-#:   central-directory bytes. `size_limit:members` failures fire before a
-#:   ZipFile object exists.
+#:   central-directory bytes. `size_limit:members` / `size_limit:central_directory`
+#:   failures fire before a ZipFile object exists.
+#:
+#:   These two are a pre-open bound on *honest-or-overstated* tail records
+#:   (declared count, declared directory bytes, file geometry). A lying
+#:   archive can understate either field; that is caught post-open (count
+#:   reconciliation, or CPython raising on a truncated `size_cd` read), not
+#:   prevented. The byte cap bounds parser *input* and constrains allocation.
+#:   It is not an exact RAM ceiling and not proof of a pre-open actual-member
+#:   limit. Allocation between a passing guard and a post-open refusal is
+#:   bounded only by file size; there is no amplification (local-file threat
+#:   model).
 #:
 #:   MAX_ARCHIVE_UNCOMPRESSED_BYTES is the ACCEPTANCE LIMIT, NOT a guard. It
 #:   is enforced POST-OPEN, inside `_extract_docx_open`, after `ZipFile` has
@@ -511,6 +522,18 @@ MAX_PART_BYTES = 32 * 1024 * 1024
 #: ============================================================================
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+
+#: Cap on the declared central-directory size, enforced pre-open off the same
+#: tail records as MAX_ARCHIVE_MEMBERS. CPython 3.11 `zipfile._RealGetContents`
+#: does `data = fp.read(size_cd)` -- this is that input, not a heap ceiling.
+#:
+#: 32 MiB is tens of megabytes: a real Word `.docx` directory is kilobytes
+#: (tens of parts, short names), and 32 MiB matches MAX_PART_BYTES so a
+#: hostile archive cannot force a larger parser input than we already accept
+#: for the one part we decompress. An honest 10,000-member directory with
+#: long names/comments can approach this order; a 6 MB lying-count archive
+#: is *under* the cap and is detected post-open. That residual is load-bearing.
+MAX_CD_BYTES = 32 * 1024 * 1024
 
 #: Local-file-header and end-of-central-directory signatures. Checked before
 #: handing the file to `zipfile`, so a renamed .txt/.pdf is refused on its own
@@ -571,8 +594,9 @@ def _tail_record_error(detail: str) -> str:
 
 
 def _read_zip_tail_records(p: Path, file_size: int):
-    """Pre-open reader for the GUARD. Returns (entries_total, cd_size) or a
-    reason string; a str return means refuse, before any ZipFile exists.
+    """Pre-open reader for the GUARD. Returns (entries_total, cd_size,
+    cd_offset) or a reason string; a str return means refuse, before any
+    ZipFile exists.
 
     Reads only the file's tail: at most _TAIL_WINDOW (65,577) bytes, scanned
     right-to-left for the EOCD signature. A candidate is accepted only if its
@@ -667,7 +691,7 @@ def _read_zip_tail_records(p: Path, file_size: int):
                     f"central directory claims {entries_total} entries but is "
                     f"only {cd_size} bytes; at {_CD_HEADER_MIN} bytes minimum "
                     f"per entry the count is a structural lie")
-            return entries_total, cd_size
+            return entries_total, cd_size, cd_offset
     except OSError as exc:
         return _tail_record_error(f"cannot read archive tail: {exc}")
 
@@ -814,20 +838,27 @@ def extract_docx(path: str, *, max_part_bytes: int = MAX_PART_BYTES) -> Document
             path, f"not a zip archive: leading bytes {head!r} are not a zip "
                   f"signature, so the .docx extension does not match the content")
 
-    # THE GUARD (RFC 0005 §4a): the member bound runs HERE, before
-    # `zipfile.ZipFile` is constructed, because `ZipFile.__init__` reads the
-    # whole central directory and materialises one `ZipInfo` per entry before
-    # any in-process check could run. A `size_limit:members` refusal means no
+    # THE GUARD (RFC 0005 §4a): the member bound and the declared-directory
+    # byte cap run HERE, before `zipfile.ZipFile` is constructed, because
+    # `ZipFile.__init__` reads the declared central directory and materialises
+    # one `ZipInfo` per entry before any in-process check could run. A
+    # `size_limit:members` or `size_limit:central_directory` refusal means no
     # ZipFile object ever existed. Do not move this below the `with`.
     tail = _read_zip_tail_records(p, file_size)
     if isinstance(tail, str):                       # a structural lie: refuse
         return _docx_failed(path, tail)
-    preopen_entries, _cd_size = tail
+    preopen_entries, cd_size, _cd_offset = tail
     if preopen_entries > MAX_ARCHIVE_MEMBERS:
         return _docx_failed(
             path, f"size_limit:members — archive declares {preopen_entries} "
                   f"entries, over the {MAX_ARCHIVE_MEMBERS}-member guard; "
                   f"refused pre-open, before any ZipFile was constructed")
+    if cd_size > MAX_CD_BYTES:
+        return _docx_failed(
+            path, f"size_limit:central_directory — archive declares a "
+                  f"{cd_size}-byte central directory, over the "
+                  f"{MAX_CD_BYTES}-byte cap; refused pre-open, before any "
+                  f"ZipFile was constructed")
 
     try:
         with zipfile.ZipFile(p, "r") as zf:
