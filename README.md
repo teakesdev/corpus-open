@@ -53,7 +53,10 @@ python3 matter.py packet ~/cases/my-case --layer 3min --out COUNSEL_PACKET.md
 ```
 
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
-`matter.deadline_list` · `matter.packet_render` · `matter.cite_extract`.
+`matter.deadline_list` · `matter.packet_render` · `matter.cite_extract` ·
+`matter.ingest_path` · `matter.verify`.
+`matter.ingest_path` refuses paths that escape `MATTER_DIR`. `matter.verify`
+prints absolute `root=` and ok/changed/missing; it does not send network.
 
 ## Citations and stages (v0.2, RFC 0001)
 

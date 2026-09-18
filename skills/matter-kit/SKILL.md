@@ -15,7 +15,7 @@ unsupported — that visibility is the product.
 ```bash
 python3 /path/to/matter-kit/matter.py init <case-dir>       # creates .matter/ + standard folders
 python3 /path/to/matter-kit/matter.py ingest <case-dir>     # hash+register all files (idempotent)
-python3 /path/to/matter-kit/matter.py verify <case-dir>     # re-hash everything; fails on drift
+python3 /path/to/matter-kit/matter.py verify <case-dir>     # re-hash; cwd-independent; fails on drift
 python3 /path/to/matter-kit/matter.py status <case-dir>
 ```
 
@@ -48,6 +48,7 @@ documents uses the same five words:
 6. **Never expose raw IPs, emails, phone numbers, account identifiers** in anything public-facing.
 7. **Secondary docket indexes are leads, not records.** Mark deadlines from them `working-estimate` + `secondary-source` until an official document lands in the store.
 8. **Wrong-entity naming kills claims.** Naming "X Police Department" instead of "City of X" has gotten municipal defendants dismissed unopposed. Check party capacity carefully.
+9. **`rel_path` is matter-relative.** Never store `os.path.relpath(fp, cwd)`. After writing a file under the matter, ingest **that path**, then `verify` from a cwd that is neither the matter nor the kit repo (e.g. `cd /tmp && python3 /path/to/matter-kit/matter.py verify <case-dir>`). A `MISSING` or `CHANGED` line is a **blocker** — do not continue until verify is clean from a foreign cwd. Existing stores with cwd-relative locators will report MISSING until re-ingest; do not silently rewrite sqlite.
 
 ## Facts & deadlines
 
@@ -80,4 +81,6 @@ Outreach drafts may be prepared, but nothing in matter-kit ever sends — humans
 ```
 
 Tools: `matter.status`, `matter.fact_add`, `matter.fact_list`,
-`matter.deadline_list`, `matter.packet_render`. Read-mostly by design.
+`matter.deadline_list`, `matter.packet_render`, `matter.cite_extract`,
+`matter.ingest_path`, `matter.verify`. `ingest_path` refuses path escape.
+Read-mostly plus local ingest/verify; nothing sends.
