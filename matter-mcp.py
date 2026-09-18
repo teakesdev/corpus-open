@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from matterkit import store, packet as pk  # noqa: E402
+from matterkit import ingest as ing, store, packet as pk  # noqa: E402
 
 MATTER_DIR = os.environ.get("MATTER_DIR", os.getcwd())
 
@@ -32,10 +32,49 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["text"],
                      "properties": {"text": {"type": "string"},
                                     "document_sha256": {"type": "string"}}}},
+    {"name": "matter.ingest_path", "description": "Hash and register one path that must resolve inside MATTER_DIR. Refuses path escape. Returns added/skipped/excluded. No network.",
+     "inputSchema": {"type": "object", "required": ["path"],
+                     "properties": {"path": {"type": "string"}}}},
+    {"name": "matter.verify", "description": "Re-hash the store against files under MATTER_DIR. Returns absolute root= plus ok/changed/missing. MISSING/CHANGED is a blocker. No network.",
+     "inputSchema": {"type": "object", "properties": {}}},
 ]
 
 
+def _resolve_in_matter(path: str) -> str:
+    """Resolve path inside MATTER_DIR. Relative paths are joined to the matter root, not cwd."""
+    if not path:
+        raise ValueError("path required")
+    abs_matter = os.path.abspath(MATTER_DIR)
+    if os.path.isabs(path):
+        candidate = os.path.abspath(path)
+    else:
+        candidate = os.path.abspath(os.path.join(abs_matter, path))
+    if not ing.is_within_matter(candidate, abs_matter):
+        raise ValueError("path escapes MATTER_DIR")
+    try:
+        ing.to_rel_path(candidate, abs_matter)
+    except ValueError as e:
+        raise ValueError("path escapes MATTER_DIR") from e
+    return candidate
+
+
 def call(name: str, args: dict):
+    if name == "matter.verify":
+        abs_matter = os.path.abspath(MATTER_DIR)
+        if not os.path.isdir(abs_matter):
+            return f"root={abs_matter}\nerror: MATTER_DIR is not a directory"
+        conn = store.connect(MATTER_DIR)
+        ok, bad, missing, failures = ing.verify_integrity(conn, MATTER_DIR)
+        lines = [f"root={abs_matter}",
+                 f"integrity: {ok} ok · {bad} changed · {missing} missing"]
+        for kind, path in failures:
+            lines.append(f"  {kind}: {path}")
+        return "\n".join(lines)
+    if name == "matter.ingest_path":
+        candidate = _resolve_in_matter(args.get("path", ""))
+        conn = store.connect(MATTER_DIR)
+        added, skipped, excluded = ing.ingest_paths(conn, MATTER_DIR, [candidate])
+        return json.dumps({"added": added, "skipped": skipped, "excluded": excluded})
     conn = store.connect(MATTER_DIR)
     if name == "matter.status":
         return pk.status_report(conn, MATTER_DIR)

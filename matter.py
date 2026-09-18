@@ -44,8 +44,13 @@ def cmd_ingest(args):
 
 
 def cmd_verify(args):
+    abs_matter = os.path.abspath(args.case_dir)
+    print(f"root={abs_matter}")
+    if not os.path.isdir(abs_matter):
+        print(f"error: case_dir is not a directory: {args.case_dir}", file=sys.stderr)
+        sys.exit(1)
     conn = store.connect(args.case_dir)
-    ok, bad, missing, failures = ing.verify_integrity(conn)
+    ok, bad, missing, failures = ing.verify_integrity(conn, args.case_dir)
     print(f"integrity: {ok} ok · {bad} changed · {missing} missing")
     for kind, path in failures:
         print(f"  ⚠ {kind}: {path}")

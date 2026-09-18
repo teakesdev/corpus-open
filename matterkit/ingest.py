@@ -51,9 +51,58 @@ def walk_files(root: str):
             yield os.path.join(dirpath, fn)
 
 
+def is_within_matter(path: str, matter_dir: str) -> bool:
+    """True iff abspath(path) is the matter root or a descendant (no .. escape)."""
+    abs_path = os.path.abspath(path)
+    abs_matter = os.path.abspath(matter_dir)
+    try:
+        rel = os.path.relpath(abs_path, abs_matter)
+    except ValueError:
+        return False
+    if rel == os.curdir:
+        return True
+    return not _invalid_rel(rel)
+
+
+def _invalid_rel(rel_path: str) -> bool:
+    """True if rel_path is not a safe matter-relative locator."""
+    if not rel_path or os.path.isabs(rel_path):
+        return True
+    parts = rel_path.replace("\\", "/").split("/")
+    return any(p == ".." for p in parts)
+
+
+def to_rel_path(fp: str, matter_dir: str) -> str:
+    """Matter-root-relative locator: no leading slash, no .. . Raises ValueError if outside."""
+    abs_fp = os.path.abspath(fp)
+    abs_matter = os.path.abspath(matter_dir)
+    if not is_within_matter(abs_fp, abs_matter):
+        raise ValueError(f"path outside matter: {fp}")
+    rel = os.path.relpath(abs_fp, abs_matter)
+    if rel == os.curdir or _invalid_rel(rel):
+        raise ValueError(f"invalid matter-relative path: {rel!r}")
+    return rel
+
+
+def resolve_document_path(matter_dir: str, rel_path: str):
+    """Join rel_path to abs matter. None if absolute, .., or would escape — do not read."""
+    if rel_path is None or _invalid_rel(rel_path):
+        return None
+    abs_matter = os.path.abspath(matter_dir)
+    resolved = os.path.normpath(os.path.join(abs_matter, rel_path))
+    if not is_within_matter(resolved, abs_matter):
+        return None
+    if os.path.abspath(resolved) == abs_matter:
+        return None
+    return resolved
+
+
 def ingest_paths(conn, matter_dir: str, paths, exclude=()):
-    """Register files under the given paths. Returns (added, skipped_dup, excluded) counts."""
-    import itertools
+    """Register files under the given paths. Returns (added, skipped_dup, excluded) counts.
+
+    documents.rel_path is always relative to abspath(matter_dir), never cwd.
+    Paths that resolve outside the matter are excluded (fail-closed).
+    """
     abs_matter = os.path.abspath(matter_dir)
     added = skipped = excluded = 0
     for p in paths:
@@ -63,48 +112,60 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
             continue
         targets = ([ap] if os.path.isfile(ap) else walk_files(ap))
         for fp in targets:
-            rel_to_cwd = os.path.relpath(fp, os.getcwd())
-            if any(x in rel_to_cwd for x in exclude):
+            if not is_within_matter(fp, abs_matter):
+                print(f"  ! outside matter: {fp}")
+                excluded += 1
+                continue
+            try:
+                rel_path = to_rel_path(fp, abs_matter)
+            except ValueError:
+                print(f"  ! outside matter: {fp}")
+                excluded += 1
+                continue
+            if any(x in rel_path for x in exclude):
                 excluded += 1
                 continue
             digest = sha256_file(fp)
             row = conn.execute(
-                "SELECT id FROM documents WHERE sha256=? OR rel_path=?", (digest, rel_to_cwd)
+                "SELECT id FROM documents WHERE sha256=? OR rel_path=?", (digest, rel_path)
             ).fetchone()
             if row:
                 skipped += 1
                 continue
             st = os.stat(fp)
-            kind = classify(os.path.relpath(fp, abs_matter)) if fp.startswith(abs_matter) else \
-                classify(rel_to_cwd) or "other"
-            # prefer dir-hint classification against the SOURCE location, not the store
-            for hint, k in DIR_KINDS:
-                if hint in rel_to_cwd.lower().split(os.sep):
-                    kind = k
-                    break
-            else:
-                kind = EXT_KINDS.get(os.path.splitext(fp)[1].lower(), "other")
+            kind = classify(rel_path)
             conn.execute(
                 "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
                 " VALUES (?,?,?,?,?,?)",
                 (__import__("matterkit.store", fromlist=["new_id"]).new_id(),
-                 digest, rel_to_cwd, st.st_size, st.st_mtime, kind),
+                 digest, rel_path, st.st_size, st.st_mtime, kind),
             )
             added += 1
     conn.commit()
     return added, skipped, excluded
 
 
-def verify_integrity(conn):
+def verify_integrity(conn, matter_dir: str):
+    """Re-hash stored documents against files under matter_dir.
+
+    Old cwd-relative locators are not rewritten; they report MISSING or ESCAPED
+    until the caller re-ingests.
+    """
+    abs_matter = os.path.abspath(matter_dir)
     rows = conn.execute("SELECT id, sha256, rel_path FROM documents").fetchall()
     ok = bad = missing = 0
     failures = []
     for r in rows:
-        if not os.path.exists(r["rel_path"]):
+        resolved = resolve_document_path(abs_matter, r["rel_path"])
+        if resolved is None:
+            missing += 1
+            failures.append(("ESCAPED", r["rel_path"]))
+            continue
+        if not os.path.exists(resolved):
             missing += 1
             failures.append(("MISSING", r["rel_path"]))
             continue
-        if sha256_file(r["rel_path"]) != r["sha256"]:
+        if sha256_file(resolved) != r["sha256"]:
             bad += 1
             failures.append(("CHANGED", r["rel_path"]))
         else:
