@@ -44,6 +44,26 @@ matter_fact=$(python3 matter.py fact add ~/cases/my-case \
 python3 matter.py packet ~/cases/my-case --layer 3min --out COUNSEL_PACKET.md
 ```
 
+## Capturing a web page
+
+```bash
+python3 matter.py capture ~/cases/my-case --url https://example.org/press/release \
+  --out Media/captures/2026-09-18_example.org/page.html   # --out is matter-relative, never cwd
+python3 matter.py capture list ~/cases/my-case            # the provenance table, as Markdown
+```
+
+`capture` writes the fetched bytes, registers them through `ingest` with
+`source_url` and `kind=media|research`, and records
+`url · retrieved_at · sha256 · rel_path` in the `captures` table. It refuses to
+overwrite, refuses redirects (the recorded URL is the URL that served the
+bytes), and refuses URLs carrying credentials. A page whose bytes are already in
+the store records the retrieval without writing a duplicate file. Derived text
+goes to `.matter/out/captures/<sha256>.txt` — never beside the source, never
+ingested. Network: one GET to the URL the operator named, logged hash-only to
+`.matter/egress.jsonl`. Unlike `search` it takes no consent grant — the URL on
+the command line is the instruction, and nothing else leaves. Then `verify` from
+a foreign cwd, as after any write.
+
 ## MCP (Hermes / Claude Desktop / Codex / anything)
 
 ```json

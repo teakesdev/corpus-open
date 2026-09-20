@@ -5,6 +5,8 @@ Usage:
   matter.py init <case-dir>
   matter.py ingest <case-dir> [paths...] [--exclude SUBSTR]...
   matter.py verify <case-dir>
+  matter.py capture <case-dir> --url URL --out Media/captures/YYYY-MM-DD_host/page.html [--kind media|research]
+  matter.py capture list <case-dir>
   matter.py status <case-dir>
   matter.py fact add <dir> --text T --status LABEL [--source rel@loc]...
   matter.py fact list <dir> [--status LABEL]
@@ -134,6 +136,49 @@ def cmd_packet(args):
         print(f"wrote {args.out}")
     else:
         print(text)
+
+
+CAPTURE_USAGE = ("usage: matter capture <case-dir> --url URL --out REL_PATH [--kind media|research]\n"
+                 "       matter capture list <case-dir>")
+
+
+def cmd_capture(args):
+    """capture <case-dir> --url URL --out REL_PATH | capture list <case-dir>
+
+    --out is matter-relative (joined to the matter root, never cwd). The fetcher —
+    the only network code — is imported for a capture, never for `list`.
+    """
+    from matterkit import capture as cap
+    target = args.target
+    listing = target[0] == "list" and len(target) == 2
+    if not listing and (len(target) != 1 or not args.url or not args.out):
+        sys.exit(CAPTURE_USAGE)
+    case_dir = target[-1]
+    if not os.path.isdir(case_dir):
+        # never let a typo'd path become a fresh store that a fetch then lands in
+        sys.exit(f"error: case_dir is not a directory: {case_dir}")
+    if listing:
+        print(cap.render_list(store.connect(case_dir)))
+        return
+    from matterkit.adapters.capture_fetch import make_fetch
+    try:
+        res = cap.capture_url(store.connect(case_dir), case_dir, args.url, args.out,
+                              fetch=make_fetch(case_dir), kind=args.kind)
+    except (cap.CaptureError, OSError) as e:
+        sys.exit(f"refused: {e}")
+    if res["unchanged"]:
+        print(f"unchanged: {args.url} returned bytes already registered as {res['rel_path']}\n"
+              f"  sha256={res['sha256']} retrieved_at={res['retrieved_at']}\n"
+              f"  retrieval recorded; no file written at {args.out}")
+    else:
+        print(f"captured {args.url}\n  → {res['rel_path']}\n"
+              f"  sha256={res['sha256']} retrieved_at={res['retrieved_at']}")
+        if res["extract"]:
+            print(f"  derived text: {res['extract']} (cite the source, not the extract)")
+        if res.get("extract_error"):
+            print(f"  ⚠ derived text NOT written ({res['extract_error']}); the capture itself is registered")
+    print(f"next, from a cwd that is neither the matter nor the kit: "
+          f"matter.py verify {os.path.abspath(case_dir)}   # MISSING/CHANGED is a blocker")
 
 
 def cmd_cite(args):
@@ -348,6 +393,12 @@ def main():
 
     p = sub.add_parser("authority"); p.add_argument("case_dir"); p.add_argument("citation")
     p.add_argument("--via", default=None); p.set_defaults(fn=cmd_authority)
+
+    p = sub.add_parser("capture", usage=CAPTURE_USAGE[len("usage: "):])
+    p.add_argument("target", nargs="+", metavar="[list] case_dir")
+    p.add_argument("--url"); p.add_argument("--out")
+    p.add_argument("--kind", choices=["media", "research"])
+    p.set_defaults(fn=cmd_capture)
 
     p = sub.add_parser("cite"); p.add_argument("sub", choices=["extract", "list"]); p.add_argument("case_dir")
     p.add_argument("path", nargs="?")

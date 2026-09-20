@@ -50,6 +50,25 @@ documents uses the same five words:
 8. **Wrong-entity naming kills claims.** Naming "X Police Department" instead of "City of X" has gotten municipal defendants dismissed unopposed. Check party capacity carefully.
 9. **`rel_path` is matter-relative.** Never store `os.path.relpath(fp, cwd)`. After writing a file under the matter, ingest **that path**, then `verify` from a cwd that is neither the matter nor the kit repo (e.g. `cd /tmp && python3 /path/to/matter-kit/matter.py verify <case-dir>`). A `MISSING` or `CHANGED` line is a **blocker** — do not continue until verify is clean from a foreign cwd. Existing stores with cwd-relative locators will report MISSING until re-ingest; do not silently rewrite sqlite.
 
+## Capturing web pages (no curl + hand-hashed tables)
+
+```bash
+matter capture <dir> --url https://example.org/press/release --out Media/captures/2026-09-18_example.org/page.html
+matter capture list <dir>          # provenance table: url | retrieved_at | sha256 | rel_path
+```
+
+`--out` is matter-relative. `capture` writes the bytes, registers them (`source_url`
+set, `kind` = `media`, or `research` under `Research/` or with `--kind research`), and
+records the retrieval in the `captures` table. **Do not keep a handwritten provenance
+table** — paste `capture list`. It refuses to overwrite, refuses redirects (re-run with
+the URL it reports, so the row names the page that actually served the bytes), and
+refuses URLs with embedded credentials. Identical bytes already in the store record a
+new retrieval row and write no second file. The text extract lands in
+`.matter/out/captures/<sha256>.txt`: search it, but **cite the captured file**, never
+the extract. A capture proves what a URL served at `retrieved_at` — custody, not truth;
+what the page *says* is still an ALLEGATION until a record shows it. Rule 9 applies
+after every capture: `verify` from a foreign cwd; MISSING/CHANGED is a blocker.
+
 ## Facts & deadlines
 
 ```bash

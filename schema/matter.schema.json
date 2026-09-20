@@ -29,6 +29,17 @@
         "notes": { "type": "string" }
       }
     },
+    "Capture": {
+      "description": "One retrieval of a URL. rel_path names the Document holding those bytes; a re-retrieval of unchanged bytes is a new row against the same rel_path.",
+      "type": "object",
+      "required": ["url", "retrieved_at", "sha256", "rel_path"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https?://" },
+        "retrieved_at": { "type": "string", "format": "date-time" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "rel_path": { "type": "string" }
+      }
+    },
     "Assertion": {
       "type": "object",
       "required": ["id", "text", "status"],
