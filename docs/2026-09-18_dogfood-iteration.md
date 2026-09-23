@@ -104,6 +104,11 @@ Writes bytes, sets `source_url`, `kind=media` or `research`, records `retrieved_
 
 ### 2. Correspondence ledger (RFC 0006 — not counsel outreach)
 
+**Implemented 2026-09-20:** [`correspondence` CLI and read-only MCP renderer](../rfcs/0006-correspondence-ledger.md).
+Transport remains `nosend` even after a human supplies receipt evidence; the
+ledger records human actions and never sends. Confirmation dates stay working
+estimates until independently verified.
+
 A row is a **custodian notice**, not a lawyer pitch.
 
 ```

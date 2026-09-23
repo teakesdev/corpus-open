@@ -40,6 +40,58 @@
         "rel_path": { "type": "string" }
       }
     },
+    "CorrespondenceNotice": {
+      "description": "A custodian notice, separate from counsel outreach. Addressee must reference a Party with role agency|other and capacity custodian. Only DOCUMENTED FACT and UNKNOWN assertions enter generated letter bodies. Receipt hashes record operator-supplied evidence; software never sends.",
+      "type": "object",
+      "required": ["id", "kind", "status", "addressee", "address", "exhibit_document_id", "exhibit_sha256", "transport", "created_at", "updated_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "enum": ["hold", "mpra", "foia", "touhy", "letter", "other"] },
+        "status": { "enum": ["draft", "signed", "mailed", "receipt-hashed", "answered", "refused"] },
+        "addressee": { "type": "string", "description": "Custodian Party ID; never an outreach recipient ID." },
+        "address": { "type": "string", "minLength": 1 },
+        "exhibit_document_id": { "type": "string" },
+        "exhibit_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "assertion_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "confirm_due": { "type": ["string", "null"], "format": "date" },
+        "deadline_id": { "type": ["string", "null"] },
+        "transport": { "const": "nosend" },
+        "approval_id": { "type": ["string", "null"] },
+        "receipt_document_id": { "type": ["string", "null"] },
+        "receipt_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "enum": ["signed", "mailed", "receipt-hashed", "answered", "refused"] } } },
+          "then": { "required": ["approval_id"], "properties": { "approval_id": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "status": { "enum": ["mailed", "receipt-hashed", "answered", "refused"] } } },
+          "then": {
+            "required": ["receipt_document_id", "receipt_sha256"],
+            "properties": { "receipt_document_id": { "type": "string" }, "receipt_sha256": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "CorrespondenceEvidence": {
+      "description": "An append-only lifecycle history row. Mailing proof, delivery confirmation, answers, and refusals keep distinct evidence hashes. created_at is recording time, not a claim about delivery time.",
+      "type": "object",
+      "required": ["id", "notice_id", "to_status", "recorded_by", "created_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "notice_id": { "type": "string" },
+        "from_status": { "type": ["string", "null"] },
+        "to_status": { "enum": ["draft", "signed", "mailed", "receipt-hashed", "answered", "refused"] },
+        "evidence_document_id": { "type": ["string", "null"] },
+        "evidence_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "approval_id": { "type": ["string", "null"] },
+        "recorded_by": { "type": "string", "minLength": 1 },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
     "Assertion": {
       "type": "object",
       "required": ["id", "text", "status"],

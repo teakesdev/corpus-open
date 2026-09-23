@@ -15,6 +15,8 @@ Usage:
   matter.py deadline list <dir> [--all]
   matter.py authority add <dir> "<citation>" [--via HOW]
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
+  matter.py party add <dir> --name NAME --role agency --capacity custodian
+  matter.py correspondence add|list|render|manifest|export|status <dir> ...
 """
 import argparse
 import json
@@ -114,7 +116,49 @@ def cmd_deadline(args):
         q = "SELECT * FROM deadlines" + ("" if args.all else " WHERE state='open'") + " ORDER BY due_date"
         for r in conn.execute(q):
             flag = "" if r["verification_status"] == "verified-official" else f" ({r['confidence']}/{r['verification_status']})"
-            print(f"{r['due_date']}  {r['label']}{flag}  [{r.get('rule_source') or '—'}]")
+            print(f"{r['due_date']}  {r['label']}{flag}  [{r['rule_source'] or '—'}]")
+
+
+def cmd_party(args):
+    if not os.path.isdir(args.case_dir):
+        sys.exit(f"error: case_dir is not a directory: {args.case_dir}")
+    conn = store.connect(args.case_dir)
+    if args.sub == "list":
+        print(json.dumps([dict(r) for r in conn.execute("SELECT * FROM parties ORDER BY name")], indent=2))
+        return
+    if not args.name or not args.name.strip() or not args.role:
+        sys.exit("party add requires --name and --role")
+    pid = store.new_id("p_")
+    with conn:
+        conn.execute("INSERT INTO parties (id,name,role,capacity) VALUES (?,?,?,?)",
+                     (pid, args.name.strip(), args.role, args.capacity))
+    print(pid)
+
+
+def cmd_correspondence(args):
+    from matterkit import correspondence as co
+    if not os.path.isdir(args.case_dir):
+        sys.exit(f"error: case_dir is not a directory: {args.case_dir}")
+    with store.connect(args.case_dir) as conn:
+        try:
+            if args.sub == "add":
+                print(co.create_notice(conn, args.case_dir, kind=args.kind, addressee=args.addressee,
+                                       address=args.address, exhibit=args.exhibit,
+                                       assertion_ids=args.assertion, confirm_due=args.confirm_due))
+            elif args.sub == "list":
+                print(co.ledger(conn))
+            elif args.sub == "render":
+                print(co.render_packet(conn, args.case_dir, args.notice))
+            elif args.sub == "manifest":
+                print(json.dumps(co.build_manifest(conn, args.case_dir, args.notice), indent=2, ensure_ascii=False))
+            elif args.sub == "export":
+                print(json.dumps(co.export_packet(conn, args.case_dir, args.notice), indent=2))
+            elif args.sub == "status":
+                status = co.transition(conn, args.case_dir, args.notice, args.state,
+                                       issuer=args.issuer, expected_sha=args.sha, receipt=args.receipt)
+                print(f"{args.notice} → {status}; transport=nosend (operator action recorded; nothing sent)")
+        except (ValueError, OSError) as e:
+            sys.exit(f"refused: {e}")
 
 
 def cmd_authority(args):
@@ -390,6 +434,35 @@ def main():
                    choices=["verified-official", "secondary-source", "unverified"])
     p.add_argument("--all", action="store_true")
     p.set_defaults(fn=cmd_deadline)
+
+    p = sub.add_parser("party")
+    p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")
+    p.add_argument("--name")
+    p.add_argument("--role", choices=["plaintiff", "defendant", "witness", "counsel", "court", "agency", "other"])
+    p.add_argument("--capacity")
+    p.set_defaults(fn=cmd_party)
+
+    from matterkit import correspondence as co
+    p = sub.add_parser("correspondence", help="Custodian notices; humans send, software records evidence")
+    commands = p.add_subparsers(dest="sub", required=True)
+    for action in ("add", "list", "render", "manifest", "export", "status"):
+        c = commands.add_parser(action)
+        c.add_argument("case_dir")
+        c.set_defaults(fn=cmd_correspondence)
+        if action == "add":
+            c.add_argument("--kind", choices=co.KINDS, required=True)
+            c.add_argument("--addressee", required=True, help="Existing agency|other party with capacity=custodian")
+            c.add_argument("--address", required=True, help="Human-selected mailing address")
+            c.add_argument("--exhibit", required=True, help="Ingested document ID, SHA-256, or matter-relative path")
+            c.add_argument("--assertion", action="append", default=[], help="Explicit assertion ID; repeat to select")
+            c.add_argument("--confirm-due", help="Requested confirmation date, YYYY-MM-DD")
+        elif action != "list":
+            c.add_argument("notice")
+        if action == "status":
+            c.add_argument("state", choices=co.STATUSES)
+            c.add_argument("--issuer", required=True, help="Name of human attesting to this action")
+            c.add_argument("--sha", help="Reviewed manifest SHA-256, required for signed and mailed")
+            c.add_argument("--receipt", help="Ingested mailing receipt, delivery confirmation, response, or refusal")
 
     p = sub.add_parser("authority"); p.add_argument("case_dir"); p.add_argument("citation")
     p.add_argument("--via", default=None); p.set_defaults(fn=cmd_authority)

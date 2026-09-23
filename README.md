@@ -64,6 +64,50 @@ ingested. Network: one GET to the URL the operator named, logged hash-only to
 the command line is the instruction, and nothing else leaves. Then `verify` from
 a foreign cwd, as after any write.
 
+## Custodian correspondence
+
+Create a notice for a custodian party, then generate a packet for human review:
+
+```bash
+custodian=$(python3 matter.py party add ~/cases/my-case \
+  --name "Example Records Office" --role agency --capacity custodian)
+python3 matter.py ingest ~/cases/my-case ~/cases/my-case/Correspondence/esi-schedule.txt
+notice=$(python3 matter.py correspondence add ~/cases/my-case --kind hold \
+  --addressee "$custodian" --address "100 Example Street, Example City" \
+  --exhibit Correspondence/esi-schedule.txt --confirm-due 2026-10-01)
+# Add --assertion a_ID (repeatable) to select assertion rows for this addressee.
+python3 matter.py correspondence export ~/cases/my-case "$notice"
+python3 matter.py correspondence list ~/cases/my-case
+```
+
+Kinds: `hold|mpra|foia|touhy|letter|other`. The export contains `packet.md`, an
+exact Exhibit A copy, and `approval.json` under `.matter/out/correspondence/`.
+Letter bodies include only selected `DOCUMENTED FACT` and `UNKNOWN` assertions;
+HYPOTHESIS rows are omitted even when explicitly selected. Exhibits themselves
+require human review. Missing or changed sources block generation.
+
+After reviewing the exact bundle, a human records signing with the printed
+manifest hash. Sending happens outside the kit. An ingested receipt is required
+to record mailing:
+
+```bash
+python3 matter.py correspondence status ~/cases/my-case "$notice" signed \
+  --issuer "Human Name" --sha REVIEWED_MANIFEST_SHA256
+# The human sends, saves their receipt in the matter, then registers it:
+python3 matter.py ingest ~/cases/my-case ~/cases/my-case/Correspondence/mailing-receipt.pdf
+python3 matter.py correspondence status ~/cases/my-case "$notice" mailed \
+  --issuer "Human Name" --sha REVIEWED_MANIFEST_SHA256 \
+  --receipt Correspondence/mailing-receipt.pdf
+```
+
+Delivery confirmation (`receipt-hashed`) and response states (`answered|refused`)
+also require ingested evidence via `--receipt`. All transports remain `nosend`.
+The issuer is an operator attestation, not identity authentication. Confirmation
+dates create linked deadlines marked `working-estimate`; mailing does not make
+them verified legal deadlines. See [RFC 0006](rfcs/0006-correspondence-ledger.md)
+for the lifecycle and approval contract. This ledger is separate from counsel
+outreach.
+
 ## MCP (Hermes / Claude Desktop / Codex / anything)
 
 ```json
@@ -74,9 +118,12 @@ a foreign cwd, as after any write.
 
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.deadline_list` · `matter.packet_render` · `matter.cite_extract` ·
-`matter.ingest_path` · `matter.verify`.
+`matter.ingest_path` · `matter.verify` · `matter.hold_render` ·
+`matter.correspondence_list`.
 `matter.ingest_path` refuses paths that escape `MATTER_DIR`. `matter.verify`
 prints absolute `root=` and ok/changed/missing; it does not send network.
+`matter.hold_render` takes a `notice_id` and returns a filtered custodian packet.
+MCP cannot approve a notice, record mailing, or send it.
 
 ## Citations and stages (v0.2, RFC 0001)
 

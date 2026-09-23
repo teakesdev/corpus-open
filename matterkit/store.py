@@ -59,6 +59,53 @@ CREATE TABLE IF NOT EXISTS citation_extractions (
   status TEXT NOT NULL CHECK (status IN ('extracted','extraction-failed')),
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS correspondence_notices (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('hold','mpra','foia','touhy','letter','other')),
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft','signed','mailed','receipt-hashed','answered','refused')),
+  addressee TEXT NOT NULL REFERENCES parties(id),
+  address TEXT NOT NULL CHECK (length(trim(address)) > 0),
+  exhibit_document_id TEXT NOT NULL REFERENCES documents(id),
+  exhibit_sha256 TEXT NOT NULL CHECK (length(exhibit_sha256)=64),
+  confirm_due TEXT,
+  deadline_id TEXT UNIQUE REFERENCES deadlines(id),
+  transport TEXT NOT NULL DEFAULT 'nosend' CHECK (transport='nosend'),
+  approval_id TEXT REFERENCES correspondence_approvals(id),
+  receipt_document_id TEXT REFERENCES documents(id),
+  receipt_sha256 TEXT CHECK (receipt_sha256 IS NULL OR length(receipt_sha256)=64),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK ((confirm_due IS NULL) = (deadline_id IS NULL)),
+  CHECK (status='draft' OR approval_id IS NOT NULL),
+  CHECK (status IN ('draft','signed') OR
+         (receipt_document_id IS NOT NULL AND receipt_sha256 IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS correspondence_assertions (
+  notice_id TEXT NOT NULL REFERENCES correspondence_notices(id),
+  assertion_id TEXT NOT NULL REFERENCES assertions(id),
+  position INTEGER NOT NULL,
+  PRIMARY KEY (notice_id, assertion_id)
+);
+CREATE TABLE IF NOT EXISTS correspondence_approvals (
+  id TEXT PRIMARY KEY,
+  notice_id TEXT NOT NULL REFERENCES correspondence_notices(id),
+  sha256 TEXT NOT NULL,
+  manifest_json TEXT NOT NULL,
+  approved_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS correspondence_history (
+  id TEXT PRIMARY KEY,
+  notice_id TEXT NOT NULL REFERENCES correspondence_notices(id),
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  evidence_document_id TEXT REFERENCES documents(id),
+  evidence_sha256 TEXT,
+  approval_id TEXT REFERENCES correspondence_approvals(id),
+  recorded_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 VALID_STATUS = {"DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"}

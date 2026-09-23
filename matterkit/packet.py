@@ -24,6 +24,11 @@ def status_report(conn, matter_dir: str) -> str:
         "SELECT COUNT(*) c FROM authorities WHERE status NOT IN ({})".format(
             ",".join("?" * len(checked))), checked).fetchone()["c"]
     lines += ["", f"Assertions: {n_assert} · Open deadlines: {n_dead} · Unverified authorities: {n_auth}"]
+    notices = conn.execute(
+        "SELECT status,COUNT(*) c FROM correspondence_notices GROUP BY status ORDER BY status").fetchall()
+    if notices:
+        lines += ["", "Custodian notices (transport=nosend; humans send): " +
+                  " · ".join(f"{r['status']}: {r['c']}" for r in notices)]
     return "\n".join(lines)
 
 

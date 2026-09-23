@@ -81,6 +81,49 @@ An assertion with no recognized source renders `[UNSUPPORTED]` everywhere. That
 is deliberate: unsupported leaps should be visible to the user, the agent, and
 any lawyer reading the output.
 
+## Custodian correspondence (holds / records requests)
+
+Use the correspondence ledger for custodian notices; counsel outreach recipients
+are not custodians. Register the addressee with `party add --name NAME --role
+agency --capacity custodian` (or `role=other`), then select that party ID:
+
+```bash
+matter correspondence add <dir> --kind hold --addressee p_ID --address "Example mailing address" --exhibit Correspondence/esi-schedule.txt --confirm-due 2026-10-01 --assertion a_ID
+matter correspondence export <dir> cn_ID
+matter correspondence list <dir>
+```
+
+Ingest the exhibit first. All document references are IDs, SHA-256 hashes, or
+matter-relative paths. Select assertions explicitly with repeated `--assertion`;
+the default selects none. Generated letter bodies only include DOCUMENTED FACT
+and UNKNOWN rows, with provenance or `[UNSUPPORTED]`. HYPOTHESIS, INFERENCE, and
+ALLEGATION rows cannot enter through assertion selection. Do not paste theories
+into addressee metadata or exhibits to evade the filter. Humans review exhibits
+as well as the letter; hashing proves custody, not truth.
+
+Exports under `.matter/out/correspondence/<sha>/` contain the packet, exact
+Exhibit A bytes, and a manifest binding the addressee and packet to their hash.
+`confirm_due` creates an open working-estimate deadline; it is a requested date,
+not an automatically verified legal deadline. The packet prints this mapping:
+
+```text
+custody verified ≠ assertion DOCUMENTED FACT
+(A) Confirmed = DOCUMENTED FACT (needs a hashed source)
+(B) Lead = INFERENCE or UNKNOWN + a next ask; never a packet headline
+(C) Hypothesis = HYPOTHESIS; omitted from outbound correspondence
+```
+
+Human actions are recorded using `correspondence status <dir> cn_ID signed
+--issuer NAME --sha SHA`, then `mailed` with the same flags plus `--receipt
+Correspondence/mailing-receipt.pdf`. The human reviews/signs/sends outside the kit
+and supplies evidence. Ingest receipts before recording them. Delivery
+confirmation (`receipt-hashed`) and `answered|refused` require their own ingested
+evidence via `--receipt` and a human issuer. Do not invent an issuer or infer
+mailing from an export. Transport stays `nosend` throughout. A changed approved
+packet must be reviewed again; an unmailed signed notice can return to `draft`.
+Rule 9 applies after adding source/receipt files. Derived export bundles stay
+under `.matter/` and are not ingested as sources or receipts.
+
 ## Counsel packets & MCP
 
 ```bash
@@ -101,5 +144,7 @@ Outreach drafts may be prepared, but nothing in matter-kit ever sends — humans
 
 Tools: `matter.status`, `matter.fact_add`, `matter.fact_list`,
 `matter.deadline_list`, `matter.packet_render`, `matter.cite_extract`,
-`matter.ingest_path`, `matter.verify`. `ingest_path` refuses path escape.
+`matter.ingest_path`, `matter.verify`, `matter.hold_render`,
+`matter.correspondence_list`. `hold_render` takes a `notice_id` and returns the
+filtered packet without approving or sending it. `ingest_path` refuses path escape.
 Read-mostly plus local ingest/verify; nothing sends.

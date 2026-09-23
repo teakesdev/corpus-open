@@ -37,6 +37,11 @@ TOOLS = [
                      "properties": {"path": {"type": "string"}}}},
     {"name": "matter.verify", "description": "Re-hash the store against files under MATTER_DIR. Returns absolute root= plus ok/changed/missing. MISSING/CHANGED is a blocker. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "matter.hold_render", "description": "Render one custodian notice packet by notice_id (all correspondence kinds). Only DOCUMENTED FACT and UNKNOWN assertion rows; HYPOTHESIS omitted. Validates source hashes. Read-only, nosend; no approval or mailing writes.",
+     "inputSchema": {"type": "object", "required": ["notice_id"],
+                     "properties": {"notice_id": {"type": "string"}}, "additionalProperties": False}},
+    {"name": "matter.correspondence_list", "description": "Read the custodian notice ledger, including status, exhibit hashes, confirmation dates, and receipt evidence. No network.",
+     "inputSchema": {"type": "object", "properties": {}}},
 ]
 
 
@@ -114,6 +119,12 @@ def call(name: str, args: dict):
         return json.dumps([dict(r) for r in conn.execute(q)], indent=1)
     if name == "matter.packet_render":
         return pk.packet(conn, MATTER_DIR, layer=args.get("layer", "3min"))
+    if name == "matter.hold_render":
+        from matterkit import correspondence
+        return correspondence.render_packet(conn, MATTER_DIR, args["notice_id"])
+    if name == "matter.correspondence_list":
+        from matterkit import correspondence
+        return correspondence.ledger(conn)
     if name == "matter.cite_extract":
         from matterkit import citations
         text = args.get("text", "")
