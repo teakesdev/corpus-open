@@ -2,6 +2,8 @@
 from collections import Counter
 from datetime import date
 
+from . import subcase
+
 
 def _badge(status: str) -> str:
     return "" if status == "DOCUMENTED FACT" else f" `{status}`"
@@ -11,6 +13,9 @@ def status_report(conn, matter_dir: str) -> str:
     docs = conn.execute("SELECT kind, COUNT(*) c FROM documents GROUP BY kind ORDER BY kind").fetchall()
     total = sum(r["c"] for r in docs)
     lines = [f"# Matter status — {matter_dir}", ""]
+    parent = subcase.parent_line(matter_dir)
+    if parent:
+        lines += [parent, ""]
     lines.append(f"Documents registered: **{total}**")
     for r in docs:
         lines.append(f"- {r['kind']}: {r['c']}")
@@ -29,6 +34,9 @@ def status_report(conn, matter_dir: str) -> str:
     if notices:
         lines += ["", "Custodian notices (transport=nosend; humans send): " +
                   " · ".join(f"{r['status']}: {r['c']}" for r in notices)]
+    children = subcase.children_lines(matter_dir)
+    if children:
+        lines += [""] + children
     return "\n".join(lines)
 
 

@@ -12,7 +12,7 @@ import shutil
 import sqlite3
 from collections import namedtuple
 
-from . import ingest, store
+from . import deadlines, ingest, store
 from .ingest import PARENT_PREFIX
 from .store import new_id, now_iso
 
@@ -227,3 +227,45 @@ def attach_sources(conn, aid, sources, parents):
         conn.execute("INSERT OR IGNORE INTO assertion_sources VALUES (?,?,?)", (aid, doc_id, loc or None))
     return unrecognized, notes
 
+
+def parent_line(matter_dir):
+    """For `status` on a subcase: one line naming its parent. None for an ordinary matter."""
+    m = read_manifest(matter_dir)
+    if not m or not isinstance(m.get("parent"), str) or not m["parent"].strip():
+        return None
+    title = f" · title: {m['title']}" if m.get("title") else ""
+    try:
+        parent = parent_dir_of(matter_dir)
+    except SubcaseError as e:
+        return f"Subcase{title} — ⚠ {e}"
+    return f"Subcase of: {os.path.basename(parent) or parent} ({parent}){title}"
+
+
+def children_lines(matter_dir):
+    """For `status` on a parent: its subcases (immediate children of Subcases/ holding both a store
+    and a matter.json) with open and OVERDUE deadline counts. Read-only: connect_readonly, so
+    listing never creates, migrates or writes a child store. Empty list when there are none."""
+    root = os.path.join(matter_dir, "Subcases")
+    if not os.path.isdir(root) or os.path.islink(root):
+        return []
+    out = []
+    for name in sorted(os.listdir(root)):
+        d = os.path.join(root, name)
+        if os.path.islink(d) or not os.path.isdir(d):
+            continue
+        m = read_manifest(d)
+        if m is None or not os.path.isfile(store.db_path(d)):
+            continue
+        title = str(m.get("title") or name)
+        try:
+            conn = store.connect_readonly(d)
+            try:
+                due = conn.execute("SELECT due_date, state FROM deadlines WHERE state='open'").fetchall()
+            finally:
+                conn.close()
+            late = sum(deadlines.is_overdue(r["due_date"], r["state"]) for r in due)
+            detail = f"Open deadlines: {len(due)} · {'⚠ ' if late else ''}OVERDUE: {late}"
+        except (sqlite3.DatabaseError, FileNotFoundError):
+            detail = "⚠ store unreadable"
+        out.append(f"- {name} — {title} · {detail}")
+    return [f"Subcases: {len(out)}"] + out if out else []

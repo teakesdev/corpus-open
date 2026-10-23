@@ -573,5 +573,96 @@ class TestParentIsNeverWrittenBySubcaseOperations(ParentBase):
 
 
 
+class TestStatus(SubBase):
+    def deadline(self, matter, label, due, state=None):
+        self.run_cli("deadline", "add", matter, "--label", label, "--due", due)
+        if state:
+            did = self.rows(matter, "SELECT id FROM deadlines WHERE label=?", (label,))[0][0]
+            self.run_cli("deadline", "update", matter, did, "--state", state, "--reason", "test")
+
+    def status(self, matter):
+        return self.run_cli("status", matter).stdout
+
+    def test_parent_without_subcases_prints_no_subcase_section(self):
+        out = self.status(self.parent)
+        self.assertNotIn("Subcase", out)
+
+    def test_parent_lists_subcases_with_title_open_and_overdue_counts(self):
+        self.make_subcase("alpha", "Alpha libel matter")
+        self.make_subcase("beta", "Beta matter")
+        a = os.path.join(self.parent, "Subcases", "alpha")
+        self.deadline(a, "Past open", "2020-01-01")
+        self.deadline(a, "Past open 2", "2020-02-01")
+        self.deadline(a, "Future", "2099-01-01")
+        self.deadline(a, "Past but met", "2020-03-01", state="met")
+        out = self.status(self.parent)
+        alpha = next(l for l in out.splitlines() if "alpha" in l)
+        beta = next(l for l in out.splitlines() if "beta" in l)
+        self.assertIn("Alpha libel matter", alpha)
+        self.assertIn("Open deadlines: 3", alpha)   # met one is not open
+        self.assertIn("⚠ OVERDUE: 2", alpha)
+        self.assertIn("Beta matter", beta)
+        self.assertIn("Open deadlines: 0", beta)
+        self.assertIn("OVERDUE: 0", beta)
+        self.assertNotIn("⚠", beta)
+        self.assertIn("Subcases: 2", out)
+
+    def test_only_immediate_children_with_store_and_manifest_are_listed(self):
+        self.make_subcase("real", "Real one")
+        os.makedirs(os.path.join(self.parent, "Subcases", "plain-folder"))               # no store
+        store.connect(os.path.join(self.parent, "Subcases", "no-manifest")).close()      # store, no matter.json
+        write(os.path.join(self.parent, "Subcases", "a-file.txt"), "not a directory\n")
+        real = os.path.join(self.parent, "Subcases", "real")
+        self.run_cli("subcase", "init", real, "grand", "--title", "Grandchild")          # not immediate
+        out = self.status(self.parent)
+        self.assertIn("Subcases: 1", out)
+        self.assertIn("real", out)
+        for absent in ("plain-folder", "no-manifest", "a-file.txt", "grand", "Grandchild"):
+            self.assertNotIn(absent, out)
+
+    def test_unreadable_child_store_is_reported_not_fatal(self):
+        self.make_subcase("broken", "Broken one")
+        with open(os.path.join(self.parent, "Subcases", "broken", ".matter", "matter.db"), "wb") as f:
+            f.write(b"this is not a sqlite database" * 50)
+        out = self.status(self.parent)
+        line = next(l for l in out.splitlines() if "broken" in l)
+        self.assertIn("store unreadable", line)
+
+    def test_status_reads_children_without_writing_to_them(self):
+        self.make_subcase("alpha", "Alpha")
+        db = os.path.join(self.parent, "Subcases", "alpha", ".matter", "matter.db")
+        before = open(db, "rb").read()
+        self.status(self.parent)
+        self.assertEqual(open(db, "rb").read(), before)
+
+    def test_subcase_status_names_its_parent(self):
+        self.make_subcase("alpha", "Alpha libel matter")
+        out = self.status(os.path.join(self.parent, "Subcases", "alpha"))
+        line = next(l for l in out.splitlines() if "Subcase of" in l)
+        self.assertIn("Parent-Case", line)
+        parent_path = line.split(" (", 1)[1].split(")", 1)[0]
+        self.assertTrue(os.path.samefile(parent_path, self.parent))
+        self.assertIn("title: Alpha libel matter", line)
+        self.assertNotIn("Subcases:", out)  # a subcase with no children lists none
+
+    def test_subcase_status_leaves_parent_store_untouched(self):
+        self.make_subcase("alpha", "Alpha")
+        before = self.parent_db_bytes()
+        self.status(os.path.join(self.parent, "Subcases", "alpha"))
+        self.assertEqual(self.parent_db_bytes(), before)
+
+    def test_plain_matter_status_is_unchanged(self):
+        out = self.status(self.parent)
+        self.assertNotIn("Subcase of", out)
+        self.assertIn("Documents registered: **1**", out)
+
+    def test_mcp_status_includes_subcases(self):
+        self.make_subcase("alpha", "Alpha libel matter")
+        req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "matter.status", "arguments": {}}}
+        p = subprocess.run([sys.executable, os.path.join(KIT, "matter-mcp.py")], input=json.dumps(req) + "\n",
+                           capture_output=True, text=True, env=dict(CLEAN_ENV, MATTER_DIR=self.parent), check=True)
+        self.assertIn("Alpha libel matter", json.loads(p.stdout)["result"]["content"][0]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()
