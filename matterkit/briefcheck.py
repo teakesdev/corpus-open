@@ -15,10 +15,14 @@ in) it resolves:
 
 Record cites resolve through `.matter/docket.json`:
 
-  {"entries":     {"16": "Filings/…/16.pdf", "23-1": "…"},
-   "pleadings":   {"Compl.": "1" | "<rel_path>", "Am. Compl.": "…"},
-   "text_copies": {"Filings/…/16.pdf": "Filings/plaintext/16.md"},
-   "bare_rule":   "Fed. R. Civ. P."}
+  {"entries":            {"16": "Filings/…/16.pdf", "23-1": "…"},
+   "pleadings":          {"Compl.": "1" | "<rel_path>", "Am. Compl.": "…"},
+   "operative_pleading": "1" | "<rel_path>",     (fallback for any pleading key)
+   "text_copies":        {"Filings/…/16.pdf": "Filings/plaintext/16.md"},
+   "bare_rule":          "Fed. R. Civ. P.",       ('Rule 15' is read as this)
+   "local_rule":         "L.U.Civ.R."}            ('Local Civil Rule 7' is read as this)
+
+Any other shape is refused. Keys starting with "_" (notes) are ignored.
 
 Severity: BLOCK (exit 1), UNCHECKED (exit 2 when nothing blocks), WARN, OK.
 "Tied to a source in the store" means the cited document or authority record
@@ -258,8 +262,18 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
     for m in LOCAL_WORDS_RE.finditer(s):
         if free(*m.span()):
             spans.append(m.span())
-            yield ("rule:" + _norm_key(f"{local_rule} {m['num']}"), f"{m.group(0)} (read as {local_rule} {m['num']})",
+            words = m.group(0)
+            prefix = local_rule.replace("Civ", "Crim") if "Criminal" in words else local_rule
+            if re.search(r"Bankruptcy|Admiralty", words):  # no mapping known: key the words as written
+                prefix = re.match(r"(.*?Rules?)\s", words).group(1).replace("Rules", "Rule")
+            yield ("rule:" + _norm_key(f"{prefix} {m['num']}"), f"{words} (read as {prefix} {m['num']})",
                    None, m.start(), m.end(), "rule", None)
+            pos = m.end()
+            while (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
+                spans.append(t.span("cite"))
+                yield ("rule:" + _norm_key(f"{prefix} {t['num']}"), f"{prefix} {t['cite']}", None,
+                       t.start("cite"), t.end("cite"), "rule", None)
+                pos = t.end()
     bare = bare_rule
     for m in BARE_RULE_RE.finditer(s):
         if free(*m.span()):
@@ -323,8 +337,8 @@ def _sentence_spans(text: str, start: int, end: int):
     quoted = [(start + q.start(), start + q.end()) for q in QUOTE_RE.finditer(text[start:end])]
     for m in re.finditer(r"[.?!][\"”’)\]*]*\s+(?=[\"“(\[*§A-Z0-9])", text[start:end]):
         cut = start + m.start()
-        if any(a < cut < b - 1 for a, b in quoted):
-            continue
+        if any(a < cut and start + m.end() <= b for a, b in quoted):
+            continue  # the quotation continues past this boundary
         before = text[s:cut + 1]
         tok = re.search(r"(\S+)$", before)
         word = tok.group(1).lstrip("([*\"“").rstrip(".").lower() if tok else ""
@@ -465,19 +479,54 @@ def _split_pages(text: str):
     return [text], None
 
 
-_PAGES_NODE = re.compile(rb"<<(?:(?!<<|>>).)*?/Type\s*/Pages\b(?:(?!<<|>>).)*?>>", re.S)
+def _pages_nodes(buf: bytes) -> list[bytes]:
+    """Top-level text of every /Type /Pages dictionary in buf (nested dictionaries removed)."""
+    out = []
+    for m in re.finditer(rb"/Type\s*/Pages\b", buf):
+        depth, i = 0, m.start()
+        while i > 0:  # back to the << that opens this dictionary
+            if buf[i - 1:i + 1] == b">>":
+                depth += 1
+                i -= 2
+                continue
+            if buf[i - 1:i + 1] == b"<<":
+                if depth == 0:
+                    break
+                depth -= 1
+                i -= 2
+                continue
+            i -= 1
+        start, depth, j, top = i - 1, 0, i - 1, bytearray()
+        while j < len(buf) - 1:  # forward to the matching >>, keeping only depth-1 bytes
+            two = buf[j:j + 2]
+            if two == b"<<":
+                depth += 1
+                j += 2
+                continue
+            if two == b">>":
+                depth -= 1
+                j += 2
+                if depth == 0:
+                    break
+                continue
+            if depth == 1:
+                top.append(buf[j])
+            j += 1
+        if start >= 0:
+            out.append(bytes(top))
+    return out
 
 
 def _pdf_page_count(data: bytes) -> int | None:
     """Page count from the page tree: plain objects and /ObjStm object streams only, never
     content streams (whose text could spell anything). The root node has no /Parent."""
-    nodes = _PAGES_NODE.findall(_strip_streams(data))
+    nodes = _pages_nodes(_strip_streams(data))
     for m in re.finditer(rb"<<((?:(?!>>).)*?/Type\s*/ObjStm(?:(?!>>).)*?)>>\s*stream\r?\n", data, re.S):
         end = data.find(b"endstream", m.end())
         if end < 0:
             continue
         try:
-            nodes += _PAGES_NODE.findall(zlib.decompressobj().decompress(data[m.end():end]))
+            nodes += _pages_nodes(zlib.decompressobj().decompress(data[m.end():end]))
         except zlib.error:
             continue
     counts = [(b"/Parent" not in n, int(c.group(1))) for n in nodes if (c := re.search(rb"/Count\s+(\d+)", n))]
@@ -485,7 +534,7 @@ def _pdf_page_count(data: bytes) -> int | None:
 
 
 def _strip_streams(data: bytes) -> bytes:
-    return re.sub(rb"stream\r?\n.*?endstream", b"stream endstream", data, flags=re.S)
+    return re.sub(rb"stream\r?\n.*?endstream", b"stream endstream", data, flags=re.S)  # content never parsed
 
 
 _QUOTE_TRANS = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "–": "-", "—": "-", "‐": "-", "‑": "-"})
@@ -505,8 +554,8 @@ def _fragments(quote: str) -> list[re.Pattern]:
 
     Ellipses and stand-alone bracketed insertions ("[the officer]", "[sic]") split the
     quotation. A word altered in place keeps its visible letters and frees only the
-    bracketed part: "[M]otion" must match a source word ending in "otion", "alleg[e]"
-    one starting with "alleg".
+    bracketed part, up to its own length: "[M]otion" must match a source word "?otion",
+    "conclud[ing]" one of "conclud" plus at most three letters ("concluded").
     """
     q = unicodedata.normalize("NFKC", quote).translate(_QUOTE_TRANS).lower()
     q = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", q)
@@ -516,7 +565,7 @@ def _fragments(quote: str) -> list[re.Pattern]:
         for t in re.finditer(r"[\w']*(?:\[[^\]]*\][\w']*)+|[\w']+", part):
             w = t.group(0)
             if "[" in w:
-                toks.append("".join(r"[\w']{0,6}" if seg.startswith("[") else re.escape(seg)
+                toks.append("".join(r"[\w']{0,%d}" % (len(seg) - 2) if seg.startswith("[") else re.escape(seg)
                                     for seg in re.split(r"(\[[^\]]*\])", w) if seg))
             else:
                 toks.append(re.escape(w))

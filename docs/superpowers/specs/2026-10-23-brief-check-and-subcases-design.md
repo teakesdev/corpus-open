@@ -77,3 +77,15 @@ The founder assigned `550292c..3d88bb6` to SWE-2 (Devin, `swe-2-max`, read-only)
 Found while fixing: a sentence split inside a multi-sentence quotation meant that quotation was never checked. The segmenter no longer splits inside quotation marks.
 
 Revision 2 has not been re-reviewed.
+
+## 8. Revision 3 (2026-10-23): SWE-2's round-2 re-review
+
+SWE-2 re-reviewed `3d88bb6..0791064` and returned **APPROVE**, with five P3 follow-ups ([the review](../reviews/2026-10-23-brief-check-code-r2/SWE2-REVIEW.md)). I reproduced N1, N2 and N4 with probes. The founder approved fixing all five before landing.
+
+| Finding | Amendment here |
+| --- | --- |
+| **N1** a period that closes a quotation suppressed the sentence split | §2.A5 segmentation: a boundary is skipped only when the quotation continues past it |
+| **N2** the bracket wildcard was looser than the alteration | §2.A4: the freed part of an altered word is at most the bracket's own length |
+| **N3**, **N4**, **N5** | page-tree parsing tolerates nested dictionaries; spelled-out local rules honour the Criminal flavour and "… and N" lists; the docstring lists every docket-map key |
+
+Revision 3 has not been re-reviewed.

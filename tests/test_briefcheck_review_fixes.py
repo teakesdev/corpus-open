@@ -210,3 +210,38 @@ class TestP3Authority(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRound2FollowUps(Base):
+    """SWE-2 round 2 (2026-10-23) follow-ups N1–N5."""
+
+    def test_n1_sentence_ending_in_a_quotation_still_splits(self):
+        r = self.m.check('STATEMENT OF FACTS\n\nHe filed it "late." She knew it all along.\n')
+        uncited = [f.cite for f in r.findings if f.code == "uncited-fact"]
+        self.assertEqual(uncited, ["She knew it all along."])
+
+    def test_n1_period_inside_a_continuing_quotation_does_not_split(self):
+        r = self.m.check('Defendants "move to dismiss. The Complaint does not allege" this. Doc. 16 at 1-2.')
+        self.assertEqual(len(r.rows), 1)
+
+    def test_n2_bracket_wildcard_is_bounded_by_the_alteration(self):
+        self.assertIsNone(briefcheck._find(briefcheck._fragments("the [w]ord was"), "the sword was drawn"))
+        self.assertIsNotNone(briefcheck._find(briefcheck._fragments("the [w]ord was"), "the Word was drawn"))
+        self.assertIsNotNone(briefcheck._find(briefcheck._fragments("he conclud[ing] it"), "he concluded it"))
+
+    def test_n3_page_tree_root_with_nested_resources_dict(self):
+        pdf = (b"%PDF-1.7\n1 0 obj << /Type /Pages /Resources << /Font << /F1 5 0 R >> >> /Count 12 /Kids [2 0 R] >> endobj\n"
+               b"2 0 obj << /Type /Pages /Parent 1 0 R /Count 3 /Kids [] >> endobj\n")
+        self.assertEqual(briefcheck._pdf_page_count(pdf), 12)
+
+    def test_n4_spelled_out_local_rules_list_checks_each(self):
+        r = self.m.check("Exhibits are required. Local Civil Rules 7 and 15.")
+        self.assertEqual([f.cite for f in r.findings if f.code == "authority-not-logged"], ["L.U.Civ.R. 15"])
+
+    def test_n4_local_criminal_rule_is_not_read_as_civil(self):
+        r = self.m.check("Discovery is governed by Local Criminal Rule 16.")
+        self.assertIn("L.U.Crim.R. 16", r.authorities[0].display)
+
+    def test_n5_docstring_documents_every_honoured_key(self):
+        for key in ("bare_rule", "local_rule", "operative_pleading", "text_copies"):
+            self.assertIn(key, briefcheck.__doc__)
