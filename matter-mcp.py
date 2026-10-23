@@ -25,8 +25,18 @@ TOOLS = [
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
     {"name": "matter.fact_list", "description": "List assertions, optionally filtered by label, with their provenance.",
      "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}}}},
-    {"name": "matter.deadline_list", "description": "List deadlines (open only unless all=true) with confidence and verification status.",
+    {"name": "matter.deadline_list", "description": "List deadlines (open only unless all=true) with confidence and verification status. Open deadlines dated before today carry overdue=true and marker '⚠ OVERDUE'.",
      "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}}}},
+    {"name": "matter.deadline_update", "description": "Change a deadline's state (open|met|superseded|lapsed|vacated), verification, confidence or due date. A reason is required; each change appends an events row (old->new, reason, sources, actor). Sources are 'rel_path@locator' refs that must be registered documents. Refuses unknown ids, invalid values, no-op updates and unregistered sources, and changes nothing when it refuses.",
+     "inputSchema": {"type": "object", "required": ["deadline_id", "reason"],
+                     "properties": {"deadline_id": {"type": "string"}, "reason": {"type": "string"},
+                                    "state": {"enum": ["open", "met", "superseded", "lapsed", "vacated"]},
+                                    "verification": {"enum": ["verified-official", "secondary-source", "unverified"]},
+                                    "confidence": {"enum": ["hard", "working-estimate"]},
+                                    "due": {"type": "string", "description": "YYYY-MM-DD"},
+                                    "sources": {"type": "array", "items": {"type": "string"}},
+                                    "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
     {"name": "matter.packet_render", "description": "Render the counsel packet markdown at a given layer (30s | 3min | 15min). Read-only; returns text.",
      "inputSchema": {"type": "object", "properties": {"layer": {"type": "string"}}}},
     {"name": "matter.cite_extract", "description": "Local citation extraction (RFC 0001 §2.2/§2.3): stdlib parser, zero network, no adapter imports reachable; needs no consent grant. Records rows with character offsets keyed to the parsed text's sha256; unparsed section fragments are first-class extraction-failed rows, never dropped.",
@@ -118,7 +128,19 @@ def call(name: str, args: dict):
         return json.dumps(out, indent=1)
     if name == "matter.deadline_list":
         q = "SELECT * FROM deadlines" + ("" if args.get("all") else " WHERE state='open'") + " ORDER BY due_date"
-        return json.dumps([dict(r) for r in conn.execute(q)], indent=1)
+        from matterkit import deadlines as dl
+        rows = []
+        for r in conn.execute(q):
+            od = dl.is_overdue(r["due_date"], r["state"])
+            rows.append(dict(r, overdue=od, marker=dl.OVERDUE_MARK if od else None))
+        return json.dumps(rows, indent=1)
+    if name == "matter.deadline_update":
+        from matterkit import deadlines as dl
+        by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
+        dl.update(conn, MATTER_DIR, args.get("deadline_id"), args.get("reason"), by, state=args.get("state"),
+                  verification=args.get("verification"), confidence=args.get("confidence"),
+                  due=args.get("due"), sources=args.get("sources") or [])
+        return f"deadline {args['deadline_id']} updated by {by}; events row recorded"
     if name == "matter.packet_render":
         return pk.packet(conn, MATTER_DIR, layer=args.get("layer", "3min"))
     if name == "matter.hold_render":

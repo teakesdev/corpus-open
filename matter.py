@@ -13,7 +13,13 @@ Usage:
   matter.py fact list <dir> [--status LABEL]
   matter.py deadline add <dir> --label L --due YYYY-MM-DD [--rule R] [--confidence hard|working-estimate]
                               [--verification verified-official|secondary-source|unverified]
-  matter.py deadline list <dir> [--all]
+                              [--author agent:MODEL [--directed-by PERSON]]
+  matter.py deadline list <dir> [--all]            # open dates in the past are marked OVERDUE
+  matter.py deadline update <dir> <deadline_id> --reason TEXT
+                              [--state open|met|superseded|lapsed|vacated] [--due YYYY-MM-DD]
+                              [--verification verified-official|secondary-source|unverified]
+                              [--confidence hard|working-estimate] [--source rel@loc]...
+                              [--author agent:MODEL [--directed-by PERSON]]   # appends an events row
   matter.py authority add <dir> "<citation>" [--via HOW]
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
   matter.py party add <dir> --name NAME --role agency --capacity custodian
@@ -109,20 +115,34 @@ def cmd_fact(args):
 
 
 def cmd_deadline(args):
+    from matterkit import deadlines as dl
     conn = store.connect(args.case_dir)
-    if args.sub == "add":
-        from matterkit.store import new_id
-        conn.execute("INSERT INTO deadlines (id,label,due_date,rule_source,confidence,verification_status)"
-                     " VALUES (?,?,?,?,?,?)",
-                     (new_id("d_"), args.label, args.due, args.rule,
-                      args.confidence, args.verification))
-        conn.commit()
-        print(f"deadline registered: {args.due} — {args.label}")
-    else:
+    if args.sub == "list":
         q = "SELECT * FROM deadlines" + ("" if args.all else " WHERE state='open'") + " ORDER BY due_date"
         for r in conn.execute(q):
-            flag = "" if r["verification_status"] == "verified-official" else f" ({r['confidence']}/{r['verification_status']})"
-            print(f"{r['due_date']}  {r['label']}{flag}  [{r['rule_source'] or '—'}]")
+            print(dl.list_line(r, show_state=args.all))
+        return
+    try:
+        by = store.attribution(args.author, args.directed_by)
+    except ValueError as e:
+        sys.exit(f"invalid attribution: {e}")
+    try:
+        if args.sub == "add":
+            if not args.label or not args.due:
+                sys.exit("deadline add requires --label and --due")
+            dl.add(conn, args.label, args.due, by, rule=args.rule,
+                   confidence=args.confidence or "working-estimate",
+                   verification=args.verification or "unverified")
+            print(f"deadline registered: {args.due} — {args.label}")
+        else:
+            if not args.deadline_id:
+                sys.exit("deadline update requires <deadline_id>")
+            dl.update(conn, args.case_dir, args.deadline_id, args.reason, by, state=args.state,
+                      verification=args.verification, confidence=args.confidence, due=args.due,
+                      sources=args.source)
+            print(f"deadline {args.deadline_id} updated by {by}; events row recorded")
+    except dl.DeadlineError as e:
+        sys.exit(f"refused: {e}")
 
 
 def cmd_party(args):
@@ -436,13 +456,20 @@ def main():
                    help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_fact)
 
-    p = sub.add_parser("deadline"); p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")
+    p = sub.add_parser("deadline"); p.add_argument("sub", choices=["add", "list", "update"]); p.add_argument("case_dir")
+    p.add_argument("deadline_id", nargs="?", help="update: the deadline to change")
     p.add_argument("--label"); p.add_argument("--due"); p.add_argument("--rule")
-    p.add_argument("--confidence", default="working-estimate",
-                   choices=["hard", "working-estimate"])
-    p.add_argument("--verification", default="unverified",
-                   choices=["verified-official", "secondary-source", "unverified"])
+    # defaults are applied in cmd_deadline: `update` must see "not given" as None
+    p.add_argument("--confidence", choices=["hard", "working-estimate"])
+    p.add_argument("--verification", choices=["verified-official", "secondary-source", "unverified"])
+    p.add_argument("--state", choices=["open", "met", "superseded", "lapsed", "vacated"])
+    p.add_argument("--reason", help="update: why the deadline changed (required)")
+    p.add_argument("--source", action="append", default=[], help="update: rel_path@locator of a registered document")
     p.add_argument("--all", action="store_true")
+    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
+                   help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
+    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
+                   help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_deadline)
 
     p = sub.add_parser("party")
