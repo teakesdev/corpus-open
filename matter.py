@@ -20,6 +20,8 @@ Usage:
                               [--verification verified-official|secondary-source|unverified]
                               [--confidence hard|working-estimate] [--source rel@loc]...
                               [--author agent:MODEL [--directed-by PERSON]]   # appends an events row
+  matter.py subcase init <parent_dir> <slug> --title TITLE [--author agent:MODEL [--directed-by PERSON]]
+                              # own matter at <parent>/Subcases/<slug>/; ingest/verify treat it as a boundary
   matter.py authority add <dir> "<citation>" [--via HOW]
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
   matter.py party add <dir> --name NAME --role agency --capacity custodian
@@ -143,6 +145,21 @@ def cmd_deadline(args):
             print(f"deadline {args.deadline_id} updated by {by}; events row recorded")
     except dl.DeadlineError as e:
         sys.exit(f"refused: {e}")
+
+
+def cmd_subcase(args):
+    """subcase init <parent_dir> <slug> --title T — a matter of its own at <parent>/Subcases/<slug>/."""
+    from matterkit import subcase
+    try:
+        by = store.attribution(args.author, args.directed_by)
+    except ValueError as e:
+        sys.exit(f"invalid attribution: {e}")
+    try:
+        path = subcase.init(args.parent_dir, args.slug, args.title, by, FOLDERS)
+    except subcase.SubcaseError as e:
+        sys.exit(f"refused: {e}")
+    print(f"subcase created: {path}\n  own store .matter/matter.db; matter.json names the parent; "
+          f"cite parent documents there as parent:<rel_path>@<locator>")
 
 
 def cmd_party(args):
@@ -471,6 +488,15 @@ def main():
     p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
                    help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_deadline)
+
+    p = sub.add_parser("subcase"); p.add_argument("sub", choices=["init"])
+    p.add_argument("parent_dir"); p.add_argument("slug")
+    p.add_argument("--title", required=True, help="human title of the subcase")
+    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
+                   help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
+    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
+                   help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
+    p.set_defaults(fn=cmd_subcase)
 
     p = sub.add_parser("party")
     p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")

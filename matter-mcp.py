@@ -5,6 +5,7 @@ Set MATTER_DIR to the case workspace root before launching. Tools are deliberate
 read-mostly: agents can register facts and render packets, but nothing here sends,
 files, or contacts anyone.
 """
+import contextlib
 import json
 import os
 import sys
@@ -89,7 +90,8 @@ def call(name: str, args: dict):
     if name == "matter.ingest_path":
         candidate = _resolve_in_matter(args.get("path", ""))
         conn = store.connect(MATTER_DIR)
-        added, skipped, excluded = ing.ingest_paths(conn, MATTER_DIR, [candidate])
+        with contextlib.redirect_stdout(sys.stderr):  # ingest prints "! ..." notes; stdout is the JSON-RPC channel
+            added, skipped, excluded = ing.ingest_paths(conn, MATTER_DIR, [candidate])
         return json.dumps({"added": added, "skipped": skipped, "excluded": excluded})
     conn = store.connect(MATTER_DIR)
     if name == "matter.status":
