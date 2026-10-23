@@ -19,7 +19,7 @@ MATTER_DIR = os.environ.get("MATTER_DIR", os.getcwd())
 TOOLS = [
     {"name": "matter.status", "description": "Counts of documents by kind, assertions by label, open deadlines, unverified authorities.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "matter.fact_add", "description": "Register an assertion with an epistemic label and optional source refs ('rel_path@locator'). Refuses sources not present in the store.",
+    {"name": "matter.fact_add", "description": "Register an assertion with an epistemic label and optional source refs ('rel_path@locator'). Refuses sources not present in the store. In a subcase, a source may be 'parent:<rel_path>@locator': resolved against the parent matter, re-hashed, refused if it escapes the parent or no longer matches; the document is referenced, never copied.",
      "inputSchema": {"type": "object", "required": ["text", "status"],
                      "properties": {"text": {"type": "string"}, "status": {"enum": ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]},
                                     "sources": {"type": "array", "items": {"type": "string"}}, "created_by": {"type": "string"},
@@ -98,24 +98,19 @@ def call(name: str, args: dict):
         return pk.status_report(conn, MATTER_DIR)
     if name == "matter.fact_add":
         from matterkit.store import new_id, now_iso
+        from matterkit import subcase
         aid = new_id("a_")
         status = args.get("status", "UNKNOWN")
         by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
-        conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
-                     (aid, args["text"], status, by, now_iso()))
-        unsupported = []
-        for s in args.get("sources", []):
-            ref, _, loc = s.partition("@")
-            row = conn.execute("SELECT id FROM documents WHERE rel_path=? OR id=?", (ref, ref)).fetchone()
-            if not row:
-                unsupported.append(ref)
-                continue
-            conn.execute("INSERT OR IGNORE INTO assertion_sources VALUES (?,?,?)", (aid, row["id"], loc or None))
-        conn.commit()
+        parents = subcase.resolve_parent_sources(MATTER_DIR, args.get("sources", []))  # raises -> isError, nothing written
+        with conn:
+            conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
+                         (aid, args["text"], status, by, now_iso()))
+            unsupported, notes = subcase.attach_sources(conn, aid, args.get("sources", []), parents)
         n = conn.execute("SELECT COUNT(*) c FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()["c"]
         warn = f"\n⚠ UNSUPPORTED — no recognized sources." if n == 0 else ""
         bad = f"\n⚠ Unrecognized source refs ignored: {unsupported}" if unsupported else ""
-        return f"{aid} [{status}] by {by}{warn}{bad}"
+        return f"{aid} [{status}] by {by}{warn}{bad}" + "".join(f"\n  ↳ {note}" for note in notes)
     if name == "matter.fact_list":
         st = args.get("status")
         q = "SELECT * FROM assertions" + (" WHERE status=?" if st else "") + " ORDER BY status"

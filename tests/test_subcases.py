@@ -252,5 +252,326 @@ class TestIngestBoundary(SubBase):
         self.assertIn("CHANGED: Evidence/legacy/old.txt", r.stdout)
 
 
+class ParentBase(SubBase):
+    """A subcase exists; helpers to cite parent documents from it."""
+
+    def setUp(self):
+        super().setUp()
+        self.make_subcase()
+        self.parent_file = os.path.join(self.parent, "Filings", "order.txt")
+        self.parent_sha = sha_of(self.parent_file)
+
+    def fact(self, *sources, status="documented-fact", text="The court sealed the order.", check=False, extra=()):
+        argv = ["fact", "add", self.child, "--text", text, "--status", status, *extra]
+        for src in sources:
+            argv += ["--source", src]
+        return self.run_cli(*argv, check=check)
+
+    def child_state(self):
+        return (self.rows(self.child, "SELECT id, rel_path, sha256, kind, notes FROM documents ORDER BY rel_path"),
+                self.rows(self.child, "SELECT id FROM assertions"),
+                self.rows(self.child, "SELECT assertion_id, document_id, locator FROM assertion_sources"))
+
+    def assert_refused(self, r, needle):
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn(needle, r.stderr)
+        self.assertEqual(self.child_state(), ([], [], []), "a refused parent reference must change nothing")
+
+
+class TestParentReferences(ParentBase):
+    def test_reference_is_recorded_without_copying_bytes(self):
+        r = self.fact("parent:Filings/order.txt@p. 2", check=True)
+        self.assertIn("[DOCUMENTED FACT]", r.stdout)
+        self.assertNotIn("UNSUPPORTED", r.stdout)
+        docs, asserts, sources = self.child_state()
+        self.assertEqual(len(docs), 1)
+        doc_id, rel, sha, kind, notes = docs[0]
+        self.assertEqual(rel, "parent:Filings/order.txt")
+        self.assertEqual(sha, self.parent_sha)
+        parent_row = self.rows(self.parent, "SELECT id, kind FROM documents WHERE rel_path='Filings/order.txt'")[0]
+        self.assertEqual(kind, parent_row[1])
+        self.assertIn(f"reference to parent matter document {parent_row[0]}", notes)
+        self.assertIn("bytes live in the parent", notes)
+        self.assertEqual(sources, [(asserts[0][0], doc_id, "p. 2")])
+        copies = [f for _, _, fs in os.walk(self.child) for f in fs if f == "order.txt"]
+        self.assertEqual(copies, [], "no bytes may be copied into the subcase")
+
+    def test_same_parent_document_is_registered_once(self):
+        self.fact("parent:Filings/order.txt@p. 1", check=True)
+        self.fact("parent:Filings/order.txt@p. 2", text="Another fact.", check=True)
+        docs, asserts, sources = self.child_state()
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(len(asserts), 2)
+        self.assertEqual(sorted(x[2] for x in sources), ["p. 1", "p. 2"])
+
+    def test_same_hash_already_registered_locally_is_reused_and_said_so(self):
+        write(os.path.join(self.child, "Evidence", "copy.txt"), open(self.parent_file).read())
+        self.run_cli("ingest", self.child)
+        r = self.fact("parent:Filings/order.txt@p. 1", check=True)
+        self.assertIn("reused", r.stdout)
+        self.assertIn("Evidence/copy.txt", r.stdout)
+        docs, _, sources = self.child_state()
+        self.assertFalse([d for d in docs if d[1].startswith("parent:")])
+        local = [d for d in docs if d[1] == "Evidence/copy.txt"][0]
+        self.assertEqual(sources[0][1], local[0])
+
+    def test_escape_refused(self):
+        for bad in ("parent:../x", "parent:Filings/../order.txt", "parent:/etc/hosts", "parent:", "parent:..",
+                    "parent:../Subcases/child/matter.json"):
+            self.assert_refused(self.fact(bad), "parent")
+        self.assertEqual(self.rows(self.parent, "SELECT COUNT(*) FROM documents")[0][0], 1)
+
+    def test_escape_message_says_escape(self):
+        r = self.fact("parent:../x")
+        self.assertIn("escapes", r.stderr)
+
+    def test_unregistered_in_parent_refused_even_if_file_exists(self):
+        write(os.path.join(self.parent, "Filings", "unregistered.txt"), "on disk, never ingested\n")
+        self.assert_refused(self.fact("parent:Filings/unregistered.txt"), "not registered in the parent")
+        self.assert_refused(self.fact("parent:Filings/ghost.txt"), "not registered in the parent")
+
+    def test_parent_file_changed_refused(self):
+        write(self.parent_file, "edited after it was registered\n")
+        self.assert_refused(self.fact("parent:Filings/order.txt"), "changed in parent")
+
+    def test_parent_file_missing_refused(self):
+        os.remove(self.parent_file)
+        self.assert_refused(self.fact("parent:Filings/order.txt"), "missing in parent")
+
+    def test_refused_parent_ref_aborts_the_whole_fact_even_with_a_good_source(self):
+        write(os.path.join(self.child, "Evidence", "local.txt"), "local evidence\n")
+        self.run_cli("ingest", self.child)
+        before = self.child_state()
+        r = self.fact("Evidence/local.txt@l. 1", "parent:../x")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.child_state(), before)
+
+    def test_rebaselined_parent_hash_refused_and_rolled_back(self):
+        self.fact("parent:Filings/order.txt@p. 1", check=True)
+        write(self.parent_file, "the parent re-registered this path with new bytes\n")
+        conn = sqlite3.connect(os.path.join(self.parent, ".matter", "matter.db"))
+        conn.execute("UPDATE documents SET sha256=? WHERE rel_path='Filings/order.txt'", (sha_of(self.parent_file),))
+        conn.commit()
+        conn.close()
+        before = self.child_state()
+        r = self.fact("parent:Filings/order.txt@p. 2", text="A second fact.")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("different sha256", r.stderr)
+        self.assertEqual(self.child_state(), before, "the new assertion must roll back with the refusal")
+
+    def test_not_a_subcase_refused(self):
+        r = self.run_cli("fact", "add", self.parent, "--text", "t", "--status", "unknown",
+                         "--source", "parent:Filings/order.txt", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not a subcase", r.stderr)
+        self.assertEqual(self.rows(self.parent, "SELECT COUNT(*) FROM assertions")[0][0], 0)
+
+    def test_broken_manifest_refused(self):
+        manifest = os.path.join(self.child, "matter.json")
+        for content, needle in (("{not json", "not a subcase"), ('{"relation": "subcase"}', "not a subcase"),
+                                ('{"parent": ""}', "not a subcase"), ('[1]', "not a subcase"),
+                                ('{"parent": "."}', "itself")):
+            write(manifest, content)
+            self.assert_refused(self.fact("parent:Filings/order.txt"), needle)
+        os.remove(manifest)
+        self.assert_refused(self.fact("parent:Filings/order.txt"), "not a subcase")
+
+    def test_parent_without_store_refused_and_none_is_created(self):
+        elsewhere = os.path.join(self._tmp.name, "no-store-here")
+        os.makedirs(elsewhere)
+        write(os.path.join(self.child, "matter.json"),
+              json.dumps({"parent": os.path.relpath(elsewhere, self.child), "relation": "subcase"}))
+        self.assert_refused(self.fact("parent:Filings/order.txt"), "no store")
+        self.assertEqual(os.listdir(elsewhere), [])
+
+    def test_plain_sources_behave_exactly_as_before(self):
+        r = self.fact("Evidence/ghost.txt@l. 1", check=True)  # unrecognized: warned, not refused
+        self.assertIn("unrecognized source refs", r.stdout)
+        self.assertIn("UNSUPPORTED", r.stdout)
+
+    def test_fact_list_shows_parent_reference(self):
+        self.fact("parent:Filings/order.txt@p. 2", check=True)
+        out = self.run_cli("fact", "list", self.child).stdout
+        self.assertIn("parent:Filings/order.txt@p. 2", out)
+
+    def test_agent_attribution_recorded_on_a_parent_cited_fact(self):
+        self.fact("parent:Filings/order.txt", extra=("--author", "agent:model-x", "--directed-by", "Pat Example"),
+                  check=True)
+        self.assertEqual(self.rows(self.child, "SELECT created_by FROM assertions")[0][0],
+                         "agent:model-x; directed-by:Pat Example")
+        self.assertEqual(len(self.child_state()[2]), 1)  # and the parent source really attached
+
+    def _mcp(self, arguments):
+        req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "matter.fact_add", "arguments": arguments}}
+        p = subprocess.run([sys.executable, os.path.join(KIT, "matter-mcp.py")], input=json.dumps(req) + "\n",
+                           capture_output=True, text=True, env=dict(CLEAN_ENV, MATTER_DIR=self.child), check=True)
+        return json.loads(p.stdout.strip().splitlines()[-1])["result"]
+
+    def test_mcp_fact_add_accepts_parent_refs_and_refuses_escapes(self):
+        ok = self._mcp({"text": "t", "status": "DOCUMENTED FACT", "sources": ["parent:Filings/order.txt@p. 1"]})
+        self.assertNotIn("isError", ok, ok)
+        self.assertEqual(self.rows(self.child, "SELECT rel_path FROM documents")[0][0], "parent:Filings/order.txt")
+        before = self.child_state()
+        bad = self._mcp({"text": "t2", "status": "DOCUMENTED FACT", "sources": ["parent:../x"]})
+        self.assertTrue(bad.get("isError"))
+        self.assertIn("escapes", bad["content"][0]["text"])
+        write(self.parent_file, "changed\n")
+        bad = self._mcp({"text": "t3", "status": "DOCUMENTED FACT", "sources": ["parent:Filings/order.txt"]})
+        self.assertTrue(bad.get("isError"))
+        self.assertIn("changed in parent", bad["content"][0]["text"])
+        self.assertEqual(self.child_state(), before)
+
+    def test_parent_prefix_is_reserved_so_a_local_file_cannot_masquerade(self):
+        write(os.path.join(self.child, "parent:fake.txt"), "a local file with a reserved name\n")
+        out = self.run_cli("ingest", self.child).stdout
+        self.assertIn("reserved", out)
+        self.assertFalse([p for p in self.rel_paths(self.child) if p.startswith("parent:")])
+
+
+class TestVerifyParentReferences(ParentBase):
+    def setUp(self):
+        super().setUp()
+        self.fact("parent:Filings/order.txt@p. 1", check=True)
+
+    def verify(self):
+        r = self.run_cli("verify", self.child, check=False)
+        lines = r.stdout.splitlines()
+        return r.returncode, [l for l in lines if l.startswith("integrity:")][0], [l for l in lines if "⚠" in l]
+
+    def test_intact_reference_counts_as_ok_in_the_same_format(self):
+        self.assertEqual(self.verify(), (0, "integrity: 1 ok · 0 changed · 0 missing", []))
+
+    def test_counts_combine_with_local_documents(self):
+        write(os.path.join(self.child, "Evidence", "local.txt"), "local\n")
+        self.run_cli("ingest", self.child)
+        self.assertEqual(self.verify()[1], "integrity: 3 ok · 0 changed · 0 missing")  # local.txt, matter.json, parent ref
+
+    def test_changed_in_parent_is_changed(self):
+        write(self.parent_file, "edited later\n")
+        code, line, fails = self.verify()
+        self.assertEqual((code, line), (1, "integrity: 0 ok · 1 changed · 0 missing"))
+        self.assertEqual(fails, ["  ⚠ CHANGED: parent:Filings/order.txt"])
+
+    def test_missing_in_parent_is_missing(self):
+        os.remove(self.parent_file)
+        code, line, fails = self.verify()
+        self.assertEqual((code, line), (1, "integrity: 0 ok · 0 changed · 1 missing"))
+        self.assertEqual(fails, ["  ⚠ MISSING: parent:Filings/order.txt"])
+
+    def test_parent_dropping_its_registration_is_missing(self):
+        conn = sqlite3.connect(os.path.join(self.parent, ".matter", "matter.db"))
+        conn.execute("DELETE FROM documents WHERE rel_path='Filings/order.txt'")
+        conn.commit()
+        conn.close()
+        code, line, _ = self.verify()
+        self.assertEqual((code, line), (1, "integrity: 0 ok · 0 changed · 1 missing"))
+
+    def test_parent_registering_a_different_hash_is_changed(self):
+        conn = sqlite3.connect(os.path.join(self.parent, ".matter", "matter.db"))
+        conn.execute("UPDATE documents SET sha256=? WHERE rel_path='Filings/order.txt'", ("0" * 64,))
+        conn.commit()
+        conn.close()
+        self.assertEqual(self.verify()[:2], (1, "integrity: 0 ok · 1 changed · 0 missing"))
+
+    def test_unreachable_parent_store_is_missing_not_a_crash(self):
+        os.rename(os.path.join(self.parent, ".matter"), os.path.join(self.parent, ".matter-gone"))
+        code, line, _ = self.verify()
+        self.assertEqual((code, line), (1, "integrity: 0 ok · 0 changed · 1 missing"))
+        self.assertFalse(os.path.exists(os.path.join(self.parent, ".matter")), "verify must not create a parent store")
+
+    def test_tampered_reference_that_escapes_is_flagged_like_a_local_escape(self):
+        conn = sqlite3.connect(os.path.join(self.child, ".matter", "matter.db"))
+        conn.execute("INSERT INTO documents (id,sha256,rel_path) VALUES ('x1',?,?)", ("1" * 64, "parent:../secret"))
+        conn.commit()
+        conn.close()
+        code, line, fails = self.verify()
+        self.assertEqual((code, line), (1, "integrity: 1 ok · 0 changed · 1 missing"))
+        self.assertEqual(fails, ["  ⚠ ESCAPED: parent:../secret"])
+
+    def test_mcp_verify_resolves_parent_rows(self):
+        req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "matter.verify", "arguments": {}}}
+        p = subprocess.run([sys.executable, os.path.join(KIT, "matter-mcp.py")], input=json.dumps(req) + "\n",
+                           capture_output=True, text=True, env=dict(CLEAN_ENV, MATTER_DIR=self.child), check=True)
+        self.assertIn("integrity: 1 ok · 0 changed · 0 missing", json.loads(p.stdout)["result"]["content"][0]["text"])
+
+
+class TestDeadlineSourcesInSubcase(ParentBase):
+    def deadline_id(self):
+        self.run_cli("deadline", "add", self.child, "--label", "Reply", "--due", "2099-01-01")
+        return self.rows(self.child, "SELECT id FROM deadlines")[0][0]
+
+    def test_parent_source_is_resolved_registered_and_recorded(self):
+        did = self.deadline_id()
+        self.run_cli("deadline", "update", self.child, did, "--state", "met", "--reason", "Filed",
+                     "--source", "parent:Filings/order.txt@p. 3")
+        self.assertEqual(self.rows(self.child, "SELECT rel_path FROM documents")[0][0], "parent:Filings/order.txt")
+        sources = json.loads(self.rows(self.child, "SELECT sources FROM events ORDER BY rowid DESC")[0][0])
+        self.assertEqual(sources, ["parent:Filings/order.txt@p. 3"])
+
+    def test_changed_or_escaping_parent_source_refused_and_nothing_changes(self):
+        did = self.deadline_id()
+        n_events = self.rows(self.child, "SELECT COUNT(*) FROM events")[0][0]
+        for src in ("parent:../x",):
+            r = self.run_cli("deadline", "update", self.child, did, "--state", "met", "--reason", "x",
+                             "--source", src, check=False)
+            self.assertNotEqual(r.returncode, 0)
+        write(self.parent_file, "edited\n")
+        r = self.run_cli("deadline", "update", self.child, did, "--state", "met", "--reason", "x",
+                         "--source", "parent:Filings/order.txt", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("changed in parent", r.stderr)
+        self.assertEqual(self.rows(self.child, "SELECT state FROM deadlines")[0][0], "open")
+        self.assertEqual(self.rows(self.child, "SELECT COUNT(*) FROM events")[0][0], n_events)
+        self.assertEqual(self.rows(self.child, "SELECT COUNT(*) FROM documents")[0][0], 0)
+
+
+def tree_digest(root, skip=("Subcases",)):
+    """Relative path -> sha256 of every file under root, ignoring top-level folders in `skip`."""
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        if dirpath == root:
+            dirnames[:] = [d for d in dirnames if d not in skip]
+        for fn in filenames:
+            fp = os.path.join(dirpath, fn)
+            out[os.path.relpath(fp, root)] = sha_of(fp)
+    return out
+
+
+class TestParentIsNeverWrittenBySubcaseOperations(ParentBase):
+    def test_parent_store_and_files_are_byte_identical_after_a_battery_of_subcase_operations(self):
+        db_before = self.parent_db_bytes()
+        files_before = tree_digest(self.parent)
+        write(os.path.join(self.child, "Evidence", "local.txt"), "local\n")
+        mcp = lambda name, args: subprocess.run(  # noqa: E731
+            [sys.executable, os.path.join(KIT, "matter-mcp.py")], capture_output=True, text=True, check=True,
+            input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                              "params": {"name": name, "arguments": args}}) + "\n",
+            env=dict(CLEAN_ENV, MATTER_DIR=self.child))
+        self.make_subcase("second", "Second subcase")
+        self.run_cli("ingest", self.child)
+        self.fact("parent:Filings/order.txt@p. 1", check=True)
+        self.fact("parent:../x")                                   # refused
+        self.fact("parent:Filings/ghost.txt")                      # refused
+        self.run_cli("fact", "list", self.child)
+        self.run_cli("verify", self.child)
+        self.run_cli("status", self.child)
+        self.run_cli("packet", self.child)
+        self.run_cli("deadline", "add", self.child, "--label", "L", "--due", "2020-01-01")
+        did = self.rows(self.child, "SELECT id FROM deadlines")[0][0]
+        self.run_cli("deadline", "update", self.child, did, "--state", "lapsed", "--reason", "r",
+                     "--source", "parent:Filings/order.txt")
+        self.run_cli("deadline", "list", self.child, "--all")
+        mcp("matter.fact_add", {"text": "m", "status": "UNKNOWN", "sources": ["parent:Filings/order.txt"]})
+        mcp("matter.verify", {})
+        mcp("matter.status", {})
+        mcp("matter.deadline_list", {})
+        self.assertEqual(self.parent_db_bytes(), db_before)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.parent, ".matter"))), ["matter.db"],
+                         "no journal, wal or other file may appear in the parent store folder")
+        self.assertEqual(tree_digest(self.parent), files_before, "parent files must not be added, moved or edited")
+
+
+
 if __name__ == "__main__":
     unittest.main()

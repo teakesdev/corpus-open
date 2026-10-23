@@ -8,6 +8,7 @@ import json
 import re
 from datetime import date
 
+from .ingest import PARENT_PREFIX
 from .store import new_id
 
 STATES = ("open", "met", "superseded", "lapsed", "vacated")
@@ -60,9 +61,12 @@ def update(conn, case_dir, deadline_id, reason, by, state=None, verification=Non
 
     Validates everything before writing; the update and its event commit together or not
     at all. Sources are `rel_path@locator` refs (same lookup as `fact add`) that must name
-    a document registered in this matter. `case_dir` is the matter root. Returns the event text.
+    a document registered in this matter, or in a subcase a `parent:<rel_path>` reference to a
+    document the parent registers (re-hashed first; see subcase.py). `case_dir` is the matter root.
+    Returns the event text.
     """
     reason = (reason or "").strip()
+    sources = list(sources or [])
     if not reason:
         raise DeadlineError("--reason is required and must not be blank")
     for name, val, allowed in (("state", state, STATES), ("verification", verification, VERIFICATIONS),
@@ -85,9 +89,17 @@ def update(conn, case_dir, deadline_id, reason, by, state=None, verification=Non
     if not changes:
         raise DeadlineError(f"no change — deadline {deadline_id} already has those values")
 
+    from . import subcase  # lazy: subcase imports this module
+    try:  # in a subcase, parent: sources are re-hashed against the parent before anything is written
+        parents = subcase.resolve_parent_sources(case_dir, sources)
+    except subcase.SubcaseError as e:
+        raise DeadlineError(str(e)) from None
     refs, unregistered = [], []
     for src in sources:
         ref, _, loc = src.partition("@")
+        if ref in parents:
+            refs.append(PARENT_PREFIX + parents[ref].rel_path + (f"@{loc}" if loc else ""))
+            continue
         doc = conn.execute("SELECT rel_path FROM documents WHERE rel_path=? OR id=?", (ref, ref)).fetchone()
         if doc is None:
             unregistered.append(ref)
@@ -99,6 +111,8 @@ def update(conn, case_dir, deadline_id, reason, by, state=None, verification=Non
     text = (f"deadline {deadline_id} {row['label']!r}: "
             + "; ".join(f"{f} {o}→{n}" for f, _, o, n in changes) + f"; reason: {reason}")
     with conn:
+        for pdoc in parents.values():
+            subcase.register_parent_ref(conn, pdoc)
         conn.execute("UPDATE deadlines SET " + ", ".join(f"{c}=?" for _, c, _, _ in changes) + " WHERE id=?",
                      [n for _, _, _, n in changes] + [deadline_id])
         _event(conn, text, by, refs)

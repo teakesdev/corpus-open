@@ -4,6 +4,9 @@ import os
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".matter"}
 SKIP_FILES = {".DS_Store"}
+# A subcase's documents.rel_path "parent:<rel_path>" names a document whose bytes live in the
+# parent matter (see subcase.py). The prefix is reserved: ingest never registers a local file under it.
+PARENT_PREFIX = "parent:"
 
 EXT_KINDS = {
     ".pdf": "filing", ".docx": "filing", ".doc": "filing",
@@ -149,6 +152,10 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 print(f"  ! outside matter: {fp}")
                 excluded += 1
                 continue
+            if rel_path.startswith(PARENT_PREFIX):
+                print(f"  ! reserved name (parent: marks references to the parent matter): {rel_path}")
+                excluded += 1
+                continue
             if any(x in rel_path for x in exclude):
                 excluded += 1
                 continue
@@ -185,7 +192,22 @@ def verify_integrity(conn, matter_dir: str):
     rows = conn.execute("SELECT id, sha256, rel_path FROM documents").fetchall()
     ok = bad = missing = 0
     failures = []
+    view = None  # parent: rows resolve through the parent matter, read-only, opened on first use
     for r in rows:
+        if r["rel_path"].startswith(PARENT_PREFIX):
+            if view is None:
+                from .subcase import ParentView
+                view = ParentView(abs_matter)
+            verdict = view.check(r["rel_path"][len(PARENT_PREFIX):], r["sha256"])
+            if verdict is None:
+                ok += 1
+            else:
+                if verdict == "CHANGED":
+                    bad += 1
+                else:  # MISSING (parent, registration or file gone) and ESCAPED count as missing, like local rows
+                    missing += 1
+                failures.append((verdict, r["rel_path"]))
+            continue
         resolved = resolve_document_path(abs_matter, r["rel_path"])
         if resolved is None:
             missing += 1
@@ -200,4 +222,6 @@ def verify_integrity(conn, matter_dir: str):
             failures.append(("CHANGED", r["rel_path"]))
         else:
             ok += 1
+    if view is not None:
+        view.close()
     return ok, bad, missing, failures

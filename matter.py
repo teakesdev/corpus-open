@@ -10,6 +10,7 @@ Usage:
   matter.py status <case-dir>
   matter.py fact add <dir> --text T --status LABEL [--source rel@loc]...
                            [--author agent:MODEL [--directed-by PERSON]]
+                           # in a subcase, a source may be parent:<rel_path>@loc (hash-checked, no copy)
   matter.py fact list <dir> [--status LABEL]
   matter.py deadline add <dir> --label L --due YYYY-MM-DD [--rule R] [--confidence hard|working-estimate]
                               [--verification verified-official|secondary-source|unverified]
@@ -88,22 +89,23 @@ def cmd_fact(args):
             by = store.attribution(args.author, args.directed_by)
         except ValueError as e:
             sys.exit(f"invalid attribution: {e}")
+        from matterkit import subcase
+        try:  # parent: refs are re-hashed against the parent before anything is written
+            parents = subcase.resolve_parent_sources(args.case_dir, args.source)
+        except subcase.SubcaseError as e:
+            sys.exit(f"refused: {e}")
         aid = new_id("a_")
-        conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
-                     (aid, args.text, status, by, now_iso()))
-        unrec = []
-        for s in args.source or []:
-            ref, _, loc = s.partition("@")
-            row = conn.execute("SELECT id FROM documents WHERE rel_path=? OR id=?", (ref, ref)).fetchone()
-            if not row:
-                unrec.append(ref)
-                continue
-            conn.execute("INSERT OR IGNORE INTO assertion_sources VALUES (?,?,?)", (aid, row["id"], loc or None))
-        conn.commit()
+        try:
+            with conn:
+                conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
+                             (aid, args.text, status, by, now_iso()))
+                unrec, notes = subcase.attach_sources(conn, aid, args.source, parents)
+        except subcase.SubcaseError as e:
+            sys.exit(f"refused: {e}")
         n = conn.execute("SELECT COUNT(*) c FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()["c"]
         warn = "" if n else "\n⚠ UNSUPPORTED — no recognized sources attached."
         bad = "" if not unrec else f"\n⚠ unrecognized source refs: {unrec}"
-        print(f"{aid} [{status}] by {by}{warn}{bad}")
+        print(f"{aid} [{status}] by {by}{warn}{bad}" + "".join(f"\n  ↳ {note}" for note in notes))
     else:
         st = args.status.upper().replace("-", " ") if args.status else None
         q = "SELECT * FROM assertions" + (" WHERE status=?" if st else "") + " ORDER BY status, created_at"
