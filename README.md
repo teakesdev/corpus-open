@@ -145,6 +145,30 @@ naming its authorized callers; agent-authored grants are inert proposals.
 R1 ships zero adapters and the kit makes no network calls.
 See `rfcs/0001-provider-neutral-search-adapters.md`.
 
+## Checking a brief before it is filed
+
+```bash
+python3 matter.py docket suggest ~/cases/my-case > ~/cases/my-case/.matter/docket.json  # then review it
+python3 matter.py authority import ~/cases/my-case Research/AUTHORITY_LEDGER.md         # dry run; --apply writes
+python3 matter.py authority check ~/cases/my-case "Dietz v. Bouldin, 579 U.S. 40 (2016)" \
+  --source-url https://example.org/official-opinion.pdf --pin 45-47 \
+  --artifact Research/authorities/dietz.pdf --quote "inherent authority" --author agent:MODEL --directed-by "Your Name"
+python3 matter.py brief check ~/cases/my-case Filings/drafts/RESPONSE_v1.md --out RESPONSE_v1_CHECK.md
+```
+
+`brief check` reads a Markdown or text draft and the store (read-only) and
+reports every record cite (`Doc. 16 at 2`, `Docs. 16 and 18`, `ECF No. 19`),
+pleading cite (`Compl. ¶ 59`), authority (`X v. Y, 579 U.S. 40, 45`, short
+forms, `Id.`, `Fed. R. Civ. P.`, `Rule 15`, `L.U.Civ.R.`, statutes), quotation
+and fact tag (`<!-- fact:a_… -->`) that is not tied to a hash-verified source.
+Quotations are searched on the pinned page of the cited document: Markdown and
+text sources directly, PDFs through a text copy named in `docket.json`
+(`text_copies`) or, when installed, `pdftotext` (used transiently, never
+stored). Uncited sentences in a Facts/Background section are flagged. Exit 1
+means blocking findings, 2 means items only a person can check, 0 means every
+item is tied to a source in the store. That never means the brief is legally
+correct or that an authority is still good law.
+
 ## Skills
 
 `skills/matter-kit/SKILL.md` teaches agents the operating discipline: the five
