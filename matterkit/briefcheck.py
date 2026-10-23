@@ -1,0 +1,1002 @@
+"""Brief check: tie every cite, quotation and factual sentence in a draft to the store.
+
+Read-only. The store is opened with `store.connect_readonly`; nothing is written.
+For each draft unit (a sentence, with a following citation-only sentence folded
+in) it resolves:
+
+  record cites      Doc. 16 at 2 · Docs. 16 and 18 · Dkt. 27 · ECF No. 19
+  pleading cites    Compl. ¶ 59 · Am. Compl. ¶¶ 67–69
+  authorities       X v. Y, 579 U.S. 40, 45 (2016) · 579 U.S. at 46 · Id. at 46 ·
+                    Fed. R. Civ. P. 15(a)(2) · Rule 15 · L.U.Civ.R. 7(b)(4) ·
+                    42 U.S.C. § 1983 · § 1983 · Miss. Code Ann. § 95-1-5
+  quotations        searched in the cited source's text, on the pinned page
+  facts             {fact:a_x} / <!-- fact:a_x --> tags; uncited sentences in a
+                    Facts / Background / Statement section
+
+Record cites resolve through `.matter/docket.json`:
+
+  {"entries":     {"16": "Filings/…/16.pdf", "23-1": "…"},
+   "pleadings":   {"Compl.": "1" | "<rel_path>", "Am. Compl.": "…"},
+   "text_copies": {"Filings/…/16.pdf": "Filings/plaintext/16.md"},
+   "bare_rule":   "Fed. R. Civ. P."}
+
+Severity: BLOCK (exit 1), UNCHECKED (exit 2 when nothing blocks), WARN, OK.
+"Tied to a source in the store" means the cited document or authority record
+exists, is hash-verified and matched. It never means the proposition is correct,
+the authority is good law, or the source is authentic.
+"""
+import bisect
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import unicodedata
+import zlib
+from dataclasses import dataclass, field
+
+from . import citations, store
+
+TOOL_ID = "matter-kit brief-check 0.1"
+LIMITS = ("“Tied to a source in the store” means the cited document or authority record exists in this "
+          "matter's store, its bytes still match the registered hash, and the cite or quotation matched it. "
+          "It does not mean the proposition is legally correct, that an authority is still good law (no citator "
+          "was run), or that a source is authentic, admissible or complete.")
+
+STATUS_OK = {"source-checked", "verified-official"}
+STATUS_LOCATED = {"resolved", "research-pending"}
+
+
+# --------------------------------------------------------------------------
+# Result types
+# --------------------------------------------------------------------------
+@dataclass
+class Finding:
+    severity: str  # BLOCK | UNCHECKED | WARN
+    code: str
+    line: int
+    cite: str
+    message: str
+
+
+@dataclass
+class Cite:
+    kind: str  # record | pleading | authority
+    raw: str
+    display: str
+    target: str | None = None  # rel_path for record/pleading; authority key otherwise
+    pin: str | None = None
+    start: int = 0
+    end: int = 0
+    paras: list = field(default_factory=list)
+    via_id: bool = False
+
+
+@dataclass
+class Quote:
+    text: str
+    status: str = "unchecked"  # found | wrong-page | not-found | unchecked
+    checked_against: str = ""
+    where: str = ""
+
+
+@dataclass
+class Row:
+    line: int
+    text: str
+    cites: list = field(default_factory=list)
+    quotes: list = field(default_factory=list)
+    facts: list = field(default_factory=list)
+
+
+@dataclass
+class AuthorityUse:
+    key: str
+    display: str
+    store_citation: str | None
+    store_status: str | None
+    checked_via: str | None
+    lines: list = field(default_factory=list)
+    pins: list = field(default_factory=list)
+
+
+# --------------------------------------------------------------------------
+# Patterns
+# --------------------------------------------------------------------------
+_REPORTERS = [
+    r"U\.\s?S\.", r"S\.\s?Ct\.", r"L\.\s?Ed\.\s?2d", r"L\.\s?Ed\.",
+    r"F\.\s?Supp\.\s?[23]d", r"F\.\s?Supp\.", r"F\.\s?App'x", r"Fed\.\s?App(?:'x|x)\.?",
+    r"F\.\s?4th", r"F\.\s?3d", r"F\.\s?2d", r"F\.R\.D\.", r"B\.R\.", r"Fed\.\s?Cl\.",
+    r"So\.\s?3d", r"So\.\s?2d", r"So\.", r"S\.W\.\s?3d", r"S\.W\.\s?2d", r"S\.W\.",
+    r"N\.E\.\s?3d", r"N\.E\.\s?2d", r"N\.E\.", r"N\.W\.\s?2d", r"N\.W\.", r"S\.E\.\s?2d", r"S\.E\.",
+    r"P\.\s?3d", r"P\.\s?2d", r"A\.\s?3d", r"A\.\s?2d", r"F\.",
+]
+_REP = "(?:" + "|".join(_REPORTERS) + ")"
+_PINS = r"\d{1,5}(?:\s*[-–—]\s*\d{1,5})?(?:\s*,\s*\d{1,5}(?:\s*[-–—]\s*\d{1,5})?)*"
+CASE_RE = re.compile(
+    rf"(?<![\w.])(?P<vol>\d{{1,4}})\s+(?P<rep>{_REP})\s+(?P<page>\d{{1,5}})(?!\d)"
+    rf"(?:\s*,\s*(?P<pin>{_PINS})(?![\d.]\d)(?:\s*n\.\s*\d+)?)?"
+    r"(?:\s*\((?P<paren>[^()]{0,60}?\d{4})\))?")
+SHORT_RE = re.compile(rf"(?<![\w.])(?P<vol>\d{{1,4}})\s+(?P<rep>{_REP})\s+at\s+(?P<pin>{_PINS})")
+WL_RE = re.compile(r"(?P<year>\d{4})\s+WL\s+(?P<num>\d{3,9})(?:\s*,\s*at\s*\*\s*(?P<pin>\d+(?:\s*[-–]\s*\*?\d+)?))?")
+RULE_RE = re.compile(
+    r"(?P<base>(?:Fed|[A-Z][a-z]{1,5})\.\s?R\.\s?(?:(?:Civ|Crim|App)\.\s?P\.|Evid\.)\s*\d+(?:\.\d+)?)"
+    r"(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
+LOCAL_RE = re.compile(r"(?P<base>L\.\s?U\.\s?(?:Civ|Crim)\.\s?R\.\s*\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
+RULE_TAIL_RE = re.compile(r"(?:,?\s+and\s+|\s*&\s*)(?P<cite>(?P<num>\d+(?:\.\d+)?)(?:\([A-Za-z0-9]{1,4}\))*)")
+BARE_RULE_RE = re.compile(
+    r"(?<![\w.])Rules?\s+(?P<num>\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
+RECORD_RE = re.compile(
+    r"(?P<kw>ECF\s+Nos?\.|Dkts?\.|Docs?\.)\s*"
+    r"(?P<nums>\d{1,4}(?:-\d{1,3})?(?:\s*(?:,|and|&|/)\s*\d{1,4}(?:-\d{1,3})?)*)"
+    rf"(?:\s*,?\s*at\s+(?P<pin>{_PINS}))?")
+PLEADING_RE = re.compile(
+    r"(?P<key>(?:First\s+)?Am(?:ended|\.)\s+Compl(?:aint|\.)|Compl(?:aint|\.)|FAC)\s*"
+    r"(?P<sym>¶¶?)\s*"
+    r"(?P<paras>\d{1,4}(?:\s*[-–—]\s*\d{1,4})?(?:\s*(?:,|and|&)\s*\d{1,4}(?:\s*[-–—]\s*\d{1,4})?)*)")
+ID_RE = re.compile(rf"(?<![\w.])[Ii]d\.(?:\s*(?:at\s+(?P<pin>{_PINS})|(?P<sym>¶¶?)\s*(?P<paras>\d{{1,4}}(?:\s*[-–—]\s*\d{{1,4}})?)))?")
+FACT_TAG_RE = re.compile(r"<!--\s*fact:(?P<a>[\w-]+)\s*-->|\{fact:(?P<b>[\w-]+)\}")
+COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+QUOTE_RE = re.compile(r"“([^”]{1,1500})”|\"([^\"\n]{1,1500})\"")
+SIGNALS = {"see", "also", "cf", "cf.", "e.g.", "e.g.,", "accord", "compare", "but", "contra", "citing",
+           "quoting", "and", "with", "see,", "generally"}
+FACT_HEADING = re.compile(r"\b(facts?|background|statement of (?:the )?(?:case|facts)|procedural history|allegations)\b", re.I)
+ABBREV = {
+    "v", "vs", "id", "no", "nos", "doc", "docs", "dkt", "dkts", "ecf", "compl", "am", "ex", "exs", "fed", "r",
+    "civ", "p", "evid", "app", "crim", "supp", "cir", "ct", "s", "l", "ed", "f", "so", "mr", "ms", "mrs", "dr",
+    "st", "co", "corp", "inc", "ltd", "jr", "sr", "e.g", "i.e", "cf", "al", "ann", "stat", "gov't", "dep't",
+    "cnty", "mun", "pub", "sec", "art", "const", "jan", "feb", "mar", "apr", "aug", "sept", "sep", "oct", "nov",
+    "dec", "pp", "para", "ch", "miss", "ala", "tex", "la", "fla", "ga", "tenn", "ark", "cal", "rev", "admin",
+    "proc", "mem", "op", "br", "atl", "pac", "dist", "div", "ass'n", "assn", "bros", "dept", "govt", "univ",
+    "nat'l", "int'l", "comm'n", "sch", "bd", "ctr", "hosp", "ins", "mfg", "mgmt", "prods", "servs", "sys",
+    "tel", "transp", "mut", "fin", "elec", "gen", "hous", "indus", "ry", "u", "n", "w", "e", "c", "cert",
+    "approx", "dep", "decl", "aff", "tr", "hr", "min", "fig", "vol", "pl", "def", "defs", "pls", "mot", "resp",
+}
+NAME_CONNECT = {"v.", "of", "the", "and", "&", "for", "de", "la", "ex", "rel.", "in", "re", "ex.", "et", "al.", "a"}
+
+
+def _norm_key(s: str) -> str:
+    return re.sub(r"[\s.§,]", "", s).lower()
+
+
+def _rep_key(rep: str) -> str:
+    return re.sub(r"[\s.']", "", rep).lower()
+
+
+def _case_key(vol, rep, page) -> str:
+    return f"case:{vol} {_rep_key(rep)} {page}"
+
+
+def _statute_base(frag: str) -> tuple[str, str | None]:
+    """'42 U.S.C. § 1983(a)' -> ('statute:42usc1983', '1983')."""
+    base = re.sub(r"(\s*\([^)]{1,24}\))+\s*$", "", frag.strip())
+    sec = None
+    m = re.search(r"§+\s*([\dA-Za-z][\dA-Za-z.\-]*)", base) or re.search(r"(?:[Ss]ections?|Sec\.)\s+(\d+[A-Za-z]?)", base)
+    if m:
+        sec = m.group(1).rstrip(".")
+    short = not re.search(r"[A-Za-z]{2,}", re.sub(r"(?:[Ss]ections?|Sec\.)", "", base.split("§")[0])) \
+        and not re.match(r"\d", base)
+    return ("statute-short:" if short else "statute:") + _norm_key(base), sec
+
+
+def _pin_ranges(pin: str | None) -> list[tuple[int, int]]:
+    out = []
+    for part in re.split(r"\s*,\s*", pin or ""):
+        nums = [int(n) for n in re.findall(r"\d+", part)]
+        if len(nums) == 1:
+            out.append((nums[0], nums[0]))
+        elif len(nums) >= 2:
+            a, b = nums[0], nums[1]
+            if b < a and len(str(b)) < len(str(a)):  # 45-7 shorthand
+                b = int(str(a)[: len(str(a)) - len(str(b))] + str(b))
+            out.append((a, b))
+    return out
+
+
+def _covered(pin: str, checked: list[str]) -> bool:
+    have = [r for p in checked for r in _pin_ranges(str(p))]
+    return all(any(a <= lo and hi <= b for a, b in have) for lo, hi in _pin_ranges(pin))
+
+
+def _case_name(prefix: str) -> str:
+    toks = prefix.replace("*", " ").replace("_", " ").rstrip().rstrip(",").split()
+    name: list[str] = []
+    for i in range(len(toks) - 1, -1, -1):
+        t = toks[i]
+        bare = t.rstrip(".,").lower()
+        if t.endswith(".") and t.lower() not in NAME_CONNECT and bare not in ABBREV and len(bare) > 1 \
+                and name and name[0][:1].isupper():
+            break  # previous sentence ended here
+        if t.lower() in NAME_CONNECT or t[:1].isupper() or t[:1] in "'’":
+            name.insert(0, t)
+            continue
+        break
+    while name and name[0].lower().rstrip(",") in SIGNALS | {"see", "but", "cf.", "e.g.,"}:
+        name.pop(0)
+    return " ".join(name)
+
+
+# --------------------------------------------------------------------------
+# Draft segmentation
+# --------------------------------------------------------------------------
+@dataclass
+class Unit:
+    start: int
+    end: int
+    text: str
+    fact_section: bool
+    tags: list = field(default_factory=list)
+
+
+def _blank(text: str, pattern: re.Pattern) -> str:
+    return pattern.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
+def _heading(block: str) -> int | None:
+    """Heading level of a one-line block, or None."""
+    line = block.strip()
+    if "\n" in line or not line:
+        return None
+    m = re.match(r"(#{1,6})\s+\S", line)
+    if m:
+        return len(m.group(1))
+    words = line.split()
+    letters = [c for c in line if c.isalpha()]
+    if letters and all(c.isupper() for c in letters) and len(words) <= 12 and not line.endswith(","):
+        return 1
+    m = re.match(r"([IVXLC]+|[A-Z]|\d{1,2})\.\s+\S", line)
+    if m and len(words) <= 25:
+        tok = m.group(1)
+        return 1 if re.fullmatch(r"[IVXLC]+", tok) else 2 if tok.isalpha() else 3
+    return None
+
+
+def _sentence_spans(text: str, start: int, end: int):
+    """Yield (s, e) sentence spans within text[start:end]."""
+    s = start
+    for m in re.finditer(r"[.?!][\"”’)\]*]*\s+(?=[\"“(\[*§A-Z0-9])", text[start:end]):
+        cut = start + m.start()
+        before = text[s:cut + 1]
+        tok = re.search(r"(\S+)$", before)
+        word = tok.group(1).lstrip("([*\"“").rstrip(".").lower() if tok else ""
+        if text[cut] == "." and (word in ABBREV or len(word) == 1 or re.fullmatch(r"(?:[a-z]\.)+[a-z]", word)
+                                 or re.fullmatch(r"[a-z]+\.[a-z.]+", word)):
+            continue
+        e = start + m.end()
+        if text[s:e].strip():
+            yield _lstrip(text, s), start + m.start() + len(m.group(0).rstrip())
+        s = e
+    if text[s:end].strip():
+        yield _lstrip(text, s), end
+
+
+def _lstrip(text: str, s: int) -> int:
+    while s < len(text) and text[s].isspace():
+        s += 1
+    return s
+
+
+# --------------------------------------------------------------------------
+# Documents: integrity and text
+# --------------------------------------------------------------------------
+class Docs:
+    def __init__(self, conn, matter_dir, docket, use_pdftotext):
+        self.conn, self.dir, self.docket = conn, matter_dir, docket
+        self.pdftotext = shutil.which("pdftotext") if use_pdftotext else None
+        self.pdftotext_version = None
+        if self.pdftotext:
+            p = subprocess.run([self.pdftotext, "-v"], capture_output=True, text=True)
+            self.pdftotext_version = ((p.stderr or p.stdout).splitlines() or ["pdftotext"])[0].strip()
+        self._cache: dict = {}
+        self.read: dict = {}  # rel_path -> sha256 actually verified
+
+    def row(self, rel):
+        return self.conn.execute("SELECT * FROM documents WHERE rel_path=?", (rel,)).fetchone()
+
+    def verify(self, rel):
+        """(row, problem) where problem is None, 'not-registered', 'missing' or 'changed'."""
+        r = self.row(rel)
+        if r is None:
+            return None, "not-registered"
+        p = os.path.join(self.dir, rel)
+        if not os.path.isfile(p):
+            return r, "missing"
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != r["sha256"]:
+            return r, "changed"
+        self.read[rel] = r["sha256"]
+        return r, None
+
+    def text(self, rel):
+        """(pages | None, page_count | None, label). pages is a list of page texts."""
+        if rel in self._cache:
+            return self._cache[rel]
+        r, problem = self.verify(rel)
+        out = (None, None, "")
+        if problem is None:
+            out = self._load(rel, r)
+        self._cache[rel] = out
+        return out
+
+    def _load(self, rel, r):
+        path = os.path.join(self.dir, rel)
+        ext = os.path.splitext(rel)[1].lower()
+        count = None
+        if ext == ".pdf":
+            with open(path, "rb") as f:
+                count = _pdf_page_count(f.read())
+        copy = (self.docket.get("text_copies") or {}).get(rel)
+        if copy:
+            cr, problem = self.verify(copy)
+            if problem is None:
+                pages, n = _split_pages(_read_text(os.path.join(self.dir, copy)))
+                return pages, n or count, f"text copy {copy}"
+        try:
+            rows = self.conn.execute(
+                "SELECT text FROM document_pages WHERE document_sha256=? AND text IS NOT NULL "
+                "ORDER BY page_number", (r["sha256"],)).fetchall()
+        except Exception:
+            rows = []
+        if rows:
+            return [x["text"] for x in rows], len(rows), "extracted page text in the store"
+        if ext in (".md", ".txt", ".markdown", ".text"):
+            pages, n = _split_pages(_read_text(path))
+            return pages, n, rel
+        if ext == ".pdf" and self.pdftotext:
+            p = subprocess.run([self.pdftotext, "-enc", "UTF-8", path, "-"], capture_output=True, timeout=120)
+            if p.returncode == 0:
+                pages = p.stdout.decode("utf-8", "replace").split("\f")
+                if pages and not pages[-1].strip():
+                    pages.pop()
+                return pages, len(pages), f"{rel} read transiently with {self.pdftotext_version} (not stored)"
+        return None, count, ""
+
+
+def _read_text(path) -> str:
+    with open(path, "rb") as f:
+        return f.read().decode("utf-8", "replace")
+
+
+def _split_pages(text: str):
+    parts = re.split(r"\f|<!--\s*PAGEBREAK\s*-->", text, flags=re.I)
+    if len(parts) > 1:
+        if not parts[-1].strip():
+            parts.pop()
+        return parts, len(parts)
+    return [text], None
+
+
+def _pdf_page_count(data: bytes) -> int | None:
+    pat = re.compile(rb"/Type\s*/Pages\b(?:(?!>>).)*?/Count\s+(\d+)|/Count\s+(\d+)(?:(?!>>).)*?/Type\s*/Pages\b", re.S)
+    found = [int(a or b) for a, b in pat.findall(data)]
+    for m in re.finditer(rb"stream\r?\n", data):
+        end = data.find(b"endstream", m.end())
+        if end < 0:
+            continue
+        try:
+            raw = zlib.decompressobj().decompress(data[m.end():end])
+        except zlib.error:
+            continue
+        found += [int(a or b) for a, b in pat.findall(raw)]
+    return max(found) if found else None
+
+
+_QUOTE_TRANS = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "–": "-", "—": "-", "‐": "-", "‑": "-"})
+
+
+def _words(s: str) -> list[str]:
+    s = unicodedata.normalize("NFKC", s).replace("\u00ad", "").translate(_QUOTE_TRANS)
+    s = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", s)
+    return re.findall(r"[\w']+", s.lower())
+
+
+def _fragments(quote: str) -> list[list[str]]:
+    parts = re.split(r"\w*\[[^\]]*\]\w*|\.\s?\.\s?\.|…", quote)
+    return [w for w in (_words(p) for p in parts) if w]
+
+
+def _find(frags, text) -> int | None:
+    """Word offset of the first fragment if all fragments occur in order, else None."""
+    hay = " " + " ".join(_words(text)) + " "
+    pos, first = 0, None
+    for fr in frags:
+        i = hay.find(" " + " ".join(fr) + " ", pos)
+        if i < 0:
+            return None
+        first = i if first is None else first
+        pos = i + 1
+    return first
+
+
+def _paragraphs(text: str) -> dict:
+    marks = list(re.finditer(r"(?m)^[ \t]*(?:¶\s*)?(?:\*\*)?(\d{1,4})\s*[.)](?:\*\*)?\s+\S", text))
+    out = {}
+    for i, m in enumerate(marks):
+        n = int(m.group(1))
+        if n not in out:
+            out[n] = text[m.start(): marks[i + 1].start() if i + 1 < len(marks) else len(text)]
+    return out
+
+
+# --------------------------------------------------------------------------
+# Docket map
+# --------------------------------------------------------------------------
+def load_docket(matter_dir, path=None):
+    p = path or os.path.join(matter_dir, ".matter", "docket.json")
+    if not os.path.isfile(p):
+        return {}, None
+    with open(p, "rb") as f:
+        raw = f.read()
+    return json.loads(raw.decode("utf-8")), hashlib.sha256(raw).hexdigest()
+
+
+def suggest_docket(conn) -> dict:
+    """Docket numbers derived from registered filenames under PACER/docket folders."""
+    found: dict = {}
+    for r in conn.execute("SELECT rel_path FROM documents ORDER BY rel_path"):
+        rel = r["rel_path"]
+        if rel.startswith("parent:") or not re.search(r"pacer|docket|dkt|ecf", rel, re.I):
+            continue
+        base = os.path.basename(rel)
+        if os.path.splitext(base)[1].lower() in (".zip", ".json", ".sqlite", ".db", ".gz", ".tar"):
+            continue
+        base = re.sub(r"\d:?\d{2}-[a-z]{2}-\d{3,5}(?:-[A-Z]{2,4})*", " ", base)  # case numbers
+        base = re.sub(r"\d{4}-\d{2}-\d{2}|\d{8}", " ", base)  # dates
+        tagged = re.search(r"(?i)(?:dkt|doc|ecf)[ _.-]?(?:no[ _.-]?)?(\d{1,4})(?:-(\d{1,3}))?(?!\d)", base)
+        m = re.fullmatch(r"(\d{1,4})(?:-(\d{1,3}))?\.\w+", base) or tagged
+        if m:
+            key = m.group(1) + (f"-{m.group(2)}" if m.group(2) else "")
+        else:
+            nums = [t for t in re.split(r"[-_ .]", os.path.splitext(base)[0]) if re.fullmatch(r"\d{1,3}", t)]
+            if not nums:
+                continue
+            key = str(int(nums[0]))
+        found.setdefault(key, []).append(rel)
+    entries = {k: v[0] for k, v in found.items() if len(v) == 1}
+    ambiguous = {k: v for k, v in found.items() if len(v) > 1}
+    return {"entries": dict(sorted(entries.items(), key=lambda kv: _entry_sort(kv[0]))),
+            **({"ambiguous": ambiguous} if ambiguous else {})}
+
+
+def _entry_sort(k):
+    a, _, b = k.partition("-")
+    return (int(a), int(b or 0))
+
+
+def _compress(nums: list[int]) -> list[str]:
+    out, i = [], 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        out.append(str(nums[i]) if i == j else f"{nums[i]}–{nums[j]}")
+        i = j + 1
+    return out
+
+
+# --------------------------------------------------------------------------
+# The check
+# --------------------------------------------------------------------------
+class Report:
+    def __init__(self, matter_dir, draft_path, draft_sha):
+        self.matter_dir, self.draft_path, self.draft_sha256 = matter_dir, draft_path, draft_sha
+        self.findings: list[Finding] = []
+        self.rows: list[Row] = []
+        self.authorities: list[AuthorityUse] = []
+        self.docket_gaps: list[str] = []
+        self.docket_refs: list[str] = []
+        self.inputs: dict = {}
+        self.pdftotext_version = None
+        self.docket_sha = None
+        self.docket_path = ".matter/docket.json"
+
+    def add(self, severity, code, line, cite, message):
+        self.findings.append(Finding(severity, code, line, cite, message))
+
+    @property
+    def exit_code(self) -> int:
+        sev = {f.severity for f in self.findings}
+        return 1 if "BLOCK" in sev else 2 if "UNCHECKED" in sev else 0
+
+    def summary(self) -> str:
+        n = {s: sum(1 for f in self.findings if f.severity == s) for s in ("BLOCK", "UNCHECKED", "WARN")}
+        state = {1: "BLOCKED", 2: "NEEDS A HUMAN", 0: "ALL TIED TO SOURCES"}[self.exit_code]
+        return (f"{state}: {n['BLOCK']} blocking, {n['UNCHECKED']} unchecked, {n['WARN']} warnings; "
+                f"{len(self.rows)} cited or tagged sentences, {len(self.authorities)} authorities")
+
+    def render(self) -> str:
+        from .citations import now_iso
+        esc = lambda s: str(s).replace("|", "\\|").replace("\n", " ")  # noqa: E731
+        short = lambda s, n=160: esc(s if len(s) <= n else s[: n - 1] + "…")  # noqa: E731
+        out = [f"# Brief check: {os.path.basename(self.draft_path)}", "",
+               f"**Result: {self.summary()}**", "", f"> {LIMITS}", "",
+               f"- Draft: `{self.draft_path}` · sha256 `{self.draft_sha256}`",
+               f"- Matter: `{os.path.abspath(self.matter_dir)}` · store opened read-only",
+               f"- Docket map: `{self.docket_path}` " + (f"sha256 `{self.docket_sha}`" if self.docket_sha else "(none)"),
+               f"- PDF text: {self.pdftotext_version or 'not used (PDF quotes without a text copy are unchecked)'}",
+               f"- Tool: {TOOL_ID} · checked {now_iso()}", ""]
+        for sev, title in (("BLOCK", "Blocking"), ("UNCHECKED", "Needs a human (not checked)"), ("WARN", "Warnings")):
+            items = [f for f in self.findings if f.severity == sev]
+            out += [f"## {title} ({len(items)})", ""]
+            if items:
+                out += ["| Line | Cite or sentence | Problem | Code |", "|---:|---|---|---|"]
+                out += [f"| {f.line} | {short(f.cite, 90)} | {esc(f.message)} | `{f.code}` |"
+                        for f in sorted(items, key=lambda f: f.line)]
+            else:
+                out.append("None.")
+            out.append("")
+        out += ["## Proposition-to-source table", "",
+                "| Line | Proposition | Cited source | Quotes |", "|---:|---|---|---|"]
+        for r in self.rows:
+            cites = "<br>".join(esc(_cite_cell(c)) for c in r.cites) + \
+                ("<br>" if r.cites and r.facts else "") + "<br>".join(f"fact `{a}`" for a in r.facts)
+            quotes = "<br>".join(f"{q.status}: “{short(q.text, 50)}”" + (f" ({esc(q.where)})" if q.where else "")
+                                 for q in r.quotes) or "—"
+            out.append(f"| {r.line} | {short(r.text)} | {cites or '—'} | {quotes} |")
+        out += ["", "## Authorities", "",
+                "| Authority | Lines | Pins | Store status | Checked via |", "|---|---|---|---|---|"]
+        for a in self.authorities:
+            out.append(f"| {esc(a.display)} | {', '.join(map(str, sorted(set(a.lines))))} | "
+                       f"{esc(', '.join(p for p in a.pins if p)) or '—'} | {a.store_status or '**not logged**'} | "
+                       f"{esc(a.checked_via or '—')} |")
+        out += ["", "## Docket coverage", "",
+                "Entries not in the store: " + (", ".join(self.docket_gaps) or "none below the highest known entry") + "."]
+        out += [f"- {esc(x)}" for x in self.docket_refs]
+        out += ["", "## Documents read (hash-verified)", ""]
+        out += [f"- `{rel}` sha256 `{sha[:16]}…`" for rel, sha in sorted(self.inputs.items())] or ["None."]
+        return "\n".join(out) + "\n"
+
+
+def _cite_cell(c: Cite) -> str:
+    pin = f" at {c.pin}" if c.pin else ""
+    paras = f" ¶ {', '.join(map(str, c.paras))}" if c.paras else ""
+    via = " (Id.)" if c.via_id else ""
+    tgt = f" → `{c.target}`" if c.kind != "authority" and c.target else ""
+    return f"{c.display}{pin}{paras}{via}{tgt}"
+
+
+def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_path: str | None = None) -> Report:
+    with open(draft_path, "rb") as f:
+        raw = f.read()
+    if draft_path.lower().endswith((".docx", ".pdf", ".doc")):
+        raise ValueError("brief check reads Markdown or plain text; check the .md copy of the draft")
+    text = raw.decode("utf-8", "replace")
+    rep = Report(matter_dir, draft_path, hashlib.sha256(raw).hexdigest())
+    conn = store.connect_readonly(matter_dir)
+    try:
+        docket, rep.docket_sha = load_docket(matter_dir, docket_path)
+        rep.docket_path = docket_path or ".matter/docket.json"
+        docs = Docs(conn, matter_dir, docket, use_pdftotext)
+        rep.pdftotext_version = docs.pdftotext_version
+        _Checker(rep, conn, docs, docket, text).run()
+        rep.inputs = dict(docs.read)
+    finally:
+        conn.close()
+    return rep
+
+
+class _Checker:
+    def __init__(self, rep, conn, docs, docket, text):
+        self.rep, self.conn, self.docs, self.docket = rep, conn, docs, docket
+        self.raw_text = text
+        tags = [(m.start(), m.group("a") or m.group("b")) for m in FACT_TAG_RE.finditer(text)]
+        self.text = _blank(_blank(text, COMMENT_RE), FACT_TAG_RE)
+        self.tags = tags
+        self.nl = [i for i, c in enumerate(text) if c == "\n"]
+        self.suggested = suggest_docket(conn)["entries"]
+        self.auth_index = self._authority_index()
+        self.last_target: Cite | None = None
+        self.last_unit_targets: set = set()
+        self.full_cases: dict = {}   # (vol, rep) -> case key seen in draft
+        self.full_statutes: dict = {}  # section -> statute key seen in draft
+        self.uses: dict = {}
+
+    def line(self, off: int) -> int:
+        return bisect.bisect_right(self.nl, off - 1) + 1
+
+    # ---- segmentation -----------------------------------------------------
+    def units(self) -> list[Unit]:
+        units, fact_level = [], None
+        for bm in re.finditer(r"(?:[^\n]|\n(?![ \t]*\n))+", self.text):
+            block = bm.group(0)
+            if not block.strip():
+                continue
+            lvl = _heading(block)
+            if lvl is not None:
+                if FACT_HEADING.search(block):
+                    fact_level = lvl
+                elif fact_level is not None and lvl <= fact_level:
+                    fact_level = None
+                continue
+            spans = list(_sentence_spans(self.text, bm.start(), bm.end()))
+            merged: list[list[int]] = []
+            for s, e in spans:
+                if merged and self._citation_only(self.text[s:e]):
+                    merged[-1][1] = e
+                else:
+                    merged.append([s, e])
+            units += [Unit(s, e, self.text[s:e], fact_level is not None) for s, e in merged]
+        for off, aid in self.tags:
+            host = [u for u in units if u.start <= off] or units[:1]
+            if host:
+                host[-1].tags.append(aid)
+        return units
+
+    def _citation_only(self, s: str) -> bool:
+        rest = s
+        for pat in (CASE_RE, SHORT_RE, WL_RE, RULE_RE, LOCAL_RE, RECORD_RE, PLEADING_RE, ID_RE, BARE_RULE_RE):
+            rest = pat.sub(" ", rest)
+        rest = re.sub(r"\([^)]*\)", " ", rest)
+        words = [w for w in re.findall(r"[A-Za-z]{2,}", rest) if w.lower() not in SIGNALS]
+        has_cite = rest != s
+        return has_cite and len(words) <= 4 and not QUOTE_RE.search(s)
+
+    # ---- authorities ------------------------------------------------------
+    def _authority_index(self) -> dict:
+        idx: dict = {}
+        for r in self.conn.execute("SELECT * FROM authorities"):
+            keys = {k for k, *_ in self._scan_authorities(r["citation"])} | {"full:" + _norm_key(r["citation"])}
+            for k in keys:
+                idx.setdefault(k, []).append(r)
+        return idx
+
+    def _scan_authorities(self, s: str):
+        """Yield (key, display, pin, start, end, kind, extra) for authority cites in s."""
+        spans = []
+
+        def free(a, b):
+            return not any(a < e and s_ < b for s_, e in spans)
+
+        for m in CASE_RE.finditer(s):
+            spans.append((m.start(), m.end()))
+            name = _case_name(s[: m.start()])
+            disp = (f"{name}, " if name else "") + f"{m['vol']} {m['rep']} {m['page']}"
+            yield (_case_key(m["vol"], m["rep"], m["page"]), disp, m["pin"], m.start(), m.end(), "case",
+                   (m["vol"], _rep_key(m["rep"])))
+        for m in SHORT_RE.finditer(s):
+            if free(*m.span()):
+                spans.append(m.span())
+                yield (f"case-short:{m['vol']} {_rep_key(m['rep'])}", m.group(0), m["pin"], m.start(), m.end(),
+                       "case-short", (m["vol"], _rep_key(m["rep"])))
+        for m in WL_RE.finditer(s):
+            if free(*m.span()):
+                spans.append(m.span())
+                yield (f"wl:{m['year']}:{m['num']}", f"{m['year']} WL {m['num']}", m["pin"], m.start(), m.end(),
+                       "case", None)
+        for pat, kind in ((RULE_RE, "rule"), (LOCAL_RE, "rule")):
+            for m in pat.finditer(s):
+                if free(*m.span()):
+                    spans.append(m.span())
+                    yield ("rule:" + _norm_key(m["base"]), m.group(0), None, m.start(), m.end(), kind, None)
+                    prefix = re.match(r"(.*?)\d+(?:\.\d+)?$", m["base"]).group(1)
+                    pos = m.end()
+                    while (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
+                        spans.append(t.span("cite"))
+                        yield ("rule:" + _norm_key(prefix + t["num"]), prefix + t["cite"], None,
+                               t.start("cite"), t.end("cite"), kind, None)
+                        pos = t.end()
+        bare = self.docket.get("bare_rule", "Fed. R. Civ. P.")
+        for m in BARE_RULE_RE.finditer(s):
+            pre = s[max(0, m.start() - 8): m.start()]
+            if free(*m.span()) and not re.search(r"Local\s+$", pre):
+                spans.append(m.span())
+                yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
+                       "bare-rule", bare)
+        for row in citations.extract_citations(s):
+            frag = row["raw_fragment"]
+            if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
+                continue
+            a, b = row["char_start"], row["char_end"]
+            if free(a, b):
+                spans.append((a, b))
+                key, sec = _statute_base(frag)
+                yield (key, frag, None, a, b, "statute", sec)
+
+    def _lookup(self, key):
+        rows = self.auth_index.get(key) or []
+        rank = {"source-checked": 0, "verified-official": 0, "resolved": 1, "research-pending": 1,
+                "stale-flagged": 2, "unverified": 3}
+        return sorted(rows, key=lambda r: rank.get(r["status"], 4))[0] if rows else None
+
+    def _use(self, key, display, row, line, pin):
+        u = self.uses.get(key)
+        if u is None:
+            u = self.uses[key] = AuthorityUse(key, display, row["citation"] if row else None,
+                                              row["status"] if row else None, row["checked_via"] if row else None)
+        u.lines.append(line)
+        u.pins.append(pin)
+        return u
+
+    def _judge_authority(self, key, display, row, line, pin, raw):
+        self._use(key, display, row, line, pin)
+        if row is None:
+            self.rep.add("BLOCK", "authority-not-logged", line, raw,
+                         "not in the store's authorities; log it and record a source check (authority check)")
+            return
+        st = row["status"]
+        if st in STATUS_OK:
+            ev = row["check_evidence"]
+            try:
+                pins = (json.loads(ev) or {}).get("pins") if ev else None
+            except (ValueError, AttributeError):
+                pins = None
+            if pin and pins and not _covered(pin, pins):
+                self.rep.add("WARN", "pin-not-in-check", line, raw,
+                             f"pin {pin} is outside the pages recorded in the source check ({', '.join(map(str, pins))})")
+        elif st in STATUS_LOCATED:
+            self.rep.add("UNCHECKED", "authority-not-source-checked", line, raw,
+                         f"store status '{st}': located but no source check recorded")
+        elif st == "stale-flagged":
+            self.rep.add("BLOCK", "authority-stale-flagged", line, raw,
+                         f"a source check flagged a currency question: {row['check_evidence'] or '—'}")
+        else:
+            self.rep.add("BLOCK", "authority-unverified", line, raw, f"store status '{st}'")
+
+    # ---- per-unit ---------------------------------------------------------
+    def run(self):
+        for u in self.units():
+            self.unit(u)
+        self.rep.authorities = list(self.uses.values())
+        self.coverage()
+
+    def unit(self, u: Unit):
+        line = self.line(u.start)
+        cites: list[Cite] = []
+        claimed: list[tuple[int, int]] = []
+
+        def free(a, b):
+            return not any(a < e and s < b for s, e in claimed)
+
+        # record cites
+        for m in RECORD_RE.finditer(u.text):
+            claimed.append(m.span())
+            nums = re.findall(r"\d{1,4}(?:-\d{1,3})?", m["nums"])
+            for n in nums:
+                c = Cite("record", m.group(0), f"Doc. {n}", None, m["pin"] if len(nums) == 1 else None,
+                         m.start(), m.end())
+                c.target = self.resolve_record(n, line, m.group(0))
+                if c.target:
+                    self.check_pin(c, line)
+                cites.append(c)
+        for m in PLEADING_RE.finditer(u.text):
+            if not free(*m.span()):
+                continue
+            claimed.append(m.span())
+            key = "Am. Compl." if re.match(r"(?:First\s+)?Am|FAC", m["key"]) else "Compl."
+            paras = [n for lo, hi in _pin_ranges(m["paras"]) for n in range(lo, min(hi, lo + 200) + 1)]
+            c = Cite("pleading", m.group(0), key, None, None, m.start(), m.end(), paras)
+            c.target = self.resolve_pleading(key, line, m.group(0))
+            if c.target:
+                self.check_paras(c, line)
+            cites.append(c)
+        for key, disp, pin, a, b, kind, extra in self._scan_authorities(u.text):
+            if not free(a, b):
+                continue
+            claimed.append((a, b))
+            raw = u.text[a:b] if re.search(r"[A-Za-z§]", u.text[a:b]) else disp  # "… and 15"
+            c = Cite("authority", raw, disp, key, pin, a, b)
+            self.resolve_authority(c, kind, extra, line)
+            cites.append(c)
+        for m in ID_RE.finditer(u.text):
+            if not free(*m.span()):
+                continue
+            claimed.append(m.span())
+            prev = [x for x in cites if x.start < m.start()]
+            base = prev[-1] if prev else self.last_target
+            if base is None:
+                self.rep.add("BLOCK", "id-unbound", line, m.group(0), "Id. has no preceding citation")
+                continue
+            if not prev and len(self.last_unit_targets) > 1:
+                self.rep.add("WARN", "id-ambiguous", line, m.group(0),
+                             "the preceding citation sentence cites more than one source")
+            paras = [n for lo, hi in _pin_ranges(m["paras"]) for n in range(lo, hi + 1)] if m["paras"] else []
+            c = Cite(base.kind, m.group(0), base.display, base.target, m["pin"], m.start(), m.end(),
+                     paras or (base.paras if base.kind == "pleading" else []), via_id=True)
+            if c.kind == "record" and c.target:
+                self.check_pin(c, line)
+            elif c.kind == "pleading" and c.target and paras:
+                self.check_paras(c, line)
+            elif c.kind == "authority":
+                self._judge_authority(c.target, c.display, self._lookup(c.target), line, c.pin, m.group(0))
+            cites.append(c)
+        cites.sort(key=lambda c: c.start)
+        if cites:
+            self.last_target = cites[-1]
+            self.last_unit_targets = {(c.kind, c.target) for c in cites}
+        quotes = self.quotes(u, cites, line)
+        facts = self.facts(u, line)
+        if cites or quotes or facts:
+            self.rep.rows.append(Row(line, " ".join(u.text.split()), cites, quotes, facts))
+        elif u.fact_section and len(u.text.split()) >= 4:
+            self.rep.add("WARN", "uncited-fact", line, " ".join(u.text.split()),
+                         "factual sentence with no record, pleading or authority cite")
+
+    # ---- resolution -------------------------------------------------------
+    def resolve_record(self, n, line, raw) -> str | None:
+        rel = (self.docket.get("entries") or {}).get(n)
+        if rel is None:
+            rel = self.suggested.get(n)
+            if rel is None:
+                self.rep.add("BLOCK", "record-not-in-store", line, raw,
+                             f"docket entry {n} is not in the store (no docket.json entry, no matching filename)")
+                return None
+            self.rep.add("UNCHECKED", "record-unconfirmed", line, raw,
+                         f"Doc. {n} matched by filename only (`{rel}`); confirm it in .matter/docket.json")
+        return rel if self.integrity(rel, line, raw) else None
+
+    def resolve_pleading(self, key, line, raw) -> str | None:
+        ref = (self.docket.get("pleadings") or {}).get(key) or self.docket.get("operative_pleading")
+        if not ref:
+            self.rep.add("BLOCK", "record-not-in-store", line, raw,
+                         f"no pleading configured for '{key}' in .matter/docket.json")
+            return None
+        rel = (self.docket.get("entries") or {}).get(str(ref)) or self.suggested.get(str(ref)) \
+            if re.fullmatch(r"\d{1,4}(?:-\d{1,3})?", str(ref)) else str(ref)
+        if rel is None:
+            self.rep.add("BLOCK", "record-not-in-store", line, raw, f"pleading '{key}' (Doc. {ref}) is not in the store")
+            return None
+        return rel if self.integrity(rel, line, raw) else None
+
+    def integrity(self, rel, line, raw) -> bool:
+        _, problem = self.docs.verify(rel)
+        if problem:
+            msg = {"not-registered": "mapped in docket.json but not registered in the store",
+                   "missing": "registered but the file is missing", "changed": "bytes changed since registration"}
+            code = "source-changed" if problem == "changed" else "record-not-in-store" \
+                if problem == "not-registered" else "source-missing"
+            self.rep.add("BLOCK", code, line, raw, f"`{rel}`: {msg[problem]}")
+            return False
+        return True
+
+    def check_pin(self, c: Cite, line):
+        if not c.pin:
+            return
+        _, count, _ = self.docs.text(c.target)
+        ranges = _pin_ranges(c.pin)
+        if count is None:
+            self.rep.add("UNCHECKED", "pin-unchecked", line, c.raw, f"page count of `{c.target}` unknown")
+        elif any(hi > count or lo < 1 for lo, hi in ranges):
+            self.rep.add("BLOCK", "pin-out-of-range", line, c.raw, f"`{c.target}` has {count} pages")
+
+    def check_paras(self, c: Cite, line):
+        pages, _, label = self.docs.text(c.target)
+        if pages is None:
+            self.rep.add("UNCHECKED", "paragraph-unchecked", line, c.raw, f"no readable text for `{c.target}`")
+            return
+        have = _paragraphs("\n".join(pages))
+        missing = [n for n in c.paras if n not in have]
+        if missing:
+            self.rep.add("BLOCK", "paragraph-not-found", line, c.raw,
+                         f"¶ {', '.join(map(str, missing))} not found in {label}")
+
+    def resolve_authority(self, c: Cite, kind, extra, line):
+        if kind == "case":
+            if extra:
+                self.full_cases.setdefault(extra, c.target)
+        elif kind == "case-short":
+            full = self.full_cases.get(extra)
+            if full:
+                c.target = full
+                c.display = self.uses[full].display if full in self.uses else c.display
+            else:
+                cands = {k for k in self.auth_index if k.startswith(f"case:{extra[0]} {extra[1]} ")}
+                if len(cands) == 1:
+                    c.target = cands.pop()
+                self.rep.add("WARN", "short-form-without-full-cite", line, c.raw,
+                             "short form with no full citation earlier in the draft")
+        elif kind == "statute":
+            sec = extra
+            if c.target.startswith("statute-short:"):
+                full = self.full_statutes.get(sec)
+                if full:
+                    c.target = full
+                else:
+                    cands = {k for k in self.auth_index if k.startswith("statute:") and sec and k.endswith(_norm_key(sec))}
+                    if len(cands) == 1:
+                        c.target = cands.pop()
+            elif sec:
+                self.full_statutes.setdefault(sec, c.target)
+        elif kind == "bare-rule":
+            c.display = f"{c.raw} (read as {extra} {c.raw.split()[1]})"
+        row = self._lookup(c.target)
+        self._judge_authority(c.target, self.uses[c.target].display if c.target in self.uses else c.display,
+                              row, line, c.pin, c.raw)
+
+    # ---- quotes and facts -------------------------------------------------
+    def quotes(self, u: Unit, cites, line) -> list[Quote]:
+        out = []
+        for m in QUOTE_RE.finditer(u.text):
+            qtext = m.group(1) or m.group(2)
+            frags = _fragments(qtext)
+            if not frags:
+                continue
+            q = Quote(qtext)
+            out.append(q)
+            after = [c for c in cites if c.start >= m.end()]
+            before = [c for c in cites if c.start < m.start()]
+            src = after[0] if after else (before[-1] if before else None)
+            if src is None:
+                self.rep.add("WARN", "quote-uncited", line, qtext, "quotation with no cite in the sentence")
+                continue
+            if src.kind == "authority":
+                q.status = "unchecked"
+                self.rep.add("UNCHECKED", "quote-unchecked", line, qtext,
+                             f"text of {src.display} is not in the store; check the quotation by hand")
+                continue
+            if not src.target:
+                continue
+            pages, _, label = self.docs.text(src.target)
+            if pages is None:
+                q.status = "unchecked"
+                self.rep.add("UNCHECKED", "quote-unchecked", line, qtext,
+                             f"no readable text for `{src.target}`; name a text copy in docket.json or extract it")
+                continue
+            q.checked_against = label
+            if src.kind == "pleading" and src.paras:
+                paras = _paragraphs("\n".join(pages))
+                scope = "\n".join(paras.get(n, "") for n in src.paras)
+                if _find(frags, scope) is not None:
+                    q.status, q.where = "found", f"¶ {', '.join(map(str, src.paras))}"
+                elif _find(frags, "\n".join(pages)) is not None:
+                    q.status = "wrong-page"
+                    self.rep.add("WARN", "quote-wrong-paragraph", line, qtext,
+                                 f"found in {label} but not in the cited paragraph(s)")
+                else:
+                    q.status = "not-found"
+                    self.rep.add("BLOCK", "quote-not-found", line, qtext, f"not found in {label}")
+                continue
+            hit_pages = [i + 1 for i, p in enumerate(pages) if _find(frags, p) is not None]
+            if not hit_pages and _find(frags, "\n".join(pages)) is not None:
+                hit_pages = [0]  # spans a page break
+            pins = _pin_ranges(src.pin)
+            if not hit_pages:
+                q.status = "not-found"
+                self.rep.add("BLOCK", "quote-not-found", line, qtext, f"not found in {label}")
+            elif pins and hit_pages != [0] and not any(lo <= p <= hi for p in hit_pages for lo, hi in pins):
+                q.status, q.where = "wrong-page", f"p. {', '.join(map(str, hit_pages))}"
+                self.rep.add("WARN", "quote-wrong-page", line, qtext,
+                             f"found on p. {', '.join(map(str, hit_pages))}, not at the cited p. {src.pin}")
+            else:
+                q.status = "found"
+                q.where = "across a page break" if hit_pages == [0] else f"p. {', '.join(map(str, hit_pages))}"
+        return out
+
+    def facts(self, u: Unit, line) -> list[str]:
+        for aid in u.tags:
+            r = self.conn.execute("SELECT * FROM assertions WHERE id=?", (aid,)).fetchone()
+            if r is None:
+                self.rep.add("BLOCK", "fact-unknown", line, aid, "no such assertion in the store")
+                continue
+            if r["status"] != "DOCUMENTED FACT":
+                self.rep.add("WARN", "fact-not-documented", line, aid,
+                             f"assertion is labeled {r['status']}; do not present it as established fact")
+            n = self.conn.execute("SELECT COUNT(*) FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()[0]
+            if n == 0:
+                self.rep.add("WARN", "fact-unsupported", line, aid, "assertion has no sources (UNSUPPORTED)")
+        return list(u.tags)
+
+    # ---- docket coverage --------------------------------------------------
+    def coverage(self):
+        entries = dict(self.suggested)
+        entries.update(self.docket.get("entries") or {})
+        known = {int(k) for k in entries if k.isdigit()}
+        cited = {int(n) for f in self.rep.findings if f.code == "record-not-in-store"
+                 for n in re.findall(r"docket entry (\d+)", f.message)}
+        top = max(known | cited | {0})
+        self.rep.docket_gaps = _compress([n for n in range(1, top + 1) if n not in known])
+        refs = {}
+        for key, rel in sorted(entries.items(), key=lambda kv: _entry_sort(kv[0])):
+            r, problem = self.docs.verify(rel)
+            if problem:
+                continue
+            pages, _, _ = self.docs.text(rel)
+            for i, p in enumerate(pages or []):
+                for m in RECORD_RE.finditer(p):
+                    for n in re.findall(r"\d{1,4}", m["nums"]):
+                        if int(n) not in known and n != key:
+                            refs.setdefault(n, f"Doc. {n} is cited in Doc. {key} p. {i + 1} but is not in the store")
+        self.rep.docket_refs = [refs[k] for k in sorted(refs, key=int)]

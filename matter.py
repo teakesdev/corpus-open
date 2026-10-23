@@ -18,6 +18,8 @@ Usage:
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
+  matter.py brief check <dir> <draft.md> [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
+  matter.py docket suggest <dir>
 """
 import argparse
 import json
@@ -186,6 +188,32 @@ def cmd_packet(args):
         print(f"wrote {args.out}")
     else:
         print(text)
+
+
+def cmd_brief(args):
+    """brief check: tie every cite, quotation and factual sentence in a draft to the store.
+    Read-only. Exit 1 = blocking findings, 2 = items a human must check, 0 = all tied."""
+    from matterkit import briefcheck
+    try:
+        report = briefcheck.check(args.case_dir, args.draft, use_pdftotext=not args.no_pdftotext,
+                                  docket_path=args.docket)
+    except (ValueError, FileNotFoundError) as e:
+        sys.exit(f"brief check refused: {e}")
+    text = report.render()
+    if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"{report.summary()}\nwrote {args.out}")
+    else:
+        print(text)
+    sys.exit(report.exit_code)
+
+
+def cmd_docket(args):
+    """docket suggest: docket numbers derived from registered filenames, as docket.json JSON."""
+    from matterkit import briefcheck
+    print(json.dumps(briefcheck.suggest_docket(store.connect_readonly(args.case_dir)), indent=2))
 
 
 CAPTURE_USAGE = ("usage: matter capture <case-dir> --url URL --out REL_PATH [--kind media|research]\n"
@@ -435,6 +463,14 @@ def main():
     p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
                    help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_fact)
+
+    p = sub.add_parser("brief"); p.add_argument("sub", choices=["check"]); p.add_argument("case_dir")
+    p.add_argument("draft"); p.add_argument("--out"); p.add_argument("--no-pdftotext", action="store_true")
+    p.add_argument("--docket", help="docket map JSON to use instead of <dir>/.matter/docket.json")
+    p.set_defaults(fn=cmd_brief)
+
+    p = sub.add_parser("docket"); p.add_argument("sub", choices=["suggest"]); p.add_argument("case_dir")
+    p.set_defaults(fn=cmd_docket)
 
     p = sub.add_parser("deadline"); p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")
     p.add_argument("--label"); p.add_argument("--due"); p.add_argument("--rule")
