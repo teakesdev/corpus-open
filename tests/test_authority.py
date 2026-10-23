@@ -36,6 +36,11 @@ LEDGER = """# Authority ledger (synthetic)
 | *Alpha v. Beta*, 500 U.S. 44, 55–58 (1991) | Official reporter PDF (sha `d7a3`) | 48-hour rule | V-LEAD (pins confirmed) | not a bail case |
 | *Gamma v. Delta*, 874 F.3d 425 (5th Cir. 2017) | slip op. (sha `fd9d`) | blame shifting | V-LEAD (slip pages); **F.3d pins unconfirmed** | — |
 | *Twombly*, 550 U.S. 544, 555, 570; *Iqbal*, 556 U.S. 662, 678 | W1 (mirror) | pleading standard | V-WORKER | standard cites |
+| *Epsilon v. Zeta*, 659 F.3d 440, 446–47 (5th Cir. 2011) | slip op. | supervisor standard | V-LEAD (slip); pins per W4 | — |
+| *Eta v. Theta*, 473 U.S. 159, 165–66 (1985) | Official reporter PDF | official capacity | V-LEAD | — |
+| *Iota v. Kappa*, 587 U.S. 391 (2019) | worker | retaliatory arrest | V-WORKER (Kappa); PARTIAL (Iota) | — |
+| No circuit authority on point | — | — | NOT FOUND | searched |
+| W2 (worker-x) | — | — | NO REPORT (timed out) | — |
 """
 
 
@@ -152,6 +157,23 @@ class TestLedgerImport(Base):
         self.assertTrue(gamma["pins_unconfirmed"])
         self.assertEqual(got["Twombly, 550 U.S. 544, 555, 570; Iqbal, 556 U.S. 662, 678"]["status"], "resolved")
         self.assertIn("agent:model-x", json.dumps(gamma))
+
+    def test_conservative_mapping_details(self):
+        rows = {r["citation"]: r for r in authority.parse_ledger(LEDGER)}
+        self.assertTrue(rows["Epsilon v. Zeta, 659 F.3d 440, 446–47 (5th Cir. 2011)"]["pins_unconfirmed"])
+        self.assertEqual(rows["Epsilon v. Zeta, 659 F.3d 440, 446–47 (5th Cir. 2011)"]["pins"], [])
+        self.assertEqual(rows["Eta v. Theta, 473 U.S. 159, 165–66 (1985)"]["pins"], ["165–66"])
+        self.assertEqual(rows["Iota v. Kappa, 587 U.S. 391 (2019)"]["status"], "research-pending")
+        self.assertIsNone(rows["No circuit authority on point"]["status"])
+
+    def test_non_authority_rows_skipped_on_import(self):
+        led = self.write("Research/ledger.md", LEDGER)
+        p = self.cli("authority", "import", self.dir, led, "--apply")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        cites = {r["citation"] for r in self.rows()}
+        self.assertNotIn("No circuit authority on point", cites)
+        self.assertNotIn("W2 (worker-x)", cites)
+        self.assertIn("not an authority status", p.stdout)
 
     def test_apply_twice_skips_existing(self):
         led = self.write("Research/ledger.md", LEDGER)

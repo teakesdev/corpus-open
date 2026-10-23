@@ -13,10 +13,12 @@ in `authorities.check_evidence`:
 Authority/Case/Citation column and a Status column). Nothing is written unless
 apply=True. Ledger statuses map conservatively:
 
-    V-LEAD   -> source-checked   (pins only when the ledger says "pins confirmed")
+    V-LEAD   -> source-checked   (pins confirmed only for a bare V-LEAD or "pins confirmed";
+                                  any qualifier such as "slip" or "pins per W4" leaves them unconfirmed)
     V-WORKER -> resolved         (located; no source check by the lead)
     PARTIAL  -> research-pending
-    other    -> unverified
+    UNVERIFIED -> unverified; a cell naming several takes the weakest; a cell naming
+    none of these ("NO REPORT", "NOT FOUND") is not an authority row and is skipped
 
 A recorded check means "this source was opened and these pins were seen". It
 never means the proposition is correct or the authority is still good law.
@@ -150,17 +152,17 @@ def _clean(cell: str) -> str:
     return " ".join(s.split())
 
 
-def _map_status(cell: str, has_source: bool) -> str:
+_LEDGER_STATUS = [("UNVERIFIED", "unverified"), ("PARTIAL", "research-pending"),
+                  ("V-WORKER", "resolved"), ("V-LEAD", "source-checked")]  # weakest first
+
+
+def _map_status(cell: str, has_source: bool) -> str | None:
+    """Weakest status named in the cell; None when the cell names no ledger status (not an authority row)."""
     st = cell.upper()
-    if not has_source:
-        return "unverified"
-    if st.startswith("V-LEAD"):
-        return "source-checked"
-    if st.startswith("V-WORKER"):
-        return "resolved"
-    if st.startswith("PARTIAL"):
-        return "research-pending"
-    return "unverified"
+    named = [mapped for token, mapped in _LEDGER_STATUS if token in st]
+    if not named:
+        return None
+    return named[0] if has_source else "unverified"
 
 
 def parse_ledger(text: str) -> list[dict]:
@@ -189,14 +191,17 @@ def parse_ledger(text: str) -> list[dict]:
                 source = get(src_i)
                 has_source = bool(source) and source not in ("—", "-")
                 status = _map_status(st_cell, has_source)
-                low = (st_cell + " " + get(note_i)).lower()
-                pins = []
-                if status == "source-checked" and "pins confirmed" in low:
-                    pins = [p for _, _, p, *_ in briefcheck.scan_authorities(cite) if p][:1]
+                if status is None:
+                    out.append({"citation": cite, "ledger_status": st_cell, "status": None})
+                    continue
+                # pins count as confirmed only for a bare V-LEAD or an explicit "pins confirmed"
+                confirmed = status == "source-checked" and (
+                    "pins confirmed" in st_cell.lower() or st_cell.strip().upper() == "V-LEAD")
+                pins = [p for _, _, p, *_ in briefcheck.scan_authorities(cite) if p][:1] if confirmed else []
                 out.append({"citation": cite, "ledger_status": st_cell, "status": status,
                             "source": source if has_source else None, "proposition": get(prop_i),
                             "notes": get(note_i), "pins": pins,
-                            "pins_unconfirmed": status == "source-checked" and "unconfirmed" in low})
+                            "pins_unconfirmed": status == "source-checked" and not confirmed})
             continue
         i += 1
     return out
@@ -214,6 +219,9 @@ def import_ledger(conn, matter_dir: str, ledger_path: str, *, apply: bool = Fals
     planned, skipped = [], []
     seen: set = set()
     for row in parse_ledger(raw.decode("utf-8", "replace")):
+        if row["status"] is None:
+            skipped.append({**row, "reason": f"status '{row['ledger_status']}' is not an authority status"})
+            continue
         try:
             existing = find(conn, row["citation"])
         except AuthorityError as e:

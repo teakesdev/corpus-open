@@ -181,7 +181,7 @@ def cmd_authority(args):
     if len(rest) != 2:
         sys.exit(f"usage: matter.py authority {sub} <dir> " + ("<ledger.md>" if sub == "import" else '"<citation>"'))
     case_dir, target = rest
-    conn = store.connect(case_dir)
+    conn = store.connect_readonly(case_dir) if sub == "import" and not args.apply else store.connect(case_dir)
     from matterkit import authority
     if sub == "add":
         from matterkit.store import new_id
