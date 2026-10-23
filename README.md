@@ -169,6 +169,24 @@ means blocking findings, 2 means items only a person can check, 0 means every
 item is tied to a source in the store. That never means the brief is legally
 correct or that an authority is still good law.
 
+## Deadlines and subcases
+
+```bash
+python3 matter.py deadline list ~/cases/my-case            # open dates already past are marked ⚠ OVERDUE
+python3 matter.py deadline update ~/cases/my-case d_abc123 --state superseded \
+  --reason "extension granted by text-only order" --source Filings/docket_sheet.pdf@entry-27
+python3 matter.py subcase init ~/cases/my-case Related-Claim --title "Related state-court claim"
+python3 matter.py fact add ~/cases/my-case/Subcases/Related-Claim --text "…" --status documented-fact \
+  --source parent:Media/article.html@para3
+```
+
+Every deadline change needs a reason and is recorded in `events` with who made
+it. A subcase is its own matter under `Subcases/<slug>/` with a `matter.json`
+pointing at its parent. The parent's `ingest` stops at any folder holding its
+own `.matter/`. A subcase cites the parent's documents in place as
+`parent:<rel_path>`, re-hashed against the parent on every use and never
+copied. `status` on the parent lists its subcases and their overdue deadlines.
+
 ## Skills
 
 `skills/matter-kit/SKILL.md` teaches agents the operating discipline: the five
