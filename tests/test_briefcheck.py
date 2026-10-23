@@ -359,3 +359,47 @@ class TestCli(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSubcaseParentRefs(unittest.TestCase):
+    """A subcase draft can cite and quote a parent document through a parent: reference."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.parent = os.path.join(self._tmp.name, "parent")
+        env = dict(os.environ, PATH="")
+        run = lambda *a: subprocess.run([sys.executable, os.path.join(KIT, "matter.py"), *a],  # noqa: E731
+                                        capture_output=True, text=True, env=env)
+        self.run_cli = run
+        self.assertEqual(run("init", self.parent).returncode, 0)
+        os.makedirs(os.path.join(self.parent, "Media"), exist_ok=True)
+        with open(os.path.join(self.parent, "Media", "article.txt"), "w") as f:
+            f.write("The sheriff's office named the man arrested on Tuesday.")
+        run("ingest", self.parent)
+        p = run("subcase", "init", self.parent, "Reporting-Claim", "--title", "Reporting claim")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.sub = os.path.join(self.parent, "Subcases", "Reporting-Claim")
+        p = run("fact", "add", self.sub, "--text", "The article named him.", "--status", "documented-fact",
+                "--source", "parent:Media/article.txt@para1")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(os.path.join(self.sub, ".matter", "docket.json"), "w") as f:
+            json.dump({"entries": {"5": "parent:Media/article.txt"}}, f)
+        self.draft = os.path.join(self.sub, "Filings", "notice.md")
+        os.makedirs(os.path.dirname(self.draft), exist_ok=True)
+
+    def check(self, text):
+        with open(self.draft, "w") as f:
+            f.write(text)
+        return briefcheck.check(self.sub, self.draft, use_pdftotext=False)
+
+    def test_quote_found_in_parent_document(self):
+        r = self.check('The station reported that the office "named the man arrested on Tuesday." Doc. 5.')
+        self.assertEqual(codes(r, "BLOCK"), [])
+        self.assertEqual(r.rows[0].quotes[0].status, "found")
+
+    def test_changed_parent_document_blocks(self):
+        with open(os.path.join(self.parent, "Media", "article.txt"), "a") as f:
+            f.write(" (edited)")
+        r = self.check("The station reported it. Doc. 5.")
+        self.assertIn("source-changed", codes(r, "BLOCK"))

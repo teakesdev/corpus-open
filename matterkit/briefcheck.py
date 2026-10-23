@@ -36,7 +36,7 @@ import unicodedata
 import zlib
 from dataclasses import dataclass, field
 
-from . import citations, store
+from . import citations, ingest, store
 
 TOOL_ID = "matter-kit brief-check 0.1"
 LIMITS = ("“Tied to a source in the store” means the cited document or authority record exists in this "
@@ -348,17 +348,26 @@ class Docs:
             self.pdftotext_version = ((p.stderr or p.stdout).splitlines() or ["pdftotext"])[0].strip()
         self._cache: dict = {}
         self.read: dict = {}  # rel_path -> sha256 actually verified
+        self.paths: dict = {}  # rel_path -> absolute path of the verified bytes
+        self.parents = None  # subcase.ParentView, opened on first parent: reference
+
+    def close(self):
+        if self.parents is not None:
+            self.parents.close()
 
     def row(self, rel):
         return self.conn.execute("SELECT * FROM documents WHERE rel_path=?", (rel,)).fetchone()
 
     def verify(self, rel):
-        """(row, problem) where problem is None, 'not-registered', 'missing' or 'changed'."""
+        """(row, problem) where problem is None, 'not-registered', 'missing' or 'changed'.
+        A subcase's `parent:` reference is checked through the parent, read-only."""
         r = self.row(rel)
         if r is None:
             return None, "not-registered"
-        p = os.path.join(self.dir, rel)
-        if not os.path.isfile(p):
+        if rel.startswith("parent:"):
+            return self._verify_parent(rel, r)
+        p = ingest.resolve_document_path(self.dir, rel)
+        if p is None or not os.path.isfile(p):
             return r, "missing"
         h = hashlib.sha256()
         with open(p, "rb") as f:
@@ -367,6 +376,21 @@ class Docs:
         if h.hexdigest() != r["sha256"]:
             return r, "changed"
         self.read[rel] = r["sha256"]
+        self.paths[rel] = p
+        return r, None
+
+    def _verify_parent(self, rel, r):
+        from . import subcase
+        if self.parents is None:
+            self.parents = subcase.ParentView(self.dir)
+        verdict = self.parents.check(rel[len("parent:"):], r["sha256"])
+        if verdict == "CHANGED":
+            return r, "changed"
+        if verdict:
+            return r, "missing"
+        _, path = self.parents.locate(rel[len("parent:"):])
+        self.read[rel] = r["sha256"]
+        self.paths[rel] = path
         return r, None
 
     def text(self, rel):
@@ -381,7 +405,7 @@ class Docs:
         return out
 
     def _load(self, rel, r):
-        path = os.path.join(self.dir, rel)
+        path = self.paths[rel]
         ext = os.path.splitext(rel)[1].lower()
         count = None
         if ext == ".pdf":
@@ -391,7 +415,7 @@ class Docs:
         if copy:
             cr, problem = self.verify(copy)
             if problem is None:
-                pages, n = _split_pages(_read_text(os.path.join(self.dir, copy)))
+                pages, n = _split_pages(_read_text(self.paths[copy]))
                 return pages, n or count, f"text copy {copy}"
         try:
             rows = self.conn.execute(
@@ -630,7 +654,10 @@ def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_p
         rep.docket_path = docket_path or ".matter/docket.json"
         docs = Docs(conn, matter_dir, docket, use_pdftotext)
         rep.pdftotext_version = docs.pdftotext_version
-        _Checker(rep, conn, docs, docket, text).run()
+        try:
+            _Checker(rep, conn, docs, docket, text).run()
+        finally:
+            docs.close()
         rep.inputs = dict(docs.read)
     finally:
         conn.close()
