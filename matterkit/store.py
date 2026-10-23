@@ -145,6 +145,21 @@ def connect(matter_dir: str) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(matter_dir: str) -> sqlite3.Connection:
+    """Open an existing store without creating, migrating or writing anything.
+
+    `connect` runs the schema script and migrations on every open; checkers
+    and cross-matter lookups (a subcase reading its parent) must not.
+    """
+    path = db_path(matter_dir)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"no matter store at {path}")
+    from urllib.parse import quote
+    conn = sqlite3.connect(f"file:{quote(os.path.abspath(path))}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Backward-compatible migrations for stores created before v0.2 (RFC 0001)."""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(authorities)")]
