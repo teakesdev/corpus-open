@@ -217,6 +217,64 @@ def _case_name(prefix: str) -> str:
     return " ".join(name)
 
 
+def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P."):
+    """Yield (key, display, pin, start, end, kind, extra) for authority cites in s."""
+    spans = []
+
+    def free(a, b):
+        return not any(a < e and s_ < b for s_, e in spans)
+
+    for m in CASE_RE.finditer(s):
+        spans.append((m.start(), m.end()))
+        name = _case_name(s[: m.start()])
+        disp = (f"{name}, " if name else "") + f"{m['vol']} {m['rep']} {m['page']}"
+        yield (_case_key(m["vol"], m["rep"], m["page"]), disp, m["pin"], m.start(), m.end(), "case",
+               (m["vol"], _rep_key(m["rep"])))
+    for m in SHORT_RE.finditer(s):
+        if free(*m.span()):
+            spans.append(m.span())
+            yield (f"case-short:{m['vol']} {_rep_key(m['rep'])}", m.group(0), m["pin"], m.start(), m.end(),
+                   "case-short", (m["vol"], _rep_key(m["rep"])))
+    for m in WL_RE.finditer(s):
+        if free(*m.span()):
+            spans.append(m.span())
+            yield (f"wl:{m['year']}:{m['num']}", f"{m['year']} WL {m['num']}", m["pin"], m.start(), m.end(),
+                   "case", None)
+    for pat, kind in ((RULE_RE, "rule"), (LOCAL_RE, "rule")):
+        for m in pat.finditer(s):
+            if free(*m.span()):
+                spans.append(m.span())
+                yield ("rule:" + _norm_key(m["base"]), m.group(0), None, m.start(), m.end(), kind, None)
+                prefix = re.match(r"(.*?)\d+(?:\.\d+)?$", m["base"]).group(1)
+                pos = m.end()
+                while (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
+                    spans.append(t.span("cite"))
+                    yield ("rule:" + _norm_key(prefix + t["num"]), prefix + t["cite"], None,
+                           t.start("cite"), t.end("cite"), kind, None)
+                    pos = t.end()
+    bare = bare_rule
+    for m in BARE_RULE_RE.finditer(s):
+        pre = s[max(0, m.start() - 8): m.start()]
+        if free(*m.span()) and not re.search(r"Local\s+$", pre):
+            spans.append(m.span())
+            yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
+                   "bare-rule", bare)
+    for row in citations.extract_citations(s):
+        frag = row["raw_fragment"]
+        if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
+            continue
+        a, b = row["char_start"], row["char_end"]
+        if free(a, b):
+            spans.append((a, b))
+            key, sec = _statute_base(frag)
+            yield (key, frag, None, a, b, "statute", sec)
+
+
+def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.") -> set:
+    """Every key a stored or typed citation answers to."""
+    return {k for k, *_ in scan_authorities(citation, bare_rule)} | {"full:" + _norm_key(citation)}
+
+
 # --------------------------------------------------------------------------
 # Draft segmentation
 # --------------------------------------------------------------------------
@@ -639,62 +697,13 @@ class _Checker:
     def _authority_index(self) -> dict:
         idx: dict = {}
         for r in self.conn.execute("SELECT * FROM authorities"):
-            keys = {k for k, *_ in self._scan_authorities(r["citation"])} | {"full:" + _norm_key(r["citation"])}
+            keys = authority_keys(r["citation"], self.docket.get("bare_rule", "Fed. R. Civ. P."))
             for k in keys:
                 idx.setdefault(k, []).append(r)
         return idx
 
     def _scan_authorities(self, s: str):
-        """Yield (key, display, pin, start, end, kind, extra) for authority cites in s."""
-        spans = []
-
-        def free(a, b):
-            return not any(a < e and s_ < b for s_, e in spans)
-
-        for m in CASE_RE.finditer(s):
-            spans.append((m.start(), m.end()))
-            name = _case_name(s[: m.start()])
-            disp = (f"{name}, " if name else "") + f"{m['vol']} {m['rep']} {m['page']}"
-            yield (_case_key(m["vol"], m["rep"], m["page"]), disp, m["pin"], m.start(), m.end(), "case",
-                   (m["vol"], _rep_key(m["rep"])))
-        for m in SHORT_RE.finditer(s):
-            if free(*m.span()):
-                spans.append(m.span())
-                yield (f"case-short:{m['vol']} {_rep_key(m['rep'])}", m.group(0), m["pin"], m.start(), m.end(),
-                       "case-short", (m["vol"], _rep_key(m["rep"])))
-        for m in WL_RE.finditer(s):
-            if free(*m.span()):
-                spans.append(m.span())
-                yield (f"wl:{m['year']}:{m['num']}", f"{m['year']} WL {m['num']}", m["pin"], m.start(), m.end(),
-                       "case", None)
-        for pat, kind in ((RULE_RE, "rule"), (LOCAL_RE, "rule")):
-            for m in pat.finditer(s):
-                if free(*m.span()):
-                    spans.append(m.span())
-                    yield ("rule:" + _norm_key(m["base"]), m.group(0), None, m.start(), m.end(), kind, None)
-                    prefix = re.match(r"(.*?)\d+(?:\.\d+)?$", m["base"]).group(1)
-                    pos = m.end()
-                    while (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
-                        spans.append(t.span("cite"))
-                        yield ("rule:" + _norm_key(prefix + t["num"]), prefix + t["cite"], None,
-                               t.start("cite"), t.end("cite"), kind, None)
-                        pos = t.end()
-        bare = self.docket.get("bare_rule", "Fed. R. Civ. P.")
-        for m in BARE_RULE_RE.finditer(s):
-            pre = s[max(0, m.start() - 8): m.start()]
-            if free(*m.span()) and not re.search(r"Local\s+$", pre):
-                spans.append(m.span())
-                yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
-                       "bare-rule", bare)
-        for row in citations.extract_citations(s):
-            frag = row["raw_fragment"]
-            if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
-                continue
-            a, b = row["char_start"], row["char_end"]
-            if free(a, b):
-                spans.append((a, b))
-                key, sec = _statute_base(frag)
-                yield (key, frag, None, a, b, "statute", sec)
+        return scan_authorities(s, self.docket.get("bare_rule", "Fed. R. Civ. P."))
 
     def _lookup(self, key):
         rows = self.auth_index.get(key) or []
@@ -719,11 +728,15 @@ class _Checker:
             return
         st = row["status"]
         if st in STATUS_OK:
-            ev = row["check_evidence"]
             try:
-                pins = (json.loads(ev) or {}).get("pins") if ev else None
-            except (ValueError, AttributeError):
-                pins = None
+                ev = json.loads(row["check_evidence"] or "null")
+            except ValueError:
+                ev = None
+            ev = ev if isinstance(ev, dict) else {}
+            pins = ev.get("pins")
+            if pin and ev.get("pins_unconfirmed") and not pins:
+                self.rep.add("WARN", "pins-unconfirmed", line, raw,
+                             f"the recorded source check did not confirm pinpoints; verify p. {pin} by hand")
             if pin and pins and not _covered(pin, pins):
                 self.rep.add("WARN", "pin-not-in-check", line, raw,
                              f"pin {pin} is outside the pages recorded in the source check ({', '.join(map(str, pins))})")

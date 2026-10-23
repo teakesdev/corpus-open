@@ -15,6 +15,9 @@ Usage:
                               [--verification verified-official|secondary-source|unverified]
   matter.py deadline list <dir> [--all]
   matter.py authority add <dir> "<citation>" [--via HOW]
+  matter.py authority check <dir> <auth_id|"<citation>"> --source-url U [--artifact PATH] [--pin P]...
+                            [--quote Q] [--note N] [--stale REASON] [--author agent:MODEL [--directed-by PERSON]]
+  matter.py authority import <dir> <ledger.md> [--apply] [--author ...]
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
@@ -170,12 +173,49 @@ def cmd_correspondence(args):
 
 
 def cmd_authority(args):
-    conn = store.connect(args.case_dir)
-    from matterkit.store import new_id
-    conn.execute("INSERT INTO authorities (id,citation,status,checked_via,note) VALUES (?,?,?,?,?)",
-                 (new_id("auth_"), args.citation, "unverified", args.via, None))
-    conn.commit()
-    print(f"authority logged (unverified): {args.citation} — run verification via corpuslaw.us/CourtListener and update status")
+    """authority add|check|import. The legacy form `authority <dir> <citation>` still means add."""
+    if args.sub_or_dir in ("add", "check", "import"):
+        sub, rest = args.sub_or_dir, args.rest
+    else:
+        sub, rest = "add", [args.sub_or_dir, *args.rest]
+    if len(rest) != 2:
+        sys.exit(f"usage: matter.py authority {sub} <dir> " + ("<ledger.md>" if sub == "import" else '"<citation>"'))
+    case_dir, target = rest
+    conn = store.connect(case_dir)
+    from matterkit import authority
+    if sub == "add":
+        from matterkit.store import new_id
+        conn.execute("INSERT INTO authorities (id,citation,status,checked_via,note) VALUES (?,?,?,?,?)",
+                     (new_id("auth_"), target, "unverified", args.via, None))
+        conn.commit()
+        print(f"authority logged (unverified): {target} — record what you opened with: matter.py authority check")
+        return
+    try:
+        by = store.attribution(args.author, args.directed_by)
+    except ValueError as e:
+        sys.exit(f"invalid attribution: {e}")
+    if sub == "check":
+        try:
+            aid, status = authority.check(conn, case_dir, target, source_url=args.source_url, artifact=args.artifact,
+                                          pins=args.pin, quote=args.quote, note=args.note, stale=args.stale,
+                                          by=by, use_pdftotext=not args.no_pdftotext)
+        except (ValueError, citations_error()) as e:
+            sys.exit(f"refused: {e}")
+        print(f"authority {aid} → [{status}] pins={args.pin or []} by {by}")
+        return
+    planned, skipped = authority.import_ledger(conn, case_dir, target, apply=args.apply, by=by)
+    print(("APPLIED" if args.apply else "DRY RUN — nothing written; re-run with --apply") +
+          f": {len(planned)} to add, {len(skipped)} skipped")
+    for r in planned:
+        pins = f" pins={r['pins']}" if r["pins"] else (" pins unconfirmed" if r["pins_unconfirmed"] else "")
+        print(f"  + [{r['status']}] {r['citation']}{pins}  ← {r['ledger_status'] or '—'}")
+    for r in skipped:
+        print(f"  = {r['citation']}  ({r['reason']})")
+
+
+def citations_error():
+    from matterkit.citations import StageOrderError
+    return StageOrderError
 
 
 def cmd_packet(args):
@@ -510,8 +550,15 @@ def main():
             c.add_argument("--sha", help="Reviewed manifest SHA-256, required for signed and mailed")
             c.add_argument("--receipt", help="Ingested mailing receipt, delivery confirmation, response, or refusal")
 
-    p = sub.add_parser("authority"); p.add_argument("case_dir"); p.add_argument("citation")
-    p.add_argument("--via", default=None); p.set_defaults(fn=cmd_authority)
+    p = sub.add_parser("authority", usage="matter.py authority add|check|import <dir> <citation|ledger.md> ...")
+    p.add_argument("sub_or_dir"); p.add_argument("rest", nargs="+")
+    p.add_argument("--via", default=None)
+    p.add_argument("--source-url"); p.add_argument("--artifact"); p.add_argument("--pin", action="append", default=[])
+    p.add_argument("--quote"); p.add_argument("--note"); p.add_argument("--stale", metavar="REASON")
+    p.add_argument("--apply", action="store_true"); p.add_argument("--no-pdftotext", action="store_true")
+    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"))
+    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"))
+    p.set_defaults(fn=cmd_authority)
 
     p = sub.add_parser("capture", usage=CAPTURE_USAGE[len("usage: "):])
     p.add_argument("target", nargs="+", metavar="[list] case_dir")
