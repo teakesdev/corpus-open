@@ -4,6 +4,9 @@ import os
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".matter"}
 SKIP_FILES = {".DS_Store"}
+# A subcase's documents.rel_path "parent:<rel_path>" names a document whose bytes live in the
+# parent matter (see subcase.py). The prefix is reserved: ingest never registers a local file under it.
+PARENT_PREFIX = "parent:"
 
 EXT_KINDS = {
     ".pdf": "filing", ".docx": "filing", ".doc": "filing",
@@ -42,9 +45,31 @@ def sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def is_nested_matter(path: str) -> bool:
+    """True if `path` is a directory holding its own `.matter/` store."""
+    return os.path.isdir(os.path.join(path, ".matter"))
+
+
+def nested_matter_root(path: str, matter_dir: str):
+    """The nearest directory strictly below matter_dir, at or above `path`, that is its own
+    matter (holds `.matter/`); None if `path` is not inside one. matter_dir itself never counts."""
+    abs_matter = os.path.abspath(matter_dir)
+    cur = os.path.abspath(path)
+    if not os.path.isdir(cur):
+        cur = os.path.dirname(cur)
+    while cur != abs_matter and is_within_matter(cur, abs_matter):
+        if is_nested_matter(cur):
+            return cur
+        cur = os.path.dirname(cur)
+    return None
+
+
 def walk_files(root: str):
+    """Files under root, skipping SKIP_DIRS and any nested matter (a subdirectory with its own
+    `.matter/` is a boundary: its files belong to its own store). `root` itself is not tested."""
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames
+                       if d not in SKIP_DIRS and not is_nested_matter(os.path.join(dirpath, d))]
         for fn in sorted(filenames):
             if fn in SKIP_FILES:
                 continue
@@ -110,6 +135,11 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
         if not os.path.exists(ap):
             print(f"  ! not found: {p}")
             continue
+        nested = nested_matter_root(ap, abs_matter)
+        if nested:  # an explicit path into a nested matter is refused once, not file by file
+            print(f"  ! inside nested matter {nested}: {p}")
+            excluded += 1
+            continue
         targets = ([ap] if os.path.isfile(ap) else walk_files(ap))
         for fp in targets:
             if not is_within_matter(fp, abs_matter):
@@ -120,6 +150,10 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 rel_path = to_rel_path(fp, abs_matter)
             except ValueError:
                 print(f"  ! outside matter: {fp}")
+                excluded += 1
+                continue
+            if rel_path.startswith(PARENT_PREFIX):
+                print(f"  ! reserved name (parent: marks references to the parent matter): {rel_path}")
                 excluded += 1
                 continue
             if any(x in rel_path for x in exclude):
@@ -149,13 +183,31 @@ def verify_integrity(conn, matter_dir: str):
     """Re-hash stored documents against files under matter_dir.
 
     Old cwd-relative locators are not rewritten; they report MISSING or ESCAPED
-    until the caller re-ingests.
+    until the caller re-ingests. Verify walks stored rows, not directories, so the
+    nested-matter boundary stops new registration (walk_files) but never hides a row
+    already registered: a legacy row under a folder that later became a matter is
+    still checked here.
     """
     abs_matter = os.path.abspath(matter_dir)
     rows = conn.execute("SELECT id, sha256, rel_path FROM documents").fetchall()
     ok = bad = missing = 0
     failures = []
+    view = None  # parent: rows resolve through the parent matter, read-only, opened on first use
     for r in rows:
+        if r["rel_path"].startswith(PARENT_PREFIX):
+            if view is None:
+                from .subcase import ParentView
+                view = ParentView(abs_matter)
+            verdict = view.check(r["rel_path"][len(PARENT_PREFIX):], r["sha256"])
+            if verdict is None:
+                ok += 1
+            else:
+                if verdict == "CHANGED":
+                    bad += 1
+                else:  # MISSING (parent, registration or file gone) and ESCAPED count as missing, like local rows
+                    missing += 1
+                failures.append((verdict, r["rel_path"]))
+            continue
         resolved = resolve_document_path(abs_matter, r["rel_path"])
         if resolved is None:
             missing += 1
@@ -170,4 +222,6 @@ def verify_integrity(conn, matter_dir: str):
             failures.append(("CHANGED", r["rel_path"]))
         else:
             ok += 1
+    if view is not None:
+        view.close()
     return ok, bad, missing, failures
