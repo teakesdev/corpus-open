@@ -111,6 +111,26 @@ CREATE TABLE IF NOT EXISTS correspondence_history (
 VALID_STATUS = {"DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"}
 
 
+def attribution(author: str | None, directed_by: str | None = None, default: str = "human") -> str:
+    """Compose the assertions.created_by value.
+
+    `author` is who did the work ("human", or "agent:<model>"). `directed_by`
+    records the person who instructed an agent to do it, so agent work is never
+    stored as if the person wrote it. Direction is not review or approval.
+    Result: "agent:claude-opus-5-5; directed-by:Jane Doe".
+    """
+    author = (author or default).strip()
+    directed_by = (directed_by or "").strip() or None
+    for label, value in (("author", author), ("directed-by", directed_by)):
+        if value is not None and (not value or any(c in value for c in ";\n\r")):
+            raise ValueError(f"{label} must be non-empty and contain no ';' or line breaks")
+    if directed_by is None:
+        return author
+    if not author.startswith("agent:"):
+        raise ValueError("directed-by applies to agent work; set author to 'agent:<model>'")
+    return f"{author}; directed-by:{directed_by}"
+
+
 def db_path(matter_dir: str) -> str:
     return os.path.join(matter_dir, ".matter", "matter.db")
 

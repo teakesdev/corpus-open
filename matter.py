@@ -9,6 +9,7 @@ Usage:
   matter.py capture list <case-dir>
   matter.py status <case-dir>
   matter.py fact add <dir> --text T --status LABEL [--source rel@loc]...
+                           [--author agent:MODEL [--directed-by PERSON]]
   matter.py fact list <dir> [--status LABEL]
   matter.py deadline add <dir> --label L --due YYYY-MM-DD [--rule R] [--confidence hard|working-estimate]
                               [--verification verified-official|secondary-source|unverified]
@@ -75,9 +76,13 @@ def cmd_fact(args):
         if status not in store.VALID_STATUS:
             sys.exit(f"invalid status '{args.status}' — use one of: "
                      f"{', '.join(sorted(s.lower().replace(' ', '-')) for s in store.VALID_STATUS)}")
+        try:
+            by = store.attribution(args.author, args.directed_by)
+        except ValueError as e:
+            sys.exit(f"invalid attribution: {e}")
         aid = new_id("a_")
         conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
-                     (aid, args.text, status, "human", now_iso()))
+                     (aid, args.text, status, by, now_iso()))
         unrec = []
         for s in args.source or []:
             ref, _, loc = s.partition("@")
@@ -90,7 +95,7 @@ def cmd_fact(args):
         n = conn.execute("SELECT COUNT(*) c FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()["c"]
         warn = "" if n else "\n⚠ UNSUPPORTED — no recognized sources attached."
         bad = "" if not unrec else f"\n⚠ unrecognized source refs: {unrec}"
-        print(f"{aid} [{status}]{warn}{bad}")
+        print(f"{aid} [{status}] by {by}{warn}{bad}")
     else:
         st = args.status.upper().replace("-", " ") if args.status else None
         q = "SELECT * FROM assertions" + (" WHERE status=?" if st else "") + " ORDER BY status, created_at"
@@ -99,7 +104,8 @@ def cmd_fact(args):
                 "SELECT d.rel_path, s.locator FROM assertion_sources s JOIN documents d ON d.id=s.document_id"
                 " WHERE s.assertion_id=?", (r["id"],)).fetchall()
             s = "; ".join(x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "") for x in srcs) or "**[UNSUPPORTED]**"
-            print(f"[{r['status']:15}] {r['text']}\n                ↳ {s}")
+            print(f"[{r['status']:15}] {r['text']}\n                ↳ {s}"
+                  f"\n                by {r['created_by'] or 'unrecorded'}")
 
 
 def cmd_deadline(args):
@@ -424,6 +430,10 @@ def main():
 
     p = sub.add_parser("fact"); p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")
     p.add_argument("--text"); p.add_argument("--status"); p.add_argument("--source", action="append", default=[])
+    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
+                   help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
+    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
+                   help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_fact)
 
     p = sub.add_parser("deadline"); p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")

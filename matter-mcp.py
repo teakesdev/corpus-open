@@ -21,7 +21,8 @@ TOOLS = [
     {"name": "matter.fact_add", "description": "Register an assertion with an epistemic label and optional source refs ('rel_path@locator'). Refuses sources not present in the store.",
      "inputSchema": {"type": "object", "required": ["text", "status"],
                      "properties": {"text": {"type": "string"}, "status": {"enum": ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]},
-                                    "sources": {"type": "array", "items": {"type": "string"}}, "created_by": {"type": "string"}}}},
+                                    "sources": {"type": "array", "items": {"type": "string"}}, "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
     {"name": "matter.fact_list", "description": "List assertions, optionally filtered by label, with their provenance.",
      "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}}}},
     {"name": "matter.deadline_list", "description": "List deadlines (open only unless all=true) with confidence and verification status.",
@@ -87,8 +88,9 @@ def call(name: str, args: dict):
         from matterkit.store import new_id, now_iso
         aid = new_id("a_")
         status = args.get("status", "UNKNOWN")
+        by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
         conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
-                     (aid, args["text"], status, args.get("created_by", "agent"), now_iso()))
+                     (aid, args["text"], status, by, now_iso()))
         unsupported = []
         for s in args.get("sources", []):
             ref, _, loc = s.partition("@")
@@ -101,7 +103,7 @@ def call(name: str, args: dict):
         n = conn.execute("SELECT COUNT(*) c FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()["c"]
         warn = f"\n⚠ UNSUPPORTED — no recognized sources." if n == 0 else ""
         bad = f"\n⚠ Unrecognized source refs ignored: {unsupported}" if unsupported else ""
-        return f"{aid} [{status}]{warn}{bad}"
+        return f"{aid} [{status}] by {by}{warn}{bad}"
     if name == "matter.fact_list":
         st = args.get("status")
         q = "SELECT * FROM assertions" + (" WHERE status=?" if st else "") + " ORDER BY status"
