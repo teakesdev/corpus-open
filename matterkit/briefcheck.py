@@ -129,6 +129,7 @@ RULE_RE = re.compile(
     r"(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 LOCAL_RE = re.compile(r"(?P<base>L\.\s?U\.\s?(?:Civ|Crim)\.\s?R\.\s*\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 RULE_TAIL_RE = re.compile(r"(?:,?\s+and\s+|\s*&\s*)(?P<cite>(?P<num>\d+(?:\.\d+)?)(?:\([A-Za-z0-9]{1,4}\))*)")
+RULE_CONT_RE = re.compile(r"(?P<num>\d+(?:\.\d+)?)(?:\s*(?:\([A-Za-z0-9]{1,4}\)|[-–—,&]|and(?!\w)))*")
 LOCAL_WORDS_RE = re.compile(
     r"(?<![\w.])Local(?:\s+(?:Uniform|Civil|Criminal|Bankruptcy|Admiralty|Court))*\s+Rules?\s+"
     r"(?P<num>\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
@@ -292,8 +293,24 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
 
 
 def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.") -> set:
-    """Every key a stored or typed citation answers to."""
-    return {k for k, *_ in scan_authorities(citation, bare_rule, local_rule)} | {"full:" + _norm_key(citation)}
+    """Every key a stored or typed citation answers to.
+
+    A ';' segment that is only a bare rule number ("Fed. R. Civ. P. 5(b); 6(a), (d); 15") continues the
+    most recent rule prefix, so a ledger cell listing several rules keys each one. A segment holding a
+    statute, case or anything unrecognised ends the run."""
+    found = sorted(scan_authorities(citation, bare_rule, local_rule), key=lambda a: a[3])
+    keys = {k for k, *_ in found} | {"full:" + _norm_key(citation)}
+    prefix, pos = None, 0
+    for seg in citation.split(";"):
+        a, b, pos = pos, pos + len(seg), pos + len(seg) + 1
+        inside = [k for k, _, _, s, *_ in found if a <= s < b]
+        if inside:
+            prefix = re.sub(r"\d+$", "", inside[-1]) if inside[-1].startswith("rule:") else None
+        elif prefix and (m := RULE_CONT_RE.fullmatch(seg.strip().rstrip("."))):
+            keys.add(prefix + _norm_key(m["num"]))
+        else:
+            prefix = None
+    return keys
 
 
 # --------------------------------------------------------------------------
