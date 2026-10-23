@@ -54,7 +54,8 @@ TOOLS = [
                      "properties": {"notice_id": {"type": "string"}}, "additionalProperties": False}},
     {"name": "matter.brief_check", "description": "Check a draft brief (Markdown/text inside MATTER_DIR): every record cite (Doc. 16 at 2), pleading cite (Compl. ¶ 59), authority, quotation and fact tag is tied to a hash-verified source in the store or flagged. Read-only; the store is never written. Returns the report; first line gives exit=0 (all tied), 1 (blocking), 2 (needs a human). Tied to a source is not legal correctness or good law.",
      "inputSchema": {"type": "object", "required": ["path"],
-                     "properties": {"path": {"type": "string"}, "pdftotext": {"type": "boolean"}}}},
+                     "properties": {"path": {"type": "string"}, "pdftotext": {"type": "boolean"},
+                                    "mode": {"enum": ["brief", "complaint"], "description": "complaint: allegations need no record cite"}}}},
     {"name": "matter.correspondence_list", "description": "Read the custodian notice ledger, including status, exhibit hashes, confirmation dates, and receipt evidence. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
 ]
@@ -99,7 +100,7 @@ def call(name: str, args: dict):
     if name == "matter.brief_check":
         from matterkit import briefcheck
         report = briefcheck.check(MATTER_DIR, _resolve_in_matter(args["path"]),
-                                  use_pdftotext=args.get("pdftotext", True))
+                                  use_pdftotext=args.get("pdftotext", True), mode=args.get("mode", "brief"))
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
     conn = store.connect(MATTER_DIR)
     if name == "matter.status":

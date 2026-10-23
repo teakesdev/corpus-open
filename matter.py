@@ -30,7 +30,7 @@ Usage:
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
-  matter.py brief check <dir> <draft.md> [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
+  matter.py brief check <dir> <draft.md> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
   matter.py docket suggest <dir>
 """
 import argparse
@@ -279,7 +279,7 @@ def cmd_brief(args):
     from matterkit import briefcheck
     try:
         report = briefcheck.check(args.case_dir, args.draft, use_pdftotext=not args.no_pdftotext,
-                                  docket_path=args.docket)
+                                  docket_path=args.docket, mode=args.mode)
     except (ValueError, FileNotFoundError) as e:
         sys.exit(f"brief check refused: {e}")
     text = report.render()
@@ -550,6 +550,8 @@ def main():
     p = sub.add_parser("brief"); p.add_argument("sub", choices=["check"]); p.add_argument("case_dir")
     p.add_argument("draft"); p.add_argument("--out"); p.add_argument("--no-pdftotext", action="store_true")
     p.add_argument("--docket", help="docket map JSON to use instead of <dir>/.matter/docket.json")
+    p.add_argument("--mode", choices=["brief", "complaint"], default="brief",
+                   help="complaint: allegations need no record cite; cites, authorities and sourced quotes still checked")
     p.set_defaults(fn=cmd_brief)
 
     p = sub.add_parser("docket"); p.add_argument("sub", choices=["suggest"]); p.add_argument("case_dir")

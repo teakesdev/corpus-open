@@ -169,6 +169,14 @@ means blocking findings, 2 means items only a person can check, 0 means every
 item is tied to a source in the store. That never means the brief is legally
 correct or that an authority is still good law.
 
+For a complaint, pass `--mode complaint`. Allegations need no record cite, so
+uncited sentences are not flagged, and quoted speech with no cite is listed for
+the pleader to confirm rather than flagged. Every record cite, ¶ cite,
+authority and sourced quotation is still checked, and a fact tag labeled
+HYPOTHESIS, INFERENCE or UNKNOWN is flagged. Numbered paragraphs ("1. On
+January 1, …") are always checked as text; only a short, unpunctuated
+"1. Background" line counts as a heading.
+
 ## Deadlines and subcases
 
 ```bash

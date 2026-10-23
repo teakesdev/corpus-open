@@ -324,10 +324,12 @@ def _heading(block: str) -> int | None:
     letters = [c for c in line if c.isalpha()]
     if letters and all(c.isupper() for c in letters) and len(words) <= 12 and not line.endswith(","):
         return 1
-    m = re.match(r"([IVXLC]+|[A-Z]|\d{1,2})\.\s+\S", line)
+    m = re.match(r"([IVXLC]+|[A-Z]|\d{1,3})\.\s+\S", line)
     if m and len(words) <= 25:
         tok = m.group(1)
-        return 1 if re.fullmatch(r"[IVXLC]+", tok) else 2 if tok.isalpha() else 3
+        if tok.isdigit():  # "1. Background" is a heading; "1. On January 1, officers …" is a numbered paragraph
+            return 3 if len(words) <= 8 and not re.search(r"[.?!:;,]\W*$", line) else None
+        return 1 if re.fullmatch(r"[IVXLC]+", tok) else 2
     return None
 
 
@@ -690,6 +692,8 @@ class Report:
         self.pdftotext_version = None
         self.docket_sha = None
         self.docket_path = ".matter/docket.json"
+        self.mode = "brief"
+        self.notes: list[tuple[int, str]] = []  # complaint mode: alleged quotations with no cited source
 
     def add(self, severity, code, line, cite, message):
         self.findings.append(Finding(severity, code, line, cite, message))
@@ -717,6 +721,10 @@ class Report:
                f"- Matter: `{os.path.abspath(self.matter_dir)}` · store opened read-only",
                f"- Docket map: `{self.docket_path}` " + (f"sha256 `{self.docket_sha}`" if self.docket_sha else "(none)"),
                f"- PDF text: {self.pdftotext_version or 'not used (PDF quotes without a text copy are unchecked)'}",
+               f"- Mode: {self.mode}" + (" (allegations need no record cite; uncited sentences and alleged "
+                                         "quotations are not flagged; every cite, authority and sourced quotation is "
+                                         "still checked)" if self.mode == "complaint" else
+                                         " (every factual sentence needs a cite)"),
                f"- Tool: {TOOL_ID} · checked {now_iso()}", ""]
         for sev, title in (("BLOCK", "Blocking"), ("UNCHECKED", "Needs a human (not checked)"), ("WARN", "Warnings")):
             items = [f for f in self.findings if f.severity == sev]
@@ -727,6 +735,11 @@ class Report:
                         for f in sorted(items, key=lambda f: f.line)]
             else:
                 out.append("None.")
+            out.append("")
+        if self.mode == "complaint":
+            out += [f"## Alleged quotations with no cited source ({len(self.notes)})", "",
+                    "The pleader vouches for these by signing. Confirm each against any recording or transcript.", ""]
+            out += [f"- line {ln}: “{short(q, 120)}”" for ln, q in self.notes] or ["None."]
             out.append("")
         out += ["## Proposition-to-source table", "",
                 "| Line | Proposition | Cited source | Quotes |", "|---:|---|---|---|"]
@@ -758,13 +771,23 @@ def _cite_cell(c: Cite) -> str:
     return f"{c.display}{pin}{paras}{via}{tgt}"
 
 
-def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_path: str | None = None) -> Report:
+MODES = ("brief", "complaint")
+
+
+def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_path: str | None = None,
+          mode: str = "brief") -> Report:
+    """mode "brief": every factual sentence needs a cite. mode "complaint": allegations need
+    none (uncited sentences and quotations are not flagged), but every cite, authority and
+    sourced quotation is still checked, and a HYPOTHESIS/INFERENCE/UNKNOWN fact tag is flagged."""
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r}; use one of: {', '.join(MODES)}")
     with open(draft_path, "rb") as f:
         raw = f.read()
     if draft_path.lower().endswith((".docx", ".pdf", ".doc")):
         raise ValueError("brief check reads Markdown or plain text; check the .md copy of the draft")
     text = raw.decode("utf-8", "replace")
     rep = Report(matter_dir, draft_path, hashlib.sha256(raw).hexdigest())
+    rep.mode = mode
     conn = store.connect_readonly(matter_dir)
     try:
         docket, rep.docket_sha = load_docket(matter_dir, docket_path)
@@ -980,7 +1003,7 @@ class _Checker:
         facts = self.facts(u, line)
         if cites or quotes or facts:
             self.rep.rows.append(Row(line, " ".join(u.text.split()), cites, quotes, facts))
-        elif u.fact_section and len(u.text.split()) >= 4:
+        elif self.rep.mode == "brief" and u.fact_section and len(u.text.split()) >= 4:
             self.rep.add("UNCHECKED", "uncited-fact", line, " ".join(u.text.split()),
                          "factual sentence with no record, pleading or authority cite")
 
@@ -1098,7 +1121,10 @@ class _Checker:
             before = [c for c in cites if c.start < m.start()]
             src = after[0] if after else (before[-1] if before else None)
             if src is None:
-                self.rep.add("UNCHECKED", "quote-uncited", line, qtext, "quotation with no cite in the sentence")
+                if self.rep.mode == "complaint":  # alleged speech, vouched for by the pleader
+                    self.rep.notes.append((line, qtext))
+                else:
+                    self.rep.add("UNCHECKED", "quote-uncited", line, qtext, "quotation with no cite in the sentence")
                 continue
             if src.kind == "authority":
                 q.status = "unchecked"
@@ -1160,11 +1186,15 @@ class _Checker:
             if r is None:
                 self.rep.add("BLOCK", "fact-unknown", line, aid, "no such assertion in the store")
                 continue
-            if r["status"] != "DOCUMENTED FACT":
+            complaint = self.rep.mode == "complaint"
+            if complaint and r["status"] in ("HYPOTHESIS", "INFERENCE", "UNKNOWN"):
+                self.rep.add("WARN", "fact-not-documented", line, aid,
+                             f"assertion is labeled {r['status']}; plead it on information and belief with its basis, or leave it out")
+            elif not complaint and r["status"] != "DOCUMENTED FACT":
                 self.rep.add("WARN", "fact-not-documented", line, aid,
                              f"assertion is labeled {r['status']}; do not present it as established fact")
             n = self.conn.execute("SELECT COUNT(*) FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()[0]
-            if n == 0:
+            if n == 0 and not (complaint and r["status"] == "ALLEGATION"):
                 self.rep.add("WARN", "fact-unsupported", line, aid, "assertion has no sources (UNSUPPORTED)")
         return list(u.tags)
 
