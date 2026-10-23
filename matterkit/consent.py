@@ -187,20 +187,28 @@ def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
     TTY access can fake it). kind=human is never written by stage_proposal.
     """
     from .citations import now_iso
+    # Separate read and write handles: text-mode "r+" needs a seekable file and
+    # /dev/tty is not one, so it raised io.UnsupportedOperation (an OSError) on
+    # every real terminal and reported it as a missing TTY.
     try:
-        tty = open("/dev/tty", "r+", encoding="utf-8")
+        tty_in = open("/dev/tty", "r", encoding="utf-8")
     except OSError as e:
         raise ConsentError(
             "activation requires a human controlling TTY (/dev/tty); "
-            "agent-staged proposals stay inert") from e
+            f"agent-staged proposals stay inert ({e})") from e
     try:
-        tty.write(
-            f"Activate CourtListener query_text for {matter_dir!r} as human "
-            f"issuer {issuer!r}? Type ACTIVATE then Enter.\n> ")
-        tty.flush()
-        line = (tty.readline() or "").strip()
+        with open("/dev/tty", "w", encoding="utf-8") as tty_out:
+            tty_out.write(
+                f"Activate CourtListener query_text for {matter_dir!r} as human "
+                f"issuer {issuer!r}? Type ACTIVATE then Enter.\n> ")
+            tty_out.flush()
+        line = (tty_in.readline() or "").strip()
+    except OSError as e:
+        raise ConsentError(
+            "activation requires a human controlling TTY (/dev/tty); "
+            f"agent-staged proposals stay inert ({e})") from e
     finally:
-        tty.close()
+        tty_in.close()
     if line != "ACTIVATE":
         raise ConsentError(f"activation aborted (got {line!r}, wanted 'ACTIVATE')")
     g = {
