@@ -125,6 +125,9 @@ RULE_RE = re.compile(
     r"(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 LOCAL_RE = re.compile(r"(?P<base>L\.\s?U\.\s?(?:Civ|Crim)\.\s?R\.\s*\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 RULE_TAIL_RE = re.compile(r"(?:,?\s+and\s+|\s*&\s*)(?P<cite>(?P<num>\d+(?:\.\d+)?)(?:\([A-Za-z0-9]{1,4}\))*)")
+LOCAL_WORDS_RE = re.compile(
+    r"(?<![\w.])Local(?:\s+(?:Uniform|Civil|Criminal|Bankruptcy|Admiralty|Court))*\s+Rules?\s+"
+    r"(?P<num>\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 BARE_RULE_RE = re.compile(
     r"(?<![\w.])Rules?\s+(?P<num>\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 RECORD_RE = re.compile(
@@ -217,7 +220,7 @@ def _case_name(prefix: str) -> str:
     return " ".join(name)
 
 
-def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P."):
+def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R."):
     """Yield (key, display, pin, start, end, kind, extra) for authority cites in s."""
     spans = []
 
@@ -252,10 +255,14 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P."):
                     yield ("rule:" + _norm_key(prefix + t["num"]), prefix + t["cite"], None,
                            t.start("cite"), t.end("cite"), kind, None)
                     pos = t.end()
+    for m in LOCAL_WORDS_RE.finditer(s):
+        if free(*m.span()):
+            spans.append(m.span())
+            yield ("rule:" + _norm_key(f"{local_rule} {m['num']}"), f"{m.group(0)} (read as {local_rule} {m['num']})",
+                   None, m.start(), m.end(), "rule", None)
     bare = bare_rule
     for m in BARE_RULE_RE.finditer(s):
-        pre = s[max(0, m.start() - 8): m.start()]
-        if free(*m.span()) and not re.search(r"Local\s+$", pre):
+        if free(*m.span()):
             spans.append(m.span())
             yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
                    "bare-rule", bare)
@@ -270,9 +277,9 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P."):
             yield (key, frag, None, a, b, "statute", sec)
 
 
-def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.") -> set:
+def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.") -> set:
     """Every key a stored or typed citation answers to."""
-    return {k for k, *_ in scan_authorities(citation, bare_rule)} | {"full:" + _norm_key(citation)}
+    return {k for k, *_ in scan_authorities(citation, bare_rule, local_rule)} | {"full:" + _norm_key(citation)}
 
 
 # --------------------------------------------------------------------------
@@ -311,14 +318,17 @@ def _heading(block: str) -> int | None:
 
 
 def _sentence_spans(text: str, start: int, end: int):
-    """Yield (s, e) sentence spans within text[start:end]."""
+    """Yield (s, e) sentence spans within text[start:end]. Never cuts inside a quotation."""
     s = start
+    quoted = [(start + q.start(), start + q.end()) for q in QUOTE_RE.finditer(text[start:end])]
     for m in re.finditer(r"[.?!][\"”’)\]*]*\s+(?=[\"“(\[*§A-Z0-9])", text[start:end]):
         cut = start + m.start()
+        if any(a < cut < b - 1 for a, b in quoted):
+            continue
         before = text[s:cut + 1]
         tok = re.search(r"(\S+)$", before)
         word = tok.group(1).lstrip("([*\"“").rstrip(".").lower() if tok else ""
-        if text[cut] == "." and (word in ABBREV or len(word) == 1 or re.fullmatch(r"(?:[a-z]\.)+[a-z]", word)
+        if text[cut] == "." and (word in ABBREV or (len(word) == 1 and word.isalpha()) or re.fullmatch(r"(?:[a-z]\.)+[a-z]", word)
                                  or re.fullmatch(r"[a-z]+\.[a-z.]+", word)):
             continue
         e = start + m.end()
@@ -344,8 +354,11 @@ class Docs:
         self.pdftotext = shutil.which("pdftotext") if use_pdftotext else None
         self.pdftotext_version = None
         if self.pdftotext:
-            p = subprocess.run([self.pdftotext, "-v"], capture_output=True, text=True)
-            self.pdftotext_version = ((p.stderr or p.stdout).splitlines() or ["pdftotext"])[0].strip()
+            try:
+                p = subprocess.run([self.pdftotext, "-v"], capture_output=True, text=True, timeout=10)
+                self.pdftotext_version = ((p.stderr or p.stdout).splitlines() or ["pdftotext"])[0].strip()
+            except (OSError, subprocess.SubprocessError):
+                self.pdftotext_version = "pdftotext (version unknown)"
         self._cache: dict = {}
         self.read: dict = {}  # rel_path -> sha256 actually verified
         self.paths: dict = {}  # rel_path -> absolute path of the verified bytes
@@ -452,19 +465,27 @@ def _split_pages(text: str):
     return [text], None
 
 
+_PAGES_NODE = re.compile(rb"<<(?:(?!<<|>>).)*?/Type\s*/Pages\b(?:(?!<<|>>).)*?>>", re.S)
+
+
 def _pdf_page_count(data: bytes) -> int | None:
-    pat = re.compile(rb"/Type\s*/Pages\b(?:(?!>>).)*?/Count\s+(\d+)|/Count\s+(\d+)(?:(?!>>).)*?/Type\s*/Pages\b", re.S)
-    found = [int(a or b) for a, b in pat.findall(data)]
-    for m in re.finditer(rb"stream\r?\n", data):
+    """Page count from the page tree: plain objects and /ObjStm object streams only, never
+    content streams (whose text could spell anything). The root node has no /Parent."""
+    nodes = _PAGES_NODE.findall(_strip_streams(data))
+    for m in re.finditer(rb"<<((?:(?!>>).)*?/Type\s*/ObjStm(?:(?!>>).)*?)>>\s*stream\r?\n", data, re.S):
         end = data.find(b"endstream", m.end())
         if end < 0:
             continue
         try:
-            raw = zlib.decompressobj().decompress(data[m.end():end])
+            nodes += _PAGES_NODE.findall(zlib.decompressobj().decompress(data[m.end():end]))
         except zlib.error:
             continue
-        found += [int(a or b) for a, b in pat.findall(raw)]
-    return max(found) if found else None
+    counts = [(b"/Parent" not in n, int(c.group(1))) for n in nodes if (c := re.search(rb"/Count\s+(\d+)", n))]
+    return max(counts)[1] if counts else None
+
+
+def _strip_streams(data: bytes) -> bytes:
+    return re.sub(rb"stream\r?\n.*?endstream", b"stream endstream", data, flags=re.S)
 
 
 _QUOTE_TRANS = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "–": "-", "—": "-", "‐": "-", "‑": "-"})
@@ -476,21 +497,44 @@ def _words(s: str) -> list[str]:
     return re.findall(r"[\w']+", s.lower())
 
 
-def _fragments(quote: str) -> list[list[str]]:
-    parts = re.split(r"\w*\[[^\]]*\]\w*|\.\s?\.\s?\.|…", quote)
-    return [w for w in (_words(p) for p in parts) if w]
+_ALTERED = re.compile(r"[\w']*(?:\[[^\]\s]{1,4}\][\w']*)+")
+
+
+def _fragments(quote: str) -> list[re.Pattern]:
+    """Word-sequence patterns for a quotation, in order.
+
+    Ellipses and stand-alone bracketed insertions ("[the officer]", "[sic]") split the
+    quotation. A word altered in place keeps its visible letters and frees only the
+    bracketed part: "[M]otion" must match a source word ending in "otion", "alleg[e]"
+    one starting with "alleg".
+    """
+    q = unicodedata.normalize("NFKC", quote).translate(_QUOTE_TRANS).lower()
+    q = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", q)
+    out = []
+    for part in re.split(r"\.\s?\.\s?\.|…|(?<![\w'])\[[^\]]*\](?![\w'])|\[[^\]]*\s[^\]]*\]", q):
+        toks = []
+        for t in re.finditer(r"[\w']*(?:\[[^\]]*\][\w']*)+|[\w']+", part):
+            w = t.group(0)
+            if "[" in w:
+                toks.append("".join(r"[\w']{0,6}" if seg.startswith("[") else re.escape(seg)
+                                    for seg in re.split(r"(\[[^\]]*\])", w) if seg))
+            else:
+                toks.append(re.escape(w))
+        if toks:
+            out.append(re.compile(" " + " ".join(toks) + " "))
+    return out
 
 
 def _find(frags, text) -> int | None:
-    """Word offset of the first fragment if all fragments occur in order, else None."""
+    """Offset of the first fragment if all fragments occur in order in text's words, else None."""
     hay = " " + " ".join(_words(text)) + " "
     pos, first = 0, None
     for fr in frags:
-        i = hay.find(" " + " ".join(fr) + " ", pos)
-        if i < 0:
+        m = fr.search(hay, pos)
+        if m is None:
             return None
-        first = i if first is None else first
-        pos = i + 1
+        first = m.start() if first is None else first
+        pos = m.end() - 1
     return first
 
 
@@ -508,12 +552,34 @@ def _paragraphs(text: str) -> dict:
 # Docket map
 # --------------------------------------------------------------------------
 def load_docket(matter_dir, path=None):
+    """(docket map, sha256) — refuses a map that is not the documented shape."""
     p = path or os.path.join(matter_dir, ".matter", "docket.json")
     if not os.path.isfile(p):
         return {}, None
     with open(p, "rb") as f:
         raw = f.read()
-    return json.loads(raw.decode("utf-8")), hashlib.sha256(raw).hexdigest()
+    try:
+        d = json.loads(raw.decode("utf-8"))
+    except ValueError as e:
+        raise ValueError(f"docket map {p} is not valid JSON: {e}") from None
+    if not isinstance(d, dict):
+        raise ValueError(f"docket map {p} must be a JSON object")
+    for name in ("entries", "pleadings", "text_copies"):
+        v = d.get(name, {})
+        if not isinstance(v, dict) or not all(isinstance(k, str) and isinstance(x, str) for k, x in v.items()):
+            raise ValueError(f"docket map {p}: '{name}' must map strings to strings")
+    bad = [k for k in d.get("entries", {}) if not re.fullmatch(r"\d{1,4}(?:-\d{1,3})?", k)]
+    if bad:
+        raise ValueError(f"docket map {p}: entry keys must be docket numbers like '16' or '23-1', not {bad}")
+    for name in ("bare_rule", "local_rule", "operative_pleading"):
+        if name in d and not isinstance(d[name], str):
+            raise ValueError(f"docket map {p}: '{name}' must be a string")
+    return d, hashlib.sha256(raw).hexdigest()
+
+
+def rule_prefixes(docket: dict) -> tuple[str, str]:
+    """(bare 'Rule N' prefix, spelled-out 'Local … Rule N' prefix) for this matter."""
+    return docket.get("bare_rule", "Fed. R. Civ. P."), docket.get("local_rule", "L.U.Civ.R.")
 
 
 def suggest_docket(conn) -> dict:
@@ -587,6 +653,8 @@ class Report:
     def summary(self) -> str:
         n = {s: sum(1 for f in self.findings if f.severity == s) for s in ("BLOCK", "UNCHECKED", "WARN")}
         state = {1: "BLOCKED", 2: "NEEDS A HUMAN", 0: "ALL TIED TO SOURCES"}[self.exit_code]
+        if self.exit_code == 0 and n["WARN"]:
+            state = "TIED TO SOURCES, WITH WARNINGS TO READ"
         return (f"{state}: {n['BLOCK']} blocking, {n['UNCHECKED']} unchecked, {n['WARN']} warnings; "
                 f"{len(self.rows)} cited or tagged sentences, {len(self.authorities)} authorities")
 
@@ -679,6 +747,7 @@ class _Checker:
         self.full_cases: dict = {}   # (vol, rep) -> case key seen in draft
         self.full_statutes: dict = {}  # section -> statute key seen in draft
         self.uses: dict = {}
+        self._dup_warned: set = set()
 
     def line(self, off: int) -> int:
         return bisect.bisect_right(self.nl, off - 1) + 1
@@ -724,16 +793,16 @@ class _Checker:
     def _authority_index(self) -> dict:
         idx: dict = {}
         for r in self.conn.execute("SELECT * FROM authorities"):
-            keys = authority_keys(r["citation"], self.docket.get("bare_rule", "Fed. R. Civ. P."))
+            keys = authority_keys(r["citation"], *rule_prefixes(self.docket))
             for k in keys:
                 idx.setdefault(k, []).append(r)
         return idx
 
     def _scan_authorities(self, s: str):
-        return scan_authorities(s, self.docket.get("bare_rule", "Fed. R. Civ. P."))
+        return scan_authorities(s, *rule_prefixes(self.docket))
 
     def _lookup(self, key):
-        rows = self.auth_index.get(key) or []
+        rows = list({r["id"]: r for r in self.auth_index.get(key) or []}.values())
         rank = {"source-checked": 0, "verified-official": 0, "resolved": 1, "research-pending": 1,
                 "stale-flagged": 2, "unverified": 3}
         return sorted(rows, key=lambda r: rank.get(r["status"], 4))[0] if rows else None
@@ -753,6 +822,11 @@ class _Checker:
             self.rep.add("BLOCK", "authority-not-logged", line, raw,
                          "not in the store's authorities; log it and record a source check (authority check)")
             return
+        dups = {r["id"]: r for r in self.auth_index.get(key) or []}
+        if len(dups) > 1 and key not in self._dup_warned:
+            self._dup_warned.add(key)
+            self.rep.add("WARN", "authority-duplicate", line, raw, "several store rows answer to this cite: " +
+                         ", ".join(f"{r['id']} [{r['status']}]" for r in dups.values()) + f"; judged by {row['id']}")
         st = row["status"]
         if st in STATUS_OK:
             try:
@@ -795,8 +869,11 @@ class _Checker:
         for m in RECORD_RE.finditer(u.text):
             claimed.append(m.span())
             nums = re.findall(r"\d{1,4}(?:-\d{1,3})?", m["nums"])
-            for n in nums:
-                c = Cite("record", m.group(0), f"Doc. {n}", None, m["pin"] if len(nums) == 1 else None,
+            if m["pin"] and len(nums) > 1:
+                self.rep.add("WARN", "pin-ambiguous", line, m.group(0),
+                             f"one pin for several entries; checked against Doc. {nums[-1]} only — cite each page separately")
+            for i, n in enumerate(nums):
+                c = Cite("record", m.group(0), f"Doc. {n}", None, m["pin"] if i == len(nums) - 1 else None,
                          m.start(), m.end())
                 c.target = self.resolve_record(n, line, m.group(0))
                 if c.target:
@@ -821,12 +898,13 @@ class _Checker:
             c = Cite("authority", raw, disp, key, pin, a, b)
             self.resolve_authority(c, kind, extra, line)
             cites.append(c)
+        cites.sort(key=lambda c: c.start)
         for m in ID_RE.finditer(u.text):
             if not free(*m.span()):
                 continue
             claimed.append(m.span())
             prev = [x for x in cites if x.start < m.start()]
-            base = prev[-1] if prev else self.last_target
+            base = max(prev, key=lambda c: c.start) if prev else self.last_target
             if base is None:
                 self.rep.add("BLOCK", "id-unbound", line, m.group(0), "Id. has no preceding citation")
                 continue
@@ -840,6 +918,8 @@ class _Checker:
                 self.check_pin(c, line)
             elif c.kind == "pleading" and c.target and paras:
                 self.check_paras(c, line)
+            elif c.kind == "pleading" and c.target and c.pin:
+                self.check_pin(c, line)
             elif c.kind == "authority":
                 self._judge_authority(c.target, c.display, self._lookup(c.target), line, c.pin, m.group(0))
             cites.append(c)
@@ -852,7 +932,7 @@ class _Checker:
         if cites or quotes or facts:
             self.rep.rows.append(Row(line, " ".join(u.text.split()), cites, quotes, facts))
         elif u.fact_section and len(u.text.split()) >= 4:
-            self.rep.add("WARN", "uncited-fact", line, " ".join(u.text.split()),
+            self.rep.add("UNCHECKED", "uncited-fact", line, " ".join(u.text.split()),
                          "factual sentence with no record, pleading or authority cite")
 
     # ---- resolution -------------------------------------------------------
@@ -874,8 +954,13 @@ class _Checker:
             self.rep.add("BLOCK", "record-not-in-store", line, raw,
                          f"no pleading configured for '{key}' in .matter/docket.json")
             return None
-        rel = (self.docket.get("entries") or {}).get(str(ref)) or self.suggested.get(str(ref)) \
-            if re.fullmatch(r"\d{1,4}(?:-\d{1,3})?", str(ref)) else str(ref)
+        rel = str(ref)
+        if re.fullmatch(r"\d{1,4}(?:-\d{1,3})?", rel):
+            rel = (self.docket.get("entries") or {}).get(str(ref))
+            if rel is None and self.suggested.get(str(ref)):
+                rel = self.suggested[str(ref)]
+                self.rep.add("UNCHECKED", "record-unconfirmed", line, raw,
+                             f"pleading '{key}' (Doc. {ref}) matched by filename only (`{rel}`); confirm it in .matter/docket.json")
         if rel is None:
             self.rep.add("BLOCK", "record-not-in-store", line, raw, f"pleading '{key}' (Doc. {ref}) is not in the store")
             return None
@@ -884,7 +969,9 @@ class _Checker:
     def integrity(self, rel, line, raw) -> bool:
         _, problem = self.docs.verify(rel)
         if problem:
-            msg = {"not-registered": "mapped in docket.json but not registered in the store",
+            msg = {"not-registered": "mapped in docket.json but not registered in the store" + (
+                       "; register the parent reference first (matter.py fact add <subcase> --source "
+                       f"{rel}@<locator> …)" if rel.startswith("parent:") else ""),
                    "missing": "registered but the file is missing", "changed": "bytes changed since registration"}
             code = "source-changed" if problem == "changed" else "record-not-in-store" \
                 if problem == "not-registered" else "source-missing"
@@ -938,6 +1025,8 @@ class _Checker:
                     cands = {k for k in self.auth_index if k.startswith("statute:") and sec and k.endswith(_norm_key(sec))}
                     if len(cands) == 1:
                         c.target = cands.pop()
+                    self.rep.add("WARN", "short-form-without-full-cite", line, c.raw,
+                                 "section short form with no full citation earlier in the draft")
             elif sec:
                 self.full_statutes.setdefault(sec, c.target)
         elif kind == "bare-rule":
@@ -960,7 +1049,7 @@ class _Checker:
             before = [c for c in cites if c.start < m.start()]
             src = after[0] if after else (before[-1] if before else None)
             if src is None:
-                self.rep.add("WARN", "quote-uncited", line, qtext, "quotation with no cite in the sentence")
+                self.rep.add("UNCHECKED", "quote-uncited", line, qtext, "quotation with no cite in the sentence")
                 continue
             if src.kind == "authority":
                 q.status = "unchecked"
@@ -990,9 +1079,20 @@ class _Checker:
                     self.rep.add("BLOCK", "quote-not-found", line, qtext, f"not found in {label}")
                 continue
             hit_pages = [i + 1 for i, p in enumerate(pages) if _find(frags, p) is not None]
-            if not hit_pages and _find(frags, "\n".join(pages)) is not None:
-                hit_pages = [0]  # spans a page break
             pins = _pin_ranges(src.pin)
+            if not hit_pages:  # a quotation spanning a page break counts on both pages
+                pairs = [i + 1 for i in range(len(pages) - 1) if _find(frags, pages[i] + "\n" + pages[i + 1]) is not None]
+                if pairs:
+                    p = pairs[0]
+                    if pins and not any(lo <= x <= hi for x in (p, p + 1) for lo, hi in pins):
+                        q.status, q.where = "wrong-page", f"pp. {p}–{p + 1}"
+                        self.rep.add("WARN", "quote-wrong-page", line, qtext,
+                                     f"found across pp. {p}–{p + 1}, not at the cited p. {src.pin}")
+                    else:
+                        q.status, q.where = "found", f"pp. {p}–{p + 1}"
+                    continue
+                if _find(frags, "\n".join(pages)) is not None:
+                    hit_pages = [0]  # spans more than one break
             if not hit_pages:
                 q.status = "not-found"
                 self.rep.add("BLOCK", "quote-not-found", line, qtext, f"not found in {label}")
@@ -1024,6 +1124,7 @@ class _Checker:
         entries = dict(self.suggested)
         entries.update(self.docket.get("entries") or {})
         known = {int(k) for k in entries if k.isdigit()}
+        known_keys = set(entries)
         cited = {int(n) for f in self.rep.findings if f.code == "record-not-in-store"
                  for n in re.findall(r"docket entry (\d+)", f.message)}
         top = max(known | cited | {0})
@@ -1036,7 +1137,7 @@ class _Checker:
             pages, _, _ = self.docs.text(rel)
             for i, p in enumerate(pages or []):
                 for m in RECORD_RE.finditer(p):
-                    for n in re.findall(r"\d{1,4}", m["nums"]):
-                        if int(n) not in known and n != key:
+                    for n in re.findall(r"\d{1,4}(?:-\d{1,3})?", m["nums"]):
+                        if n not in known_keys and n != key:
                             refs.setdefault(n, f"Doc. {n} is cited in Doc. {key} p. {i + 1} but is not in the store")
-        self.rep.docket_refs = [refs[k] for k in sorted(refs, key=int)]
+        self.rep.docket_refs = [refs[k] for k in sorted(refs, key=_entry_sort)]

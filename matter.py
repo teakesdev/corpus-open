@@ -220,29 +220,33 @@ def cmd_authority(args):
     if len(rest) != 2:
         sys.exit(f"usage: matter.py authority {sub} <dir> " + ("<ledger.md>" if sub == "import" else '"<citation>"'))
     case_dir, target = rest
-    conn = store.connect_readonly(case_dir) if sub == "import" and not args.apply else store.connect(case_dir)
-    from matterkit import authority
-    if sub == "add":
-        from matterkit.store import new_id
-        conn.execute("INSERT INTO authorities (id,citation,status,checked_via,note) VALUES (?,?,?,?,?)",
-                     (new_id("auth_"), target, "unverified", args.via, None))
-        conn.commit()
-        print(f"authority logged (unverified): {target} — record what you opened with: matter.py authority check")
-        return
     try:
         by = store.attribution(args.author, args.directed_by)
     except ValueError as e:
         sys.exit(f"invalid attribution: {e}")
+    from matterkit import authority, briefcheck
+    try:
+        rules = briefcheck.rule_prefixes(briefcheck.load_docket(case_dir)[0])
+    except ValueError as e:
+        sys.exit(f"refused: {e}")
+    conn = store.connect_readonly(case_dir) if sub == "import" and not args.apply else store.connect(case_dir)
+    if sub == "add":
+        from matterkit.store import new_id
+        conn.execute("INSERT INTO authorities (id,citation,status,checked_via,note) VALUES (?,?,?,?,?)",
+                     (new_id("auth_"), target, "unverified", args.via, f"added by {by}"))
+        conn.commit()
+        print(f"authority logged (unverified): {target} by {by} — record what you opened with: matter.py authority check")
+        return
     if sub == "check":
         try:
             aid, status = authority.check(conn, case_dir, target, source_url=args.source_url, artifact=args.artifact,
                                           pins=args.pin, quote=args.quote, note=args.note, stale=args.stale,
-                                          by=by, use_pdftotext=not args.no_pdftotext)
+                                          by=by, use_pdftotext=not args.no_pdftotext, rules=rules)
         except (ValueError, citations_error()) as e:
             sys.exit(f"refused: {e}")
         print(f"authority {aid} → [{status}] pins={args.pin or []} by {by}")
         return
-    planned, skipped = authority.import_ledger(conn, case_dir, target, apply=args.apply, by=by)
+    planned, skipped = authority.import_ledger(conn, case_dir, target, apply=args.apply, by=by, rules=rules)
     print(("APPLIED" if args.apply else "DRY RUN — nothing written; re-run with --apply") +
           f": {len(planned)} to add, {len(skipped)} skipped")
     for r in planned:

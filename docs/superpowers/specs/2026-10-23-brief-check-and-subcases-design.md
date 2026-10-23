@@ -62,3 +62,18 @@ Out of scope: DOCX or PDF text extraction (other branches; PDFs report "not chec
 9. Case run (separate, after approval): back up the store, fix the stale deadlines with sources, create `Subcases/Related-Claim`, move that track's open tasks into its own todo, run `brief check` on the current drafts.
 
 Gate: `python3 -m unittest discover -s tests -v` (ty to confirm; the repo has no AGENTS.md).
+
+## 7. Revision 2 (2026-10-23): SWE-2's code review
+
+The founder assigned `550292c..3d88bb6` to SWE-2 (Devin, `swe-2-max`, read-only). The verdict was **REQUEST CHANGES**, recorded in [the review](../reviews/2026-10-23-brief-check-code/SWE2-REVIEW.md). Every finding that changes behavior was reproduced with synthetic probes before fixing, and the founder approved fixing all of them.
+
+| Finding | Amendment here |
+| --- | --- |
+| **P2** uncited facts and quotes were warnings, so exit 0 could claim "all tied" | §2.A5: an uncited factual sentence and a quotation with no cite are `UNCHECKED` (exit 2). An exit-0 report that has warnings says "with warnings to read". |
+| **D6** pdftotext deviation | §5: confirmed as built. When `pdftotext` is on PATH, PDF text is read transiently and never stored; `--no-pdftotext` turns it off. Without it, a PDF with no text copy stays "not checked". |
+| Docket-map shape (doc nit) | §2.A1: the map is `{"entries": {"16": …, "23-1": …}, "pleadings": {…}, "text_copies": {…}, "bare_rule": …, "local_rule": …}`. A map of any other shape is refused. |
+| Local rules (P3) | §2.A3: "Local [Uniform] Civil Rule N" is read under `local_rule` (default `L.U.Civ.R.`), never as a bare federal rule. |
+
+Found while fixing: a sentence split inside a multi-sentence quotation meant that quotation was never checked. The segmenter no longer splits inside quotation marks.
+
+Revision 2 has not been re-reviewed.

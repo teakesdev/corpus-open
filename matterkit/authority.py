@@ -37,13 +37,17 @@ class AuthorityError(ValueError):
     pass
 
 
-def find(conn, ref: str, bare_rule: str = "Fed. R. Civ. P."):
-    """The authorities row for an id or a citation (matched by reporter/statute/rule key)."""
+DEFAULT_RULES = ("Fed. R. Civ. P.", "L.U.Civ.R.")  # briefcheck.rule_prefixes of an empty docket map
+
+
+def find(conn, ref: str, rules: tuple = DEFAULT_RULES):
+    """The authorities row for an id or a citation (matched by reporter/statute/rule key).
+    `rules` is briefcheck.rule_prefixes(docket) so keys agree with `brief check`."""
     if re.fullmatch(r"auth_[0-9a-f]+", ref):
         return conn.execute("SELECT * FROM authorities WHERE id=?", (ref,)).fetchone()
-    keys = briefcheck.authority_keys(ref, bare_rule)
+    keys = briefcheck.authority_keys(ref, *rules)
     hits = [r for r in conn.execute("SELECT * FROM authorities ORDER BY id")
-            if briefcheck.authority_keys(r["citation"], bare_rule) & keys]
+            if briefcheck.authority_keys(r["citation"], *rules) & keys]
     if len(hits) > 1:
         raise AuthorityError("citation matches several authorities: " +
                              ", ".join(f"{r['id']} ({r['citation']})" for r in hits) + "; pass the id")
@@ -81,7 +85,8 @@ def _artifact_text(path: str, use_pdftotext: bool) -> str | None:
 
 def check(conn, matter_dir: str, ref: str, *, source_url: str | None = None, artifact: str | None = None,
           pins: list | None = None, quote: str | None = None, note: str | None = None,
-          stale: str | None = None, by: str = "human", use_pdftotext: bool = True) -> tuple[str, str]:
+          stale: str | None = None, by: str = "human", use_pdftotext: bool = True,
+          rules: tuple = DEFAULT_RULES) -> tuple[str, str]:
     """Record one source check. Returns (authority_id, new_status). Writes nothing on refusal."""
     if not (source_url or artifact):
         raise AuthorityError("a source check needs --source-url and/or --artifact (what was opened)")
@@ -111,7 +116,7 @@ def check(conn, matter_dir: str, ref: str, *, source_url: str | None = None, art
         record["quote"] = quote
     if stale:
         record["stale"] = stale
-    row = find(conn, ref)
+    row = find(conn, ref, rules)
     try:
         if row is None:
             aid = store.new_id("auth_")
@@ -124,9 +129,12 @@ def check(conn, matter_dir: str, ref: str, *, source_url: str | None = None, art
             if p not in ev["pins"]:
                 ev["pins"].append(p)
         status = "stale-flagged" if stale else "source-checked"
+        # transition_authority validates the stage, then commits; that one commit also lands the
+        # INSERT above. A refusal raises before its UPDATE, and the rollback below drops the INSERT.
         citations.transition_authority(conn, row["id"], status,
                                        checked_via=source_url or f"artifact sha256:{record['artifact_sha256']}",
                                        check_evidence=json.dumps(ev, ensure_ascii=False))
+        conn.commit()  # explicit, so the contract does not rest on transition_authority alone
     except Exception:
         conn.rollback()
         raise
@@ -207,7 +215,8 @@ def parse_ledger(text: str) -> list[dict]:
     return out
 
 
-def import_ledger(conn, matter_dir: str, ledger_path: str, *, apply: bool = False, by: str = "human"):
+def import_ledger(conn, matter_dir: str, ledger_path: str, *, apply: bool = False, by: str = "human",
+                  rules: tuple = DEFAULT_RULES):
     """Returns (planned, skipped) lists of dicts; writes only when apply=True."""
     with open(ledger_path, "rb") as f:
         raw = f.read()
@@ -223,11 +232,11 @@ def import_ledger(conn, matter_dir: str, ledger_path: str, *, apply: bool = Fals
             skipped.append({**row, "reason": f"status '{row['ledger_status']}' is not an authority status"})
             continue
         try:
-            existing = find(conn, row["citation"])
+            existing = find(conn, row["citation"], rules)
         except AuthorityError as e:
             skipped.append({**row, "reason": str(e)})
             continue
-        keys = briefcheck.authority_keys(row["citation"])
+        keys = briefcheck.authority_keys(row["citation"], *rules)
         if existing is not None or keys & seen:
             skipped.append({**row, "reason": f"already in store as {existing['id']} [{existing['status']}]"
                             if existing else "duplicate within the ledger"})

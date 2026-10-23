@@ -51,6 +51,8 @@ def init(parent_dir, slug, title, by, folders):
     subcases = os.path.join(parent_dir, "Subcases")
     if os.path.islink(subcases):
         raise SubcaseError(f"{subcases} is a symlink — refusing to create a matter through it")
+    if os.path.lexists(subcases) and not os.path.isdir(subcases):
+        raise SubcaseError(f"{subcases} exists and is not a folder")
     path = os.path.join(subcases, slug)
     if os.path.lexists(path):
         raise SubcaseError(f"{path} already exists")
