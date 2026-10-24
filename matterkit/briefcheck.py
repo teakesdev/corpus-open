@@ -288,7 +288,9 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
     # (same length: offsets hold) and yield every listed section as the single cite "<code> § <section>".
     lists = list(SECTION_LIST_RE.finditer(s))
     single = SECTION_LIST_RE.sub(lambda m: "§ " + m.group(0)[2:], s)
-    for row in citations.extract_citations(single):
+    rows = citations.extract_citations(single)
+    heads = {row["char_start"] for row in rows}
+    for row in rows:
         frag = row["raw_fragment"]
         if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
             continue
@@ -303,12 +305,15 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
         code, pos = s[a:lst.start()], lst.start("secs")
         for i, part in enumerate(re.split(f"({_SEC_SEP})", lst["secs"])):
             start, pos, part = pos, pos + len(part), part.rstrip(".")  # a final "." ends the sentence
-            lo, hi = a if i == 0 else start, start + len(part)
-            if i % 2 or not free(lo, hi):
+            if i % 2:
                 continue
-            spans.append((lo, hi))
-            key, sec = _statute_base(f"{code}§ {part}")
-            yield (key, f"{code}§ {part}", None, lo, hi, "statute", sec)
+            if i and start in heads:  # "…, 42 U.S.C. § 1983": another cite starts here, so the list has ended
+                break
+            lo, hi = a if i == 0 else start, start + len(part)
+            if free(lo, hi):
+                spans.append((lo, hi))
+                key, sec = _statute_base(f"{code}§ {part}")
+                yield (key, f"{code}§ {part}", None, lo, hi, "statute", sec)
 
 
 def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.") -> set:

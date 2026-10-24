@@ -67,6 +67,19 @@ class TestDraftStatuteListScan(unittest.TestCase):
         self.assertEqual([k for k, _ in statute_cites("28 U.S.C. § 1331; 42 U.S.C. §§ 1983, 1988.")],
                          ["statute:28usc1331", "statute:42usc1983", "statute:42usc1988"])
 
+    def test_list_stops_before_a_following_cite(self):
+        text = "See Miss. Code Ann. §§ 21-21-3, 21-3-15, 42 U.S.C. § 1983."
+        self.assertEqual(statute_cites(text), [("statute:misscodeann21-21-3", "Miss. Code Ann. §§ 21-21-3"),
+                                               ("statute:misscodeann21-3-15", "21-3-15"),
+                                               ("statute:42usc1983", "42 U.S.C. § 1983")])
+        self.assertEqual([k for k, _ in statute_cites("42 U.S.C. §§ 1983 and 1988, 28 U.S.C. § 1331.")],
+                         ["statute:42usc1983", "statute:42usc1988", "statute:28usc1331"])
+
+    def test_stored_list_followed_by_a_cite_keys_that_cite(self):
+        self.assertEqual({k for k in briefcheck.authority_keys("42 U.S.C. §§ 1983 and 1988, 28 U.S.C. § 1331")
+                          if k.startswith("statute")},
+                         {"statute:42usc1983", "statute:42usc1988", "statute:28usc1331"})
+
     def test_single_section_cites_are_unchanged(self):
         self.assertEqual(statute_cites("Miss. Code Ann. § 21-3-15."),
                          [("statute:misscodeann21-3-15", "Miss. Code Ann. § 21-3-15")])
@@ -101,6 +114,16 @@ class TestDraftStatuteListsInBriefCheck(Base):
         used = {a.key: a.store_citation for a in r.authorities}
         self.assertEqual(used, {"statute:misscodeann21-21-3": "Miss. Code Ann. § 21-21-3",
                                 "statute:misscodeann21-3-15": None})
+
+    def test_cite_after_a_list_is_checked_on_its_own(self):
+        self.only(MISS_LIST)
+        self.m.authority("42 U.S.C. § 1983", "source-checked", via="https://example.org/1983", evidence="opened")
+        self.m.conn.commit()
+        r = self.m.check(f"The officer takes the bond. {MISS_LIST}, 42 U.S.C. § 1983.")
+        self.assertEqual(codes(r, "BLOCK"), [])
+        self.assertNotIn("short-form-without-full-cite", codes(r, "WARN"))
+        self.assertEqual(sorted(a.key for a in r.authorities),
+                         ["statute:42usc1983", "statute:misscodeann21-21-3", "statute:misscodeann21-3-15"])
 
     def test_later_short_form_binds_to_the_listed_section(self):
         self.only(MISS_LIST)
