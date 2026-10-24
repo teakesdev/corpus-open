@@ -394,6 +394,26 @@ def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule
     return keys
 
 
+# the section of a cite written without "§": "42 U.S.C. 1983", "12 CFR 1026.1"
+_CODE_TAIL_SEC = re.compile(r"(?:U\.?S\.?C\.?|C\.?F\.?R\.?|Code|Stat\.|Laws?)\s+(\d[\dA-Za-z.\-]*?)\.?$")
+
+
+def statute_sections(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.") -> dict:
+    """Each full `statute:` key `authority_keys` gives a citation -> the section numbers
+    (lowercased) the key was made from; a key with no section maps to an empty set. A short form
+    with no full cite earlier in the draft binds only by these, so "§ 983" is not "§ 1983" and
+    "§ 8" is not "8 U.S.C. § 1108". Whatever adds statute keys to `authority_keys` must add
+    their sections here (tests/test_briefcheck_short_section.py checks that the two agree)."""
+    out: dict = {}
+    for key, frag, _, _, _, kind, sec in scan_authorities(citation, bare_rule, local_rule):
+        if kind != "statute" or not key.startswith("statute:"):
+            continue
+        if not sec and (m := _CODE_TAIL_SEC.search(re.sub(r"(\s*\([^)]{1,24}\))+\s*$", "", frag.strip()))):
+            sec = m.group(1)
+        out.setdefault(key, set()).update({sec.lower()} if sec else set())
+    return out
+
+
 # --------------------------------------------------------------------------
 # Draft segmentation
 # --------------------------------------------------------------------------
@@ -947,6 +967,7 @@ class _Checker:
         self.nl = [i for i, c in enumerate(text) if c == "\n"]
         self.suggested = suggest_docket(conn)["entries"]
         self.auth_index = self._authority_index()
+        self.statute_secs = self._statute_sections()
         self.last_target: Cite | None = None
         self.last_unit_targets: set = set()
         self.full_cases: dict = {}   # (vol, rep) -> case key seen in draft
@@ -1003,6 +1024,14 @@ class _Checker:
             for k in keys:
                 idx.setdefault(k, []).append(r)
         return idx
+
+    def _statute_sections(self) -> dict:
+        """Logged full statute key -> its section numbers, across every logged citation."""
+        secs: dict = {}
+        for r in self.conn.execute("SELECT citation FROM authorities"):
+            for k, v in statute_sections(r["citation"], *rule_prefixes(self.docket)).items():
+                secs.setdefault(k, set()).update(v)
+        return secs
 
     def _scan_authorities(self, s: str):
         return scan_authorities(s, *rule_prefixes(self.docket))
@@ -1229,7 +1258,7 @@ class _Checker:
                 if full:
                     c.target = full
                 else:
-                    cands = {k for k in self.auth_index if k.startswith("statute:") and sec and k.endswith(_norm_key(sec))}
+                    cands = {k for k, secs in self.statute_secs.items() if sec and sec.lower() in secs}
                     if len(cands) == 1:
                         c.target = cands.pop()
                     self.rep.add("WARN", "short-form-without-full-cite", line, c.raw,
