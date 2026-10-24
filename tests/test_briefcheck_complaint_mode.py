@@ -109,3 +109,62 @@ class TestNumberedParagraphsAreNotHeadings(Base):
     def test_roman_numeral_heading_with_period_is_still_a_heading(self):
         r = self.m.check("I. The Court may set a limited deadline consistent with Rule 15(a)(2).\n\nText. Doc. 16.")
         self.assertEqual([f.code for f in r.findings if f.code == "authority-not-logged"], [])
+
+
+class TestSwe2ComplaintModeReview(Base):
+    """SWE-2 review of complaint mode (2026-10-24): every finding pinned."""
+
+    def test_p2_short_numbered_lines_with_checkable_content_are_text(self):
+        for mode in ("brief", "complaint"):
+            for draft in ("12. See Doc. 99 at 3", "105. See Doc. 99 at 3", "5. Statement (Doc. 99)", "1. Doc. 99."):
+                r = self.m.check(draft, mode=mode)
+                self.assertIn("record-not-in-store", codes(r, "BLOCK"), (mode, draft))
+
+    def test_p2_quote_ended_numbered_line_reaches_the_quote_checks(self):
+        r = self.m.check('3. The captain said "stand down"', mode="complaint")
+        self.assertEqual([q for _, q in r.notes], ["stand down"])
+        r = self.m.check('3. The captain said "stand down"')
+        self.assertIn("quote-uncited", codes(r, "UNCHECKED"))
+
+    def test_p2_punctuated_title_case_numbered_heading_starts_fact_section_in_brief_mode(self):
+        for heading in ("1. Statement of Facts.", "1. Factual Allegations:", "2. Background"):
+            r = self.m.check(f"{heading}\n\nThe arrest happened at home on a holiday.\n")
+            self.assertEqual([f.cite for f in r.findings if f.code == "uncited-fact"],
+                             ["The arrest happened at home on a holiday."], heading)
+
+    def test_sentence_numbered_paragraph_is_still_text(self):
+        r = self.m.check("FACTS\n\n1. On January 1, officers arrested Plaintiff at home.\n")
+        self.assertIn("uncited-fact", codes(r, "UNCHECKED"))
+
+    def test_p3_letter_numbered_allegation_with_cite_is_checked(self):
+        for mode in ("brief", "complaint"):
+            r = self.m.check("A. Plaintiff lives in Exampleton. Doc. 99.", mode=mode)
+            self.assertIn("record-not-in-store", codes(r, "BLOCK"), mode)
+
+    def test_p3_roman_heading_with_rule_stays_a_heading(self):
+        # Rule 99 is not logged: if the heading were read as text it would block
+        r = self.m.check("I. Leave is proper under Rule 99(z).\n\nText. Doc. 16.")
+        self.assertNotIn("authority-not-logged", codes(r, "BLOCK"))
+
+    def test_p3_summary_mentions_listed_quotations(self):
+        r = self.m.check('3. The captain said "stand down" to him.', mode="complaint")
+        self.assertIn("1 alleged quotation listed", r.summary())
+
+    def test_p3_mcp_mode_schema_is_typed_and_invalid_mode_is_an_error(self):
+        mcp = open(os.path.join(KIT, "matter-mcp.py"), encoding="utf-8").read()
+        self.assertIn('"mode": {"type": "string", "enum": ["brief", "complaint"]', mcp)
+        draft = os.path.join(self.m.dir, "Filings", "fac.md")
+        with open(draft, "w") as f:
+            f.write("1. Text.")
+        self.m.conn.close()
+        req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "matter.brief_check", "arguments": {"path": "Filings/fac.md", "mode": "motion"}}}
+        p = subprocess.run([sys.executable, os.path.join(KIT, "matter-mcp.py")], input=json.dumps(req) + "\n",
+                           capture_output=True, text=True, env=dict(os.environ, MATTER_DIR=self.m.dir), check=True)
+        res = json.loads(p.stdout.strip().splitlines()[-1])["result"]
+        self.assertTrue(res.get("isError"))
+        self.m.conn = store.connect(self.m.dir)
+
+    def test_p3_readme_states_the_actual_rule(self):
+        readme = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
+        self.assertIn("never a heading when it contains a cite or a quotation", readme)

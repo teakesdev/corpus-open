@@ -173,9 +173,12 @@ For a complaint, pass `--mode complaint`. Allegations need no record cite, so
 uncited sentences are not flagged, and quoted speech with no cite is listed for
 the pleader to confirm rather than flagged. Every record cite, ¶ cite,
 authority and sourced quotation is still checked, and a fact tag labeled
-HYPOTHESIS, INFERENCE or UNKNOWN is flagged. Numbered paragraphs ("1. On
-January 1, …") are always checked as text; only a short, unpunctuated
-"1. Background" line counts as a heading.
+HYPOTHESIS, INFERENCE or UNKNOWN is flagged. In either mode, a numbered or
+lettered line is never a heading when it contains a cite or a quotation, so
+"12. See Doc. 16 at 3" is checked. Otherwise a numbered line counts as a
+heading only when it is short and either unpunctuated ("1. Background") or a
+title ending in a period or colon ("1. Statement of Facts."); "1. On January 1,
+officers …" is a paragraph.
 
 ## Deadlines and subcases
 

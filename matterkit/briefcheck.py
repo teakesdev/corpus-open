@@ -361,8 +361,31 @@ def _blank(text: str, pattern: re.Pattern) -> str:
     return pattern.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
-def _heading(block: str) -> int | None:
-    """Heading level of a one-line block, or None."""
+_SMALL_WORDS = {"of", "the", "and", "a", "an", "in", "on", "to", "for", "by", "with", "or", "at", "from",
+                "v.", "vs.", "as", "under", "into"}
+
+
+def _title_case(words: list[str]) -> bool:
+    content = [w.strip("()\"'“”‘’.,:;") for w in words]
+    content = [w for w in content if w and w.lower() not in _SMALL_WORDS]
+    return bool(content) and all(w[0].isupper() or w[0].isdigit() or w[0] in "§¶" for w in content)
+
+
+def _carries_cite(line: str, quotes: bool = True) -> bool:
+    """True if the line holds something brief check verifies, so it must be read as text."""
+    pats = [RECORD_RE, PLEADING_RE, CASE_RE, SHORT_RE, WL_RE] + ([QUOTE_RE, ID_RE] if quotes else [])
+    return any(p.search(line) for p in pats) or (quotes and "§" in line)
+
+
+def _heading(block: str, mode: str = "brief") -> int | None:
+    """Heading level of a one-line block, or None.
+
+    A numbered line (and, in complaint mode, a lettered one) is a heading only when it is
+    short, carries no cite or quotation, and is either unpunctuated ("1. Background") or a
+    title ending in a period or colon ("1. Statement of Facts."). "1. On January 1,
+    officers …" and "12. See Doc. 16 at 3" are text. A roman-numeral line (and, in brief
+    mode, a lettered one) stays a heading unless it carries a record, pleading or case cite.
+    """
     line = block.strip()
     if "\n" in line or not line:
         return None
@@ -376,9 +399,17 @@ def _heading(block: str) -> int | None:
     m = re.match(r"([IVXLC]+|[A-Z]|\d{1,3})\.\s+\S", line)
     if m and len(words) <= 25:
         tok = m.group(1)
-        if tok.isdigit():  # "1. Background" is a heading; "1. On January 1, officers …" is a numbered paragraph
-            return 3 if len(words) <= 8 and not re.search(r"[.?!:;,]\W*$", line) else None
-        return 1 if re.fullmatch(r"[IVXLC]+", tok) else 2
+        roman = bool(re.fullmatch(r"[IVXLC]+", tok))
+        if tok.isdigit() or (mode == "complaint" and not roman):
+            if len(words) > 12 or _carries_cite(line):
+                return None
+            end = re.search(r"([.?!:;,])\W*$", line)
+            if end and not (end.group(1) in ".:" and "," not in line and _title_case(words[1:])):
+                return None
+            return 3 if tok.isdigit() else 2
+        if _carries_cite(line, quotes=False):
+            return None
+        return 1 if roman else 2
     return None
 
 
@@ -757,8 +788,12 @@ class Report:
         state = {1: "BLOCKED", 2: "NEEDS A HUMAN", 0: "ALL TIED TO SOURCES"}[self.exit_code]
         if self.exit_code == 0 and n["WARN"]:
             state = "TIED TO SOURCES, WITH WARNINGS TO READ"
+        listed = ""
+        if self.mode == "complaint" and self.notes:
+            k = len(self.notes)
+            listed = f"; {k} alleged quotation{'s' if k != 1 else ''} listed for the pleader to confirm"
         return (f"{state}: {n['BLOCK']} blocking, {n['UNCHECKED']} unchecked, {n['WARN']} warnings; "
-                f"{len(self.rows)} cited or tagged sentences, {len(self.authorities)} authorities")
+                f"{len(self.rows)} cited or tagged sentences, {len(self.authorities)} authorities{listed}")
 
     def render(self) -> str:
         from .citations import now_iso
@@ -880,7 +915,7 @@ class _Checker:
             block = bm.group(0)
             if not block.strip():
                 continue
-            lvl = _heading(block)
+            lvl = _heading(block, self.rep.mode)
             if lvl is not None:
                 if FACT_HEADING.search(block):
                     fact_level = lvl
