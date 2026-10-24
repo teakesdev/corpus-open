@@ -133,6 +133,7 @@ RULE_CONT_RE = re.compile(r"(?P<num>\d+(?:\.\d+)?)(?:\s*(?:\([A-Za-z0-9]{1,4}\)|
 _SEC = r"\d[\dA-Za-z.\-]*(?:\s*\([^)]{1,24}\))*"
 _SEC_SEP = r"\s*[,&]\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+"
 SECTION_LIST_RE = re.compile(rf"§§\s*(?P<secs>{_SEC}(?:(?:{_SEC_SEP}){_SEC})*)")
+LISTED_SEC_RE = re.compile(r"\d[\dA-Za-z.\-]*(?:\s*\([A-Za-z0-9]{1,4}\))*")  # a listed section: number + "(2)(ii)"
 LOCAL_WORDS_RE = re.compile(
     r"(?<![\w.])Local(?:\s+(?:Uniform|Civil|Criminal|Bankruptcy|Admiralty|Court))*\s+Rules?\s+"
     r"(?P<num>\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
@@ -289,7 +290,7 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
     lists = list(SECTION_LIST_RE.finditer(s))
     single = SECTION_LIST_RE.sub(lambda m: "§ " + m.group(0)[2:], s)
     rows = citations.extract_citations(single)
-    heads = {row["char_start"] for row in rows}
+    heads = {row["char_start"] for row in rows if re.search(r"[A-Za-z§]", row["raw_fragment"])}  # not "1.01 - 1.09"
     for row in rows:
         frag = row["raw_fragment"]
         if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
@@ -304,9 +305,12 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
             continue
         code, pos = s[a:lst.start()], lst.start("secs")
         for i, part in enumerate(re.split(f"({_SEC_SEP})", lst["secs"])):
-            start, pos, part = pos, pos + len(part), part.rstrip(".")  # a final "." ends the sentence
+            start, pos = pos, pos + len(part)
             if i % 2:
                 continue
+            # keep "21-3-15(2)(ii)", not "21-3-15 (42 U.S.C. § 1983)": the parenthetical is its own cite, and a
+            # final "." ends the sentence
+            part = LISTED_SEC_RE.match(part).group(0).rstrip(".")
             if i and start in heads:  # "…, 42 U.S.C. § 1983": another cite starts here, so the list has ended
                 break
             lo, hi = a if i == 0 else start, start + len(part)

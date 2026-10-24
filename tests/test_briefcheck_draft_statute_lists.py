@@ -140,6 +140,103 @@ class TestDraftStatuteListsInBriefCheck(Base):
         use = {a.key: a for a in r.authorities}["statute:misscodeann21-3-15"]
         self.assertEqual(len(use.lines), 2)
 
+    def test_unlogged_cite_in_a_parenthetical_blocks(self):
+        self.only(MISS_LIST)
+        r = self.m.check(f"The bond is set. {MISS_LIST} (42 U.S.C. § 1983).")
+        self.assertEqual([(f.code, f.cite) for f in r.findings if f.severity == "BLOCK"],
+                         [("authority-not-logged", "42 U.S.C. § 1983")])
+
+    def test_section_before_a_parenthetical_case_is_checked(self):
+        self.only("Miss. Code Ann. § 21-21-3")
+        self.m.authority("Bell Atl. Corp. v. Twombly, 550 U.S. 544 (2007)", "source-checked",
+                         via="https://example.org/twombly", evidence="opened")
+        self.m.conn.commit()
+        r = self.m.check(f"The bond is set. {MISS_LIST} (550 U.S. 544).")
+        self.assertEqual([(f.code, f.cite) for f in r.findings if f.severity == "BLOCK"],
+                         [("authority-not-logged", "Miss. Code Ann. § 21-3-15")])
+
+    def test_stored_list_with_a_range_covers_its_second_section(self):
+        self.only("Fla. Stat. §§ 605.0101, 605.0102 - 605.1108")
+        r = self.m.check("The company is formed. Fla. Stat. § 605.0102.")
+        self.assertEqual(codes(r, "BLOCK"), [])
+
+    def test_trailing_bare_number_blocks_rather_than_passes(self):
+        self.only(MISS_LIST)
+        r = self.m.check(f"The bond is set. {MISS_LIST} and 5 others.")
+        self.assertEqual([(f.code, f.cite) for f in r.findings if f.severity == "BLOCK"],
+                         [("authority-not-logged", "Miss. Code Ann. § 5")])
+
+    def test_list_row_and_single_row_for_one_section_warn_duplicate(self):
+        self.only(MISS_LIST)
+        self.m.authority("Miss. Code Ann. § 21-3-15", "source-checked", via="https://example.org/code", evidence="opened")
+        self.m.conn.commit()
+        r = self.m.check(f"The bond is set. {MISS_LIST}.")
+        self.assertEqual(codes(r, "BLOCK"), [])
+        self.assertEqual([(f.code, f.cite) for f in r.findings if f.severity == "WARN"],
+                         [("authority-duplicate", "Miss. Code Ann. § 21-3-15")])
+
+
+class TestListMemberBoundaries(unittest.TestCase):
+    """A listed section is its number plus short subsection marks; a parenthetical cite after it is its own cite."""
+
+    def test_cite_in_a_parenthetical_after_a_section_is_its_own_cite(self):
+        for paren in ("(42 U.S.C. § 1983)", "(see 42 U.S.C. § 1983)"):
+            self.assertEqual(statute_cites(f"The bond is set. {MISS_LIST} {paren}."),
+                             [("statute:misscodeann21-21-3", "Miss. Code Ann. §§ 21-21-3"),
+                              ("statute:misscodeann21-3-15", "21-3-15"),
+                              ("statute:42usc1983", "42 U.S.C. § 1983")], paren)
+
+    def test_section_display_leaves_out_a_parenthetical(self):
+        self.assertEqual([d for _, d, *_ in scan(f"{MISS_LIST} (42 U.S.C. § 1983)")],
+                         ["Miss. Code Ann. § 21-21-3", "Miss. Code Ann. § 21-3-15", "42 U.S.C. § 1983"])
+
+    def test_case_or_wl_in_a_parenthetical_keeps_the_section(self):
+        for paren, key in (("(550 U.S. 544)", "case:550 us 544"), ("(2019 WL 1234567)", "wl:2019:1234567")):
+            self.assertEqual(sorted(k for k, *_ in scan(f"The bond is set. {MISS_LIST} {paren}.")),
+                             sorted([key, "statute:misscodeann21-21-3", "statute:misscodeann21-3-15"]), paren)
+
+    def test_list_runs_on_past_a_parenthetical_that_is_not_a_cite(self):
+        self.assertEqual(statute_cites("Miss. Code Ann. §§ 21-21-3 (Rev. 2019), 21-3-15."),
+                         [("statute:misscodeann21-21-3", "Miss. Code Ann. §§ 21-21-3"),
+                          ("statute:misscodeann21-3-15", "21-3-15")])
+
+    def test_subsection_marks_stay_with_the_section(self):
+        self.assertEqual(statute_cites("Miss. Code Ann. §§ 21-21-3, 21-3-15(2)(ii).")[1],
+                         ("statute:misscodeann21-3-15", "21-3-15(2)(ii)"))
+
+    def test_stored_list_with_a_parenthetical_cite_keys_that_cite(self):
+        self.assertEqual({k for k in briefcheck.authority_keys(f"{MISS_LIST} (42 U.S.C. § 1983)")
+                          if k.startswith("statute")},
+                         {"statute:misscodeann21-21-3", "statute:misscodeann21-3-15", "statute:42usc1983"})
+
+    def test_numeric_range_does_not_end_the_list(self):
+        fla = "Fla. Stat. §§ 605.0101, 605.0102 - 605.1108"
+        self.assertEqual(statute_cites(f"The company is formed. {fla}."),
+                         [("statute:flastat6050101", "Fla. Stat. §§ 605.0101"), ("statute:flastat6050102", "605.0102")])
+        self.assertEqual({k for k in briefcheck.authority_keys(fla) if k.startswith("statute")},
+                         {"statute:flastat6050101", "statute:flastat6050102"})
+
+
+class TestListShapes(unittest.TestCase):
+    def test_list_followed_by_a_case_or_wl_cite(self):
+        for tail, key in ((", 550 U.S. 544", "case:550 us 544"), (", 2019 WL 1234567", "wl:2019:1234567")):
+            self.assertEqual(sorted(k for k, *_ in scan(f"The bond is set. {MISS_LIST}{tail}.")),
+                             sorted([key, "statute:misscodeann21-21-3", "statute:misscodeann21-3-15"]), tail)
+
+    def test_two_lists_in_one_sentence(self):
+        self.assertEqual([k for k, _ in statute_cites(f"See {MISS_LIST}; 42 U.S.C. §§ 1983, 1988.")],
+                         ["statute:misscodeann21-21-3", "statute:misscodeann21-3-15",
+                          "statute:42usc1983", "statute:42usc1988"])
+
+    def test_list_across_a_line_break(self):
+        self.assertEqual(statute_cites("Miss. Code Ann. §§ 21-21-3,\n21-3-15."),
+                         [("statute:misscodeann21-21-3", "Miss. Code Ann. §§ 21-21-3"),
+                          ("statute:misscodeann21-3-15", "21-3-15")])
+
+    def test_et_seq_keys_the_first_section_only(self):
+        self.assertEqual(statute_cites("Miss. Code Ann. §§ 21-21-3 et seq."),
+                         [("statute:misscodeann21-21-3", "Miss. Code Ann. §§ 21-21-3")])
+
 
 if __name__ == "__main__":
     unittest.main()
