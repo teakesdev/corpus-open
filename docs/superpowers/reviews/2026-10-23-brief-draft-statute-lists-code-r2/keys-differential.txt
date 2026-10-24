@@ -1,0 +1,44 @@
+# base af0a7dd -> 2b229b6
+'Fla. Stat. §§ 605.0101, 605.0102 - 605.1108' 
+   only base: [] 
+   only new:  ['statute:flastat6050102']
+'Miss. Code Ann. §§ 21-21-3, 21-3-15 (2019 WL 1234567)' 
+   only base: [] 
+   only new:  ['statute:misscodeann21-3-15']
+'Miss. Code Ann. §§ 21-21-3, 21-3-15 (42 U.S.C. § 1983)' 
+   only base: [] 
+   only new:  ['statute:42usc1983']
+'Miss. Code Ann. §§ 21-21-3, 21-3-15 (550 U.S. 544)' 
+   only base: [] 
+   only new:  ['statute:misscodeann21-3-15']
+'Miss. Code Ann. §§ 21-21-3, 21-3-15 (see 42 U.S.C. § 1983)' 
+   only base: [] 
+   only new:  ['statute:42usc1983']
+131 citations, 5 differ
+
+# base c63d392 -> 2b229b6
+'18 U.S.C. §§ 241, 242, 42 U.S.C. §§ 1983, 1985' 
+   only base: ['statute:18usc42'] 
+   only new:  []
+'29 C.F.R. §§ 1630.2, 1630.9, 42 U.S.C. § 12112' 
+   only base: ['statute:29cfr42'] 
+   only new:  []
+'42 U.S.C. §§ 1983 and 1988, 28 U.S.C. § 1331' 
+   only base: ['statute:42usc28'] 
+   only new:  []
+'42 U.S.C. §§ 1983 and 1988, 28 U.S.C. § 1331.' 
+   only base: ['statute:42usc28'] 
+   only new:  []
+'Miss. Code Ann. §§ 21-21-3, 21-3-15, 2019 WL 1234567' 
+   only base: ['statute:misscodeann2019'] 
+   only new:  []
+'Miss. Code Ann. §§ 21-21-3, 21-3-15, 42 U.S.C. § 1983' 
+   only base: ['statute:misscodeann42'] 
+   only new:  []
+'Miss. Code Ann. §§ 21-21-3, 21-3-15, 550 U.S. 544' 
+   only base: ['statute:misscodeann550'] 
+   only new:  []
+'See Miss. Code Ann. §§ 21-21-3, 21-3-15, 42 U.S.C. § 1983.' 
+   only base: ['statute:misscodeann42'] 
+   only new:  []
+131 citations, 8 differ
