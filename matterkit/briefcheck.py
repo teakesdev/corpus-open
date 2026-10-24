@@ -112,12 +112,12 @@ class AuthorityUse:
 # Patterns
 # --------------------------------------------------------------------------
 _REPORTERS = [
-    r"U\.\s?S\.", r"S\.\s?Ct\.", r"L\.\s?Ed\.\s?2d", r"L\.\s?Ed\.",
-    r"F\.\s?Supp\.\s?[23]d", r"F\.\s?Supp\.", r"F\.\s?App'x", r"Fed\.\s?App(?:'x|x)\.?",
-    r"F\.\s?4th", r"F\.\s?3d", r"F\.\s?2d", r"F\.R\.D\.", r"B\.R\.", r"Fed\.\s?Cl\.",
-    r"So\.\s?3d", r"So\.\s?2d", r"So\.", r"S\.W\.\s?3d", r"S\.W\.\s?2d", r"S\.W\.",
-    r"N\.E\.\s?3d", r"N\.E\.\s?2d", r"N\.E\.", r"N\.W\.\s?2d", r"N\.W\.", r"S\.E\.\s?2d", r"S\.E\.",
-    r"P\.\s?3d", r"P\.\s?2d", r"A\.\s?3d", r"A\.\s?2d", r"F\.",
+    r"U\.\s*S\.", r"S\.\s*Ct\.", r"L\.\s*Ed\.\s*2d", r"L\.\s*Ed\.",
+    r"F\.\s*Supp\.\s*[23]d", r"F\.\s*Supp\.", r"F\.\s*App'x", r"Fed\.\s*App(?:'x|x)\.?",
+    r"F\.\s*4th", r"F\.\s*3d", r"F\.\s*2d", r"F\.R\.D\.", r"B\.R\.", r"Fed\.\s*Cl\.",
+    r"So\.\s*3d", r"So\.\s*2d", r"So\.", r"S\.W\.\s*3d", r"S\.W\.\s*2d", r"S\.W\.",
+    r"N\.E\.\s*3d", r"N\.E\.\s*2d", r"N\.E\.", r"N\.W\.\s*2d", r"N\.W\.", r"S\.E\.\s*2d", r"S\.E\.",
+    r"P\.\s*3d", r"P\.\s*2d", r"A\.\s*3d", r"A\.\s*2d", r"F\.",
 ]
 _REP = "(?:" + "|".join(_REPORTERS) + ")"
 _PINS = r"\d{1,5}(?:\s*[-–—]\s*\d{1,5})?(?:\s*,\s*\d{1,5}(?:\s*[-–—]\s*\d{1,5})?)*"
@@ -128,14 +128,17 @@ CASE_RE = re.compile(
 SHORT_RE = re.compile(rf"(?<![\w.])(?P<vol>\d{{1,4}})\s+(?P<rep>{_REP})\s+at\s+(?P<pin>{_PINS})")
 WL_RE = re.compile(r"(?P<year>\d{4})\s+WL\s+(?P<num>\d{3,9})(?:\s*,\s*at\s*\*\s*(?P<pin>\d+(?:\s*[-–]\s*\*?\d+)?))?")
 RULE_RE = re.compile(
-    r"(?P<base>(?:Fed|[A-Z][a-z]{1,5})\.\s?R\.\s?(?:(?:Civ|Crim|App)\.\s?P\.|Evid\.)\s*\d+(?:\.\d+)?)"
+    r"(?P<base>(?:Fed|[A-Z][a-z]{1,5})\.\s*R\.\s*(?:(?:Civ|Crim|App)\.\s*P\.|Evid\.)\s*\d+(?:\.\d+)?)"
     r"(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
-LOCAL_RE = re.compile(r"(?P<base>L\.\s?U\.\s?(?:Civ|Crim)\.\s?R\.\s*\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
+LOCAL_RE = re.compile(r"(?P<base>L\.\s*U\.\s*(?:Civ|Crim)\.\s*R\.\s*\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 RULE_TAIL_RE = re.compile(r"(?:,?\s+and\s+|\s*&\s*)(?P<cite>(?P<num>\d+(?:\.\d+)?)(?:\([A-Za-z0-9]{1,4}\))*)")
 RULE_CONT_RE = re.compile(r"(?P<num>\d+(?:\.\d+)?)(?:\s*(?:\([A-Za-z0-9]{1,4}\)|[-–—,&]|and(?!\w)))*")
 _SEC = r"\d[\dA-Za-z.\-]*(?:\s*\([^)]{1,24}\))*"
+_SUBSEC = r"\([A-Za-z0-9]{1,4}\)(?:\s*\([A-Za-z0-9]{1,4}\))*"  # "(b)" in "21-3-15(a) and (b)": the section before
 _SEC_SEP = r"\s*[,&]\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+"
-SECTION_LIST_RE = re.compile(rf"§§\s*(?P<secs>{_SEC}(?:(?:{_SEC_SEP}){_SEC})*)")
+SECTION_LIST_RE = re.compile(rf"§§\s*(?P<secs>{_SEC}(?:(?:{_SEC_SEP})(?:{_SEC}|{_SUBSEC}))*)")
+SEC_RE = re.compile(_SEC)
+LIST_MEMBER_RE = re.compile(rf"(?:{_SEC_SEP})(?:(?P<sec>{_SEC})|{_SUBSEC})")
 LISTED_SEC_RE = re.compile(r"\d[\dA-Za-z.\-]*(?:\s*\([A-Za-z0-9]{1,4}\))*")  # a listed section: number + "(2)(ii)"
 LOCAL_WORDS_RE = re.compile(
     r"(?<![\w.])Local(?:\s+(?:Uniform|Civil|Criminal|Bankruptcy|Admiralty|Court))*\s+Rules?\s+"
@@ -306,7 +309,8 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
         for m in pat.finditer(s):
             if free(*m.span()):
                 spans.append(m.span())
-                prefix, num = re.match(r"(.*?)(\d+(?:\.\d+)?)$", m["base"]).groups()
+                # re.S: a hard-wrapped draft can break the cite ("Fed. R. Civ. P.\n12")
+                prefix, num = re.match(r"(.*?)(\d+(?:\.\d+)?)$", m["base"], re.S).groups()
                 # a full rule cite a later bare "Rule N" can bind to; local rules are not
                 full = pat is RULE_RE
                 yield ("rule:" + _norm_key(m["base"]), m.group(0), None, m.start(), m.end(), "rule",
@@ -323,7 +327,7 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
             words = m.group(0)
             prefix = local_rule.replace("Civ", "Crim") if "Criminal" in words else local_rule
             if re.search(r"Bankruptcy|Admiralty", words):  # no mapping known: key the words as written
-                prefix = re.match(r"(.*?Rules?)\s", words).group(1).replace("Rules", "Rule")
+                prefix = re.match(r"(.*?Rules?)\s", words, re.S).group(1).replace("Rules", "Rule")
             yield ("rule:" + _norm_key(f"{prefix} {m['num']}"), f"{words} (read as {prefix} {m['num']})",
                    None, m.start(), m.end(), "rule", None)
             pos = m.end()
@@ -360,11 +364,17 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
                     key, sec = _statute_base(disp)
                     yield (key, disp, None, ma, mb, "statute", sec)
             continue
-        code, pos = s[a:lst.start()], lst.start("secs")
-        for i, part in enumerate(re.split(f"({_SEC_SEP})", lst["secs"])):
-            start, pos = pos, pos + len(part)
-            if i % 2:
-                continue
+        code, secs = s[a:lst.start()], lst["secs"]
+        # Walk the list with its own grammar. Splitting on the separators would also split inside a member's
+        # parenthetical ("21-3-15 (2 and ), 21-4"). A bare subsection ("(b)") belongs to the section before it.
+        first = SEC_RE.match(secs)
+        members, pos = [(0, first.group(0))], first.end()
+        while m := LIST_MEMBER_RE.match(secs, pos):
+            if m["sec"] is not None:
+                members.append((m.start("sec"), m["sec"]))
+            pos = m.end()
+        for i, (off, part) in enumerate(members):
+            start = lst.start("secs") + off
             # keep "21-3-15(2)(ii)", not "21-3-15 (42 U.S.C. § 1983)": the parenthetical is its own cite, and a
             # final "." ends the sentence
             part = LISTED_SEC_RE.match(part).group(0).rstrip(".")
