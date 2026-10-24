@@ -104,10 +104,11 @@ _PATTERNS = [
     # Chapter abbreviation:              ch. 645
     re.compile(r"\bch\.\s+\d+[A-Za-z]?\b"),
     # Cross-reference word family: section 43 of Title 8 · Section 80 ·
-    # sections 106 and 106A · section 401(a) · Sec. 107
+    # sections 106 and 106A · section 401(a) · Sec. 107 · Section 21-23-8
+    # (a hyphenated state-code number is one section, not "Section 21")
     re.compile(
-        r"\b(?:[Ss]ections?|Sec\.)\s+\d+[A-Za-z]?"
-        r"(?:\s*\([^)]{1,24}\))*(?:\s+(?:and|or|through|to)\s+\d+[A-Za-z]?"
+        r"\b(?:[Ss]ections?|Sec\.)\s+\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*"
+        r"(?:\s*\([^)]{1,24}\))*(?:\s+(?:and|or|through|to)\s+\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*"
         r"(?:\s*\([^)]{1,24}\))*)*(?:\s+of\s+Title\s+\d+)?"
     ),
     # Short-form section cite: § 1983 / § 309(c) / § 330016(1)(L). Digit-start
@@ -189,8 +190,8 @@ def extract_citations(text: str, document_sha256: str | None = None,
             # its own item): 'section 502 or 503' also yields 'section 502'
             # and the trailing member as separate nested rows.
             xref = re.match(
-                r"((?:sections?|Sec\.)\s+\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)"
-                r"(\s+(?:and|or|through|to)\s+)(\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)",
+                r"((?:sections?|Sec\.)\s+\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*(?:\s*\([^)]{1,24}\))?)"
+                r"(\s+(?:and|or|through|to)\s+)(\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*(?:\s*\([^)]{1,24}\))?)",
                 frag)
             if xref:
                 head_s = s + xref.start(1)

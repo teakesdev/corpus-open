@@ -8,7 +8,7 @@ in) it resolves:
   pleading cites    Compl. ¶ 59 · Am. Compl. ¶¶ 67–69
   authorities       X v. Y, 579 U.S. 40, 45 (2016) · 579 U.S. at 46 · Id. at 46 ·
                     Fed. R. Civ. P. 15(a)(2) · Rule 15 · L.U.Civ.R. 7(b)(4) ·
-                    42 U.S.C. § 1983 · § 1983 · Miss. Code Ann. § 95-1-5
+                    42 U.S.C. § 1983 · § 1983 · Miss. Code (Ann.) § 95-1-5 · Section 95-1-5
   quotations        searched in the cited source's text, on the pinned page
   facts             {fact:a_x} / <!-- fact:a_x --> tags; uncited sentences in a
                     Facts / Background / Statement section
@@ -23,6 +23,8 @@ Record cites resolve through `.matter/docket.json`:
    "local_rule":         "L.U.Civ.R."}            ('Local Civil Rule 7' is read as this)
 
 Any other shape is refused. Keys starting with "_" (notes) are ignored.
+A bare "Rule 5.1(b)" binds first to the most recent earlier full rule cite with the
+same number ("Miss. R. Crim. P. 5.1"), and is read as `bare_rule` only when there is none.
 
 Severity: BLOCK (exit 1), UNCHECKED (exit 2 when nothing blocks), WARN, OK.
 "Tied to a source in the store" means the cited document or authority record
@@ -180,16 +182,56 @@ def _case_key(vol, rep, page) -> str:
     return f"case:{vol} {_rep_key(rep)} {page}"
 
 
+_ANNOTATED = re.compile(r"(?<![\w.])Ann(?:otated\b|\.|\b)")
+# "Miss. Code Annotated" before a bare "§ 21-23-7": the extractor takes only the § part. The head
+# starts at a state or territory abbreviation, so "Acme, Inc. Miss. Code Annotated" keys as Miss.
+# and "W. Va." stays whole; a federal "U.S. Code Annotated" keeps the short-form path.
+_STATE_ABBREV = (r"(?:Ala|Ariz|Ark|Cal|Colo|Conn|Del|D\.\s?C|Fla|Ga|Haw|Ill|Ind|Kan|Ky|La|Me|Md|Mass|Mich|"
+                 r"Minn|Miss|Mo|Mont|Neb|Nev|N\.\s?H|N\.\s?J|N\.\s?M|N\.\s?Y|N\.\s?C|N\.\s?D|Okla|Or|Pa|"
+                 r"P\.\s?R|R\.\s?I|S\.\s?C|S\.\s?D|Tenn|Tex|V\.\s?I|Vt|Va|Wash|W\.\s?Va|Wis|Wyo)\.")
+_ANNOTATED_HEAD = re.compile(rf"(?<![\w.]){_STATE_ABBREV}\s*(?:[A-Z][\w'&]*\.\s*){{0,3}}"
+                             r"(?:Code|Stat\.|Laws?)\s+Annotated\s*$")
+
+# A coordinated cross-reference: "Section 21-23-7, 21-23-8, or 21-23-9" / "sections 106 and 106A"
+_XREF_NUM = r"\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*"
+XREF_HEAD_RE = re.compile(rf"(?:[Ss]ections?|Sec\.)\s+(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*")
+XREF_TAIL_RE = re.compile(rf"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)"
+                          rf"(?P<cite>(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*)"
+                          r"(?![\w\-§]|\.\w|\s+[A-Z][\w'&]*\.)")
+
+
+def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, int]]:
+    """(display, start, end) for each member of a coordinated cross-reference whose extracted
+    fragment is s[a:b], or [] when it is not one. The extractor keeps "Section X or Y" as one
+    fragment and stops "Section X, Y" at X, so each member becomes its own short-form cite.
+    A member has the head's number shape (as many hyphenated parts), and the list stops at a
+    number another cite claims or one followed by a dotted word ("42 U.S.C.", "1972 Miss.
+    Laws"). A range ("through", "to") or "of Title N" does not cover the fragment and stays whole."""
+    head = XREF_HEAD_RE.match(s, a)
+    if not head or head.end() > b:
+        return []
+    taken = spans + [(r["char_start"], r["char_end"]) for r in rows
+                     if r["status"] == "extracted" and not (a <= r["char_start"] and r["char_end"] <= b)]
+    out, pos, parts = [(head.group(0), a, head.end())], head.end(), head["num"].count("-")
+    while (t := XREF_TAIL_RE.match(s, pos)) and t["num"].count("-") == parts \
+            and not any(t.start("cite") < e and s_ < t.end("cite") for s_, e in taken):
+        out.append((f"Section {t['cite']}", t.start("cite"), t.end("cite")))
+        pos = t.end()
+    return out if len(out) > 1 and pos >= b else []
+
+
 def _statute_base(frag: str) -> tuple[str, str | None]:
-    """'42 U.S.C. § 1983(a)' -> ('statute:42usc1983', '1983')."""
+    """'42 U.S.C. § 1983(a)' -> ('statute:42usc1983', '1983'). 'Ann.' / 'Annotated' is not part
+    of the key: 'Miss. Code Ann. § 21-23-7' and 'Miss. Code § 21-23-7' are one statute."""
     base = re.sub(r"(\s*\([^)]{1,24}\))+\s*$", "", frag.strip())
     sec = None
-    m = re.search(r"§+\s*([\dA-Za-z][\dA-Za-z.\-]*)", base) or re.search(r"(?:[Ss]ections?|Sec\.)\s+(\d+[A-Za-z]?)", base)
+    m = re.search(r"§+\s*([\dA-Za-z][\dA-Za-z.\-]*)", base) or \
+        re.search(r"(?:[Ss]ections?|Sec\.)\s+(\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*)", base)
     if m:
         sec = m.group(1).rstrip(".")
     short = not re.search(r"[A-Za-z]{2,}", re.sub(r"(?:[Ss]ections?|Sec\.)", "", base.split("§")[0])) \
         and not re.match(r"\d", base)
-    return ("statute-short:" if short else "statute:") + _norm_key(base), sec
+    return ("statute-short:" if short else "statute:") + _norm_key(_ANNOTATED.sub("", base)), sec
 
 
 def _pin_ranges(pin: str | None) -> list[tuple[int, int]]:
@@ -252,17 +294,20 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
             spans.append(m.span())
             yield (f"wl:{m['year']}:{m['num']}", f"{m['year']} WL {m['num']}", m["pin"], m.start(), m.end(),
                    "case", None)
-    for pat, kind in ((RULE_RE, "rule"), (LOCAL_RE, "rule")):
+    for pat in (RULE_RE, LOCAL_RE):
         for m in pat.finditer(s):
             if free(*m.span()):
                 spans.append(m.span())
-                yield ("rule:" + _norm_key(m["base"]), m.group(0), None, m.start(), m.end(), kind, None)
-                prefix = re.match(r"(.*?)\d+(?:\.\d+)?$", m["base"]).group(1)
+                prefix, num = re.match(r"(.*?)(\d+(?:\.\d+)?)$", m["base"]).groups()
+                # a full rule cite a later bare "Rule N" can bind to; local rules are not
+                full = pat is RULE_RE
+                yield ("rule:" + _norm_key(m["base"]), m.group(0), None, m.start(), m.end(), "rule",
+                       (prefix.strip(), num) if full else None)
                 pos = m.end()
                 while (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
                     spans.append(t.span("cite"))
                     yield ("rule:" + _norm_key(prefix + t["num"]), prefix + t["cite"], None,
-                           t.start("cite"), t.end("cite"), kind, None)
+                           t.start("cite"), t.end("cite"), "rule", (prefix.strip(), t["num"]) if full else None)
                     pos = t.end()
     for m in LOCAL_WORDS_RE.finditer(s):
         if free(*m.span()):
@@ -284,7 +329,7 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
         if free(*m.span()):
             spans.append(m.span())
             yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
-                   "bare-rule", bare)
+                   "bare-rule", (bare, m["num"]))
     # The extractor rejects "§§" (no digit after the first "§"), so scan with each list's "§§" read as "§ "
     # (same length: offsets hold) and yield every listed section as the single cite "<code> § <section>".
     lists = list(SECTION_LIST_RE.finditer(s))
@@ -296,12 +341,16 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
         if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
             continue
         a, b = row["char_start"], row["char_end"]
+        if frag.startswith("§") and (head := _ANNOTATED_HEAD.search(s, 0, a)):
+            a, frag = head.start(), s[head.start():b]
         lst = next((m for m in lists if a <= m.start() < b), None)
         if lst is None:
             if free(a, b):
-                spans.append((a, b))
-                key, sec = _statute_base(frag)
-                yield (key, frag, None, a, b, "statute", sec)
+                members = _xref_members(s, a, b, rows, spans)
+                spans.append((a, members[-1][2] if members else b))
+                for disp, ma, mb in members or [(frag, a, b)]:
+                    key, sec = _statute_base(disp)
+                    yield (key, disp, None, ma, mb, "statute", sec)
             continue
         code, pos = s[a:lst.start()], lst.start("secs")
         for i, part in enumerate(re.split(f"({_SEC_SEP})", lst["secs"])):
@@ -902,6 +951,7 @@ class _Checker:
         self.last_unit_targets: set = set()
         self.full_cases: dict = {}   # (vol, rep) -> case key seen in draft
         self.full_statutes: dict = {}  # section -> statute key seen in draft
+        self.full_rules: dict = {}  # rule number -> [(offset, rule key, prefix, line)] seen in draft
         self.uses: dict = {}
         self._dup_warned: set = set()
 
@@ -1052,7 +1102,7 @@ class _Checker:
             claimed.append((a, b))
             raw = u.text[a:b] if re.search(r"[A-Za-z§]", u.text[a:b]) else disp  # "… and 15"
             c = Cite("authority", raw, disp, key, pin, a, b)
-            self.resolve_authority(c, kind, extra, line)
+            self.resolve_authority(c, kind, extra, line, u.start + a)
             cites.append(c)
         cites.sort(key=lambda c: c.start)
         for m in ID_RE.finditer(u.text):
@@ -1156,7 +1206,8 @@ class _Checker:
             self.rep.add("BLOCK", "paragraph-not-found", line, c.raw,
                          f"¶ {', '.join(map(str, missing))} not found in {label}")
 
-    def resolve_authority(self, c: Cite, kind, extra, line):
+    def resolve_authority(self, c: Cite, kind, extra, line, at=0):
+        """`at` is the cite's offset in the draft, so a bare rule binds only to earlier full cites."""
         if kind == "case":
             if extra:
                 self.full_cases.setdefault(extra, c.target)
@@ -1185,8 +1236,20 @@ class _Checker:
                                  "section short form with no full citation earlier in the draft")
             elif sec:
                 self.full_statutes.setdefault(sec, c.target)
+        elif kind == "rule" and extra:
+            prefix, num = extra
+            self.full_rules.setdefault(num, []).append((at, c.target, prefix, line))
         elif kind == "bare-rule":
-            c.display = f"{c.raw} (read as {extra} {c.raw.split()[1]})"
+            # like a case short form: the most recent earlier full cite to the same rule number,
+            # else the docket map's bare_rule
+            bare, num = extra
+            rest = c.raw.split(None, 1)[1]
+            earlier = [r for r in self.full_rules.get(num, []) if r[0] < at]
+            if earlier:
+                _, c.target, prefix, full_line = max(earlier)
+                c.display = f"{c.raw} (read as {prefix} {rest}, after the full cite on line {full_line})"
+            else:
+                c.display = f"{c.raw} (read as {bare} {rest})"
         row = self._lookup(c.target)
         self._judge_authority(c.target, self.uses[c.target].display if c.target in self.uses else c.display,
                               row, line, c.pin, c.raw)

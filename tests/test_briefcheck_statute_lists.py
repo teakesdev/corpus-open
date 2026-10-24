@@ -30,7 +30,7 @@ def draft_keys(text):
 
 class TestStatuteListKeys(unittest.TestCase):
     def test_each_listed_section_keys_under_the_code_name(self):
-        self.assertEqual(statute_keys(MISS_LIST), {"statute:misscodeann21-21-3", "statute:misscodeann21-3-15"})
+        self.assertEqual(statute_keys(MISS_LIST), {"statute:misscode21-21-3", "statute:misscode21-3-15"})
 
     def test_listed_sections_key_as_the_draft_single_cites_do(self):
         keys = briefcheck.authority_keys(MISS_LIST)
@@ -45,7 +45,7 @@ class TestStatuteListKeys(unittest.TestCase):
 
     def test_and_separator_and_subsections(self):
         self.assertEqual(statute_keys("Miss. Code Ann. §§ 21-21-3 and 21-3-15"),
-                         {"statute:misscodeann21-21-3", "statute:misscodeann21-3-15"})
+                         {"statute:misscode21-21-3", "statute:misscode21-3-15"})
         self.assertEqual(statute_keys("42 U.S.C. §§ 1983, 1985(3), 1988(b)"),
                          {"statute:42usc1983", "statute:42usc1985", "statute:42usc1988"})
 
@@ -59,11 +59,11 @@ class TestStatuteListKeys(unittest.TestCase):
     def test_single_section_keys_are_unchanged(self):
         self.assertEqual(briefcheck.authority_keys("42 U.S.C. § 1983"), {"statute:42usc1983", "full:42usc1983"})
         self.assertEqual(briefcheck.authority_keys("Miss. Code Ann. § 21-3-15"),
-                         {"statute:misscodeann21-3-15", "full:misscodeann21-3-15"})
+                         {"statute:misscode21-3-15", "full:misscodeann21-3-15"})
 
     def test_draft_scanning_is_unchanged(self):
-        self.assertEqual(draft_keys("Miss. Code Ann. § 21-21-3"), {"statute:misscodeann21-21-3"})
-        self.assertEqual(draft_keys("Miss. Code Ann. § 21-3-15"), {"statute:misscodeann21-3-15"})
+        self.assertEqual(draft_keys("Miss. Code Ann. § 21-21-3"), {"statute:misscode21-21-3"})
+        self.assertEqual(draft_keys("Miss. Code Ann. § 21-3-15"), {"statute:misscode21-3-15"})
         self.assertEqual(draft_keys("42 U.S.C. § 1983"), {"statute:42usc1983"})
 
 
