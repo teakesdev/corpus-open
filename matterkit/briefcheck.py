@@ -284,15 +284,31 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
             spans.append(m.span())
             yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
                    "bare-rule", bare)
-    for row in citations.extract_citations(s):
+    # The extractor rejects "§§" (no digit after the first "§"), so scan with each list's "§§" read as "§ "
+    # (same length: offsets hold) and yield every listed section as the single cite "<code> § <section>".
+    lists = list(SECTION_LIST_RE.finditer(s))
+    single = SECTION_LIST_RE.sub(lambda m: "§ " + m.group(0)[2:], s)
+    for row in citations.extract_citations(single):
         frag = row["raw_fragment"]
         if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
             continue
         a, b = row["char_start"], row["char_end"]
-        if free(a, b):
-            spans.append((a, b))
-            key, sec = _statute_base(frag)
-            yield (key, frag, None, a, b, "statute", sec)
+        lst = next((m for m in lists if a <= m.start() < b), None)
+        if lst is None:
+            if free(a, b):
+                spans.append((a, b))
+                key, sec = _statute_base(frag)
+                yield (key, frag, None, a, b, "statute", sec)
+            continue
+        code, pos = s[a:lst.start()], lst.start("secs")
+        for i, part in enumerate(re.split(f"({_SEC_SEP})", lst["secs"])):
+            start, pos, part = pos, pos + len(part), part.rstrip(".")  # a final "." ends the sentence
+            lo, hi = a if i == 0 else start, start + len(part)
+            if i % 2 or not free(lo, hi):
+                continue
+            spans.append((lo, hi))
+            key, sec = _statute_base(f"{code}§ {part}")
+            yield (key, f"{code}§ {part}", None, lo, hi, "statute", sec)
 
 
 def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.") -> set:
@@ -303,15 +319,10 @@ def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule
     statute, case or anything unrecognised ends the run.
 
     A '§§' section list ("Miss. Code Ann. §§ 21-21-3, 21-3-15") keys each section as the single cite
-    "Miss. Code Ann. § 21-3-15" would; with no code name before the '§§', each keys as a short form."""
-    single = SECTION_LIST_RE.sub(lambda m: "§ " + m.group(0)[2:], citation)  # same length: offsets hold
-    found = sorted(scan_authorities(single, bare_rule, local_rule), key=lambda a: a[3])
+    "Miss. Code Ann. § 21-3-15" would; with no code name before the '§§', each keys as a short form.
+    scan_authorities() splits the list, so a draft citing the same list gets the same keys."""
+    found = sorted(scan_authorities(citation, bare_rule, local_rule), key=lambda a: a[3])
     keys = {k for k, *_ in found} | {"full:" + _norm_key(citation)}
-    for m in SECTION_LIST_RE.finditer(citation):
-        code = next((d[: m.start() - s] for _, d, _, s, e, kind, _ in found
-                     if kind == "statute" and s <= m.start() < e), "")
-        for sec in re.split(_SEC_SEP, m["secs"]):
-            keys.add(_statute_base(f"{code}§ {sec}")[0])
     prefix, pos = None, 0
     for seg in citation.split(";"):
         a, b, pos = pos, pos + len(seg), pos + len(seg) + 1
