@@ -8,7 +8,8 @@ in) it resolves:
   pleading cites    Compl. ¶ 59 · Am. Compl. ¶¶ 67–69
   authorities       X v. Y, 579 U.S. 40, 45 (2016) · 579 U.S. at 46 · Id. at 46 ·
                     Fed. R. Civ. P. 15(a)(2) · Rule 15 · L.U.Civ.R. 7(b)(4) ·
-                    42 U.S.C. § 1983 · § 1983 · Miss. Code (Ann.) § 95-1-5 · Section 95-1-5
+                    42 U.S.C. § 1983 · § 1983 · Miss. Code (Ann.) § 95-1-5 · Section 95-1-5 ·
+                    Section 552.101
   quotations        searched in the cited source's text, on the pinned page
   facts             {fact:a_x} / <!-- fact:a_x --> tags; uncited sentences in a
                     Facts / Background / Statement section
@@ -192,8 +193,9 @@ _STATE_ABBREV = (r"(?:Ala|Ariz|Ark|Cal|Colo|Conn|Del|D\.\s?C|Fla|Ga|Haw|Ill|Ind|
 _ANNOTATED_HEAD = re.compile(rf"(?<![\w.]){_STATE_ABBREV}\s*(?:[A-Z][\w'&]*\.\s*){{0,3}}"
                              r"(?:Code|Stat\.|Laws?)\s+Annotated\s*$")
 
-# A coordinated cross-reference: "Section 21-23-7, 21-23-8, or 21-23-9" / "sections 106 and 106A"
-_XREF_NUM = r"\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*"
+# A coordinated cross-reference: "Section 21-23-7, 21-23-8, or 21-23-9" / "sections 106 and 106A" /
+# "Sections 552.101 and 552.102". The number shape is the extractor's, so the two read one section.
+_XREF_NUM = citations._SEC_NUM
 XREF_HEAD_RE = re.compile(rf"(?:[Ss]ections?|Sec\.)\s+(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*")
 XREF_TAIL_RE = re.compile(rf"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)"
                           rf"(?P<cite>(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*)"
@@ -204,7 +206,9 @@ def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, i
     """(display, start, end) for each member of a coordinated cross-reference whose extracted
     fragment is s[a:b], or [] when it is not one. The extractor keeps "Section X or Y" as one
     fragment and stops "Section X, Y" at X, so each member becomes its own short-form cite.
-    A member has the head's number shape (as many hyphenated parts), and the list stops at a
+    A member has the head's number shape: as many hyphenated parts, and plain (no hyphen or dot)
+    only if the head is plain. So "552" after "Section 552.101," is a count, not a member, while
+    "552.103.5" and "21-23-7.1" are members whatever their dotted depth. The list stops at a
     number another cite claims or one followed by a dotted word ("42 U.S.C.", "1972 Miss.
     Laws"). A range ("through", "to") or "of Title N" does not cover the fragment and stays whole."""
     head = XREF_HEAD_RE.match(s, a)
@@ -212,8 +216,12 @@ def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, i
         return []
     taken = spans + [(r["char_start"], r["char_end"]) for r in rows
                      if r["status"] == "extracted" and not (a <= r["char_start"] and r["char_end"] <= b)]
-    out, pos, parts = [(head.group(0), a, head.end())], head.end(), head["num"].count("-")
-    while (t := XREF_TAIL_RE.match(s, pos)) and t["num"].count("-") == parts \
+
+    def shape(num):
+        return num.count("-"), "-" in num or "." in num
+
+    out, pos, parts = [(head.group(0), a, head.end())], head.end(), shape(head["num"])
+    while (t := XREF_TAIL_RE.match(s, pos)) and shape(t["num"]) == parts \
             and not any(t.start("cite") < e and s_ < t.end("cite") for s_, e in taken):
         out.append((f"Section {t['cite']}", t.start("cite"), t.end("cite")))
         pos = t.end()
@@ -226,7 +234,7 @@ def _statute_base(frag: str) -> tuple[str, str | None]:
     base = re.sub(r"(\s*\([^)]{1,24}\))+\s*$", "", frag.strip())
     sec = None
     m = re.search(r"§+\s*([\dA-Za-z][\dA-Za-z.\-]*)", base) or \
-        re.search(r"(?:[Ss]ections?|Sec\.)\s+(\d+[A-Za-z]?(?:-\d+[A-Za-z]?)*)", base)
+        re.search(rf"(?:[Ss]ections?|Sec\.)\s+({_XREF_NUM})", base)
     if m:
         sec = m.group(1).rstrip(".")
     short = not re.search(r"[A-Za-z]{2,}", re.sub(r"(?:[Ss]ections?|Sec\.)", "", base.split("§")[0])) \

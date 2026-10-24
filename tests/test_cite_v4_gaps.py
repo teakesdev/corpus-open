@@ -27,7 +27,8 @@ def exact(text: str, needle: str) -> None:
 class TestParserCapability(unittest.TestCase):
     def test_experimental_at_capability_level(self):
         self.assertEqual(citations.PARSER_CAPABILITY, "experimental")
-        self.assertEqual(citations.PARSER_ID, "kit-cite-0.4")
+        # 0.5 (ty 2026-10-23): hyphenated and dotted "Section" numbers are read whole
+        self.assertEqual(citations.PARSER_ID, "kit-cite-0.5")
 
     def test_unparsable_section_is_still_occurrence_failure(self):
         rows = citations.extract_citations("See § for details.")
