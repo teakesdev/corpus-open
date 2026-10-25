@@ -177,6 +177,16 @@ STATE_ABBREV = {
     "Ariz", "Colo", "Conn", "Del", "Haw", "Ill", "Ind", "Kan", "Ky", "Me", "Md", "Mass", "Mich", "Minn", "Mo",
     "Mont", "Neb", "Nev", "Okla", "Or", "Pa", "Vt", "Va", "Wash", "Wis", "Wyo",
 }
+# Capitalized, these are words too ("… attended Mass."): they end a sentence unless a cite goes on after them.
+# A number, "Dec." and the initials "R." / "S." always count as going on (known gap, see the word-states tests).
+WORD_STATES = {"Del", "Haw", "Ill", "Ind", "Mass", "Me", "Or", "Wash"}
+CITE_GOES_ON = re.compile(
+    r"[\d§]"  # "(Mass. 1985)", "100 Wash. 2d 1"
+    r"|(?:Rev|Gen|Comp|Ann|Admin|Adm|Sess|Legis)\.\s+(?:Stat|Code|Laws|Serv|Regs?|R)\b"  # "Rev. Stat.", not "Rev. Smith"
+    r"|(?:App|Ch|Ct|Cl|Dec|Dist|Fam|Hous|Prob|Sup|Super|Regs|R|S)\.|Att'y\s+Gen\b"
+    r"|C\.\s*§|Const\.\s+(?:art|pt|amend|pmbl)\b"  # "8 Del. C. § 141", "Ill. Const. art. I" (not an initial "C.")
+    # a code or court word only in its cite form: "Ind. Code §", "Ind. Trial R.", not "Trial began …"
+    r"|Code\s+(?:Ann\.|Regs?\.|R\.|tit\.|ch\.|§|\d)|(?:Laws|Acts)\s+(?:\d|ch\.)|Tax\s+(?:Ct\.|\d)|Trial\s+(?:Ct\.|R\.)")
 NAME_CONNECT = {"v.", "of", "the", "and", "&", "for", "de", "la", "ex", "rel.", "in", "re", "ex.", "et", "al.", "a"}
 
 
@@ -518,7 +528,8 @@ def _sentence_spans(text: str, start: int, end: int):
         tok = re.search(r"(\S+)$", before)
         raw = tok.group(1).lstrip("([*\"“").rstrip(".") if tok else ""
         word = raw.lower()
-        if text[cut] == "." and (word in ABBREV or raw in STATE_ABBREV or (len(word) == 1 and word.isalpha())
+        state = raw in STATE_ABBREV and (raw not in WORD_STATES or CITE_GOES_ON.match(text, start + m.end(), end))
+        if text[cut] == "." and (word in ABBREV or state or (len(word) == 1 and word.isalpha())
                                  or re.fullmatch(r"(?:[a-z]\.)+[a-z]", word)
                                  or re.fullmatch(r"[a-z]+\.[a-z.]+", word)):
             continue

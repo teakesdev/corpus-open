@@ -1,0 +1,60 @@
+sentences ('=' same at both commits):
+  = 'Plaintiff attended Mass. The deputy saw him.'
+      ['Plaintiff attended Mass.', 'The deputy saw him.']
+  * 'Plaintiff attended Mass. Trial began on Monday.'
+      111ef9a: ['Plaintiff attended Mass. Trial began on Monday.']
+      a468c92: ['Plaintiff attended Mass.', 'Trial began on Monday.']
+  = 'Plaintiff moved to Wash. 2 weeks later he left.'
+      ['Plaintiff moved to Wash. 2 weeks later he left.']
+  = 'Plaintiff attended Mass. S. Smith testified.'
+      ['Plaintiff attended Mass. S. Smith testified.']
+  = 'Plaintiff attended Mass. R. Jones testified.'
+      ['Plaintiff attended Mass. R. Jones testified.']
+  * 'Plaintiff attended Mass. Code enforcement arrived.'
+      111ef9a: ['Plaintiff attended Mass. Code enforcement arrived.']
+      a468c92: ['Plaintiff attended Mass.', 'Code enforcement arrived.']
+  = 'Plaintiff was treated at Mass. Gen. Hosp. The bill followed.'
+      ['Plaintiff was treated at Mass.', 'Gen. Hosp. The bill followed.']
+  = 'See Mass. Gen. Laws ch. 260, § 2A. The court agreed.'
+      ['See Mass. Gen. Laws ch. 260, § 2A.', 'The court agreed.']
+  = 'See Doe v. Roe, 1 N.E.2d 1 (Mass. 1985). The court agreed.'
+      ['See Doe v. Roe, 1 N.E.2d 1 (Mass. 1985).', 'The court agreed.']
+  * 'Directors act under 8 Del. C. § 141. The board met.'
+      111ef9a: ['Directors act under 8 Del.', 'C. § 141.', 'The board met.']
+      a468c92: ['Directors act under 8 Del. C. § 141.', 'The board met.']
+  * 'The right is in Ill. Const. art. I, § 2. The court agreed.'
+      111ef9a: ['The right is in Ill.', 'Const. art. I, § 2.', 'The court agreed.']
+      a468c92: ['The right is in Ill. Const. art. I, § 2.', 'The court agreed.']
+  * 'See Wash. Const. art. I, § 7. The court agreed.'
+      111ef9a: ['See Wash.', 'Const. art. I, § 7.', 'The court agreed.']
+      a468c92: ['See Wash. Const. art. I, § 7.', 'The court agreed.']
+  = 'See 1 Mass. L. Rptr. 1 (1993). The court agreed.'
+      ['See 1 Mass.', 'L. Rptr.', '1 (1993).', 'The court agreed.']
+  = "See Smith v. Wash. State Dep't of Corr., 1 P.3d 1 (Wash. 2001)."
+      ['See Smith v. Wash.', "State Dep't of Corr., 1 P.3d 1 (Wash. 2001)."]
+  = 'See Ill. Admin. Code tit. 20, § 1. The court agreed.'
+      ['See Ill. Admin. Code tit.', '20, § 1.', 'The court agreed.']
+  = 'Plaintiff lives in Richmond, Va. The clerk refused the request.'
+      ['Plaintiff lives in Richmond, Va. The clerk refused the request.']
+  = 'He was ill. The doctor came.'
+      ['He was ill.', 'The doctor came.']
+
+brief check (exit, findings, bound rows):
+  = stored=None draft='STATEMENT OF FACTS\n\nOn Sunday Plaintiff attended Mass. The deputy saw him at noon. Doc. 16 at 1.\n'
+      both: exit 2 findings [['UNCHECKED', 'uncited-fact', 'On Sunday Plaintiff attended Mass.']] bound []
+  * stored=None draft='STATEMENT OF FACTS\n\nOn Sunday Plaintiff attended Mass. Trial began on Monday. Doc. 16 at 1.\n'
+      111ef9a: exit 0 findings [] bound []
+      a468c92: exit 2 findings [['UNCHECKED', 'uncited-fact', 'On Sunday Plaintiff attended Mass.']] bound []
+  = stored=None draft='STATEMENT OF FACTS\n\nOn Sunday Plaintiff moved to Wash. 2 weeks later he left. Doc. 16 at 1.\n'
+      both: exit 0 findings [] bound []
+  = stored=None draft='STATEMENT OF FACTS\n\nOn Sunday Plaintiff attended Mass. S. Smith testified about it. Doc. 16 at 1.\n'
+      both: exit 0 findings [] bound []
+  = stored=None draft='STATEMENT OF FACTS\n\nOn Sunday Plaintiff lives in Richmond, Va. The clerk refused the request. Doc. 16 at 1.\n'
+      both: exit 0 findings [] bound []
+  * stored='8 Del. C. § 141' draft='Directors act under 8 Del. C. § 141. The board met.'
+      111ef9a: exit 0 findings [['WARN', 'short-form-without-full-cite', '§ 141']] bound [['§ 141', '8 Del. C. § 141']]
+      a468c92: exit 0 findings [] bound [['8 Del. C. § 141', '8 Del. C. § 141']]
+  = stored='Mass. Gen. Laws ch. 260, § 2A' draft='The claim is timely under Mass. Gen. Laws ch. 260, § 2A. The court agreed.'
+      both: exit 0 findings [['WARN', 'short-form-without-full-cite', '§ 2A.']] bound [['§ 2A.', 'Mass. Gen. Laws ch. 260, § 2A']]
+  = stored='Wash. Rev. Code § 4.16.080' draft='The claim is timely under Wash. Rev. Code § 4.16.080. The court agreed.'
+      both: exit 0 findings [] bound [['Wash. Rev. Code § 4.16.080', 'Wash. Rev. Code § 4.16.080']]
