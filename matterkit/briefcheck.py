@@ -223,17 +223,20 @@ XREF_TAIL_RE = re.compile(rf"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)"
                           r"(?![\w\-§]|\.\w|\s+[A-Z][\w'&]*\.)")
 
 
-def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, int]]:
+def _xref_members(s: str, a: int, b: int, rows, spans, stops=None) -> list[tuple[str, int, int]]:
     """(display, start, end) for each member of a coordinated cross-reference whose extracted
     fragment is s[a:b], or [] when it is not one. The extractor keeps "Section X or Y" as one
     fragment and stops "Section X, Y" at X, so each member becomes its own short-form cite.
     A member is plain (no hyphen or dot) exactly when the head is, and has the head's number of
-    hyphenated parts or its leading number (the same title or chapter). So "552" after "Section
-    552.101," is a count, and "1972-73" or "2-1" after "Section 21-23-7," is not a member, while
-    "552.103.5" and "552.102-1" after 552.101, "21-23" after 21-23-7, and "11-46-11.1" after
-    21-23-7 are. The list stops at a number another cite claims or one followed by a dotted word
-    ("42 U.S.C.", "1972 Miss. Laws"). A range ("through", "to") or "of Title N" does not cover
-    the fragment and stays whole."""
+    hyphenated parts or begins with the head's leading number and the separator after it (the
+    same title or chapter, written the same way). So "552" after "Section 552.101," is a count,
+    and "1972-73" or "2-1" after "Section 21-23-7," or "552-553" after "Section 552.101," is not a
+    member, while "552.103.5" and "552.102-1" after 552.101, "21-23" after 21-23-7, and
+    "11-46-11.1" after 21-23-7 are. The list ends at a number another cite claims or one followed
+    by a dotted word ("42 U.S.C.", "1972 Miss. Laws"). A range ("through", "to") or "of Title N"
+    does not cover the fragment and stays whole.
+    A number after the fragment that is not a member ends the list too; when `stops` is a list,
+    it gets (number, start, end) for it, so the caller can say the list was not read further."""
     head = XREF_HEAD_RE.match(s, a)
     if not head or head.end() > b:
         return []
@@ -244,7 +247,7 @@ def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, i
         return not ("-" in num or "." in num)
 
     def lead(num):
-        return re.match(r"\d+", num)[0]
+        return re.match(r"\d+[-.]?", num)[0]
 
     h = head["num"]
 
@@ -252,8 +255,12 @@ def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, i
         return plain(num) == plain(h) and (num.count("-") == h.count("-") or lead(num) == lead(h))
 
     out, pos = [(head.group(0), a, head.end())], head.end()
-    while (t := XREF_TAIL_RE.match(s, pos)) and member(t["num"]) \
+    while (t := XREF_TAIL_RE.match(s, pos)) \
             and not any(t.start("cite") < e and s_ < t.end("cite") for s_, e in taken):
+        if not member(t["num"]):
+            if stops is not None and t.start("cite") >= b:  # inside the fragment the composite BLOCKs
+                stops.append((t["cite"], t.start("cite"), t.end("cite")))
+            break
         out.append((f"Section {t['cite']}", t.start("cite"), t.end("cite")))
         pos = t.end()
     return out if len(out) > 1 and pos >= b else []
@@ -310,8 +317,10 @@ def _case_name(prefix: str) -> str:
     return " ".join(name)
 
 
-def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R."):
-    """Yield (key, display, pin, start, end, kind, extra) for authority cites in s."""
+def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.", stops=None):
+    """Yield (key, display, pin, start, end, kind, extra) for authority cites in s. When `stops` is a
+    list, a coordinated "Section X, Y" list that ends at a number it does not read as a member adds
+    (number, start, end) to it (see _xref_members); stored citations are scanned without one."""
     spans = []
 
     def free(a, b):
@@ -386,7 +395,7 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
         lst = next((m for m in lists if a <= m.start() < b), None)
         if lst is None:
             if free(a, b):
-                members = _xref_members(s, a, b, rows, spans)
+                members = _xref_members(s, a, b, rows, spans, stops)
                 spans.append((a, members[-1][2] if members else b))
                 for disp, ma, mb in members or [(frag, a, b)]:
                     key, sec = _statute_base(disp)
@@ -1089,8 +1098,8 @@ class _Checker:
                 secs.setdefault(k, set()).update(v)
         return secs
 
-    def _scan_authorities(self, s: str):
-        return scan_authorities(s, *rule_prefixes(self.docket))
+    def _scan_authorities(self, s: str, stops=None):
+        return scan_authorities(s, *rule_prefixes(self.docket), stops=stops)
 
     def _lookup(self, key):
         rows = list({r["id"]: r for r in self.auth_index.get(key) or []}.values())
@@ -1181,7 +1190,8 @@ class _Checker:
             if c.target:
                 self.check_paras(c, line)
             cites.append(c)
-        for key, disp, pin, a, b, kind, extra in self._scan_authorities(u.text):
+        stops: list = []
+        for key, disp, pin, a, b, kind, extra in self._scan_authorities(u.text, stops):
             if not free(a, b):
                 continue
             claimed.append((a, b))
@@ -1189,6 +1199,11 @@ class _Checker:
             c = Cite("authority", raw, disp, key, pin, a, b)
             self.resolve_authority(c, kind, extra, line, u.start + a)
             cites.append(c)
+        for num, a, b in stops:
+            if free(a, b):
+                self.rep.add("WARN", "list-member-unchecked", line, num,
+                             "a section list ends here: this number was not read as a section, so if it is one, "
+                             "cite it with its code")
         cites.sort(key=lambda c: c.start)
         for m in ID_RE.finditer(u.text):
             if not free(*m.span()):
