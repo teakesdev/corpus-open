@@ -171,6 +171,12 @@ ABBREV = {
     "tel", "transp", "mut", "fin", "elec", "gen", "hous", "indus", "ry", "u", "n", "w", "e", "c", "cert",
     "approx", "dep", "decl", "aff", "tr", "hr", "min", "fig", "vol", "pl", "def", "defs", "pls", "mot", "resp",
 }
+# State abbreviations not in ABBREV, matched case-sensitively: "Ill." and "Me." are states, while
+# "ill." and "me." end ordinary sentences. ("W. Va." needs "Va."; single letters are handled apart.)
+STATE_ABBREV = {
+    "Ariz", "Colo", "Conn", "Del", "Haw", "Ill", "Ind", "Kan", "Ky", "Me", "Md", "Mass", "Mich", "Minn", "Mo",
+    "Mont", "Neb", "Nev", "Okla", "Or", "Pa", "Vt", "Va", "Wash", "Wis", "Wyo",
+}
 NAME_CONNECT = {"v.", "of", "the", "and", "&", "for", "de", "la", "ex", "rel.", "in", "re", "ex.", "et", "al.", "a"}
 
 
@@ -271,7 +277,7 @@ def _case_name(prefix: str) -> str:
         t = toks[i]
         bare = t.rstrip(".,").lower()
         if t.endswith(".") and t.lower() not in NAME_CONNECT and bare not in ABBREV and len(bare) > 1 \
-                and name and name[0][:1].isupper():
+                and t.rstrip(".,") not in STATE_ABBREV and name and name[0][:1].isupper():
             break  # previous sentence ended here
         if t.lower() in NAME_CONNECT or t[:1].isupper() or t[:1] in "'’":
             name.insert(0, t)
@@ -510,8 +516,10 @@ def _sentence_spans(text: str, start: int, end: int):
             continue  # the quotation continues past this boundary
         before = text[s:cut + 1]
         tok = re.search(r"(\S+)$", before)
-        word = tok.group(1).lstrip("([*\"“").rstrip(".").lower() if tok else ""
-        if text[cut] == "." and (word in ABBREV or (len(word) == 1 and word.isalpha()) or re.fullmatch(r"(?:[a-z]\.)+[a-z]", word)
+        raw = tok.group(1).lstrip("([*\"“").rstrip(".") if tok else ""
+        word = raw.lower()
+        if text[cut] == "." and (word in ABBREV or raw in STATE_ABBREV or (len(word) == 1 and word.isalpha())
+                                 or re.fullmatch(r"(?:[a-z]\.)+[a-z]", word)
                                  or re.fullmatch(r"[a-z]+\.[a-z.]+", word)):
             continue
         e = start + m.end()
