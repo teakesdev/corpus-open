@@ -227,22 +227,32 @@ def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, i
     """(display, start, end) for each member of a coordinated cross-reference whose extracted
     fragment is s[a:b], or [] when it is not one. The extractor keeps "Section X or Y" as one
     fragment and stops "Section X, Y" at X, so each member becomes its own short-form cite.
-    A member has the head's number shape: as many hyphenated parts, and plain (no hyphen or dot)
-    only if the head is plain. So "552" after "Section 552.101," is a count, not a member, while
-    "552.103.5" and "21-23-7.1" are members whatever their dotted depth. The list stops at a
-    number another cite claims or one followed by a dotted word ("42 U.S.C.", "1972 Miss.
-    Laws"). A range ("through", "to") or "of Title N" does not cover the fragment and stays whole."""
+    A member is plain (no hyphen or dot) exactly when the head is, and has the head's number of
+    hyphenated parts or its leading number (the same title or chapter). So "552" after "Section
+    552.101," is a count, and "1972-73" or "2-1" after "Section 21-23-7," is not a member, while
+    "552.103.5" and "552.102-1" after 552.101, "21-23" after 21-23-7, and "11-46-11.1" after
+    21-23-7 are. The list stops at a number another cite claims or one followed by a dotted word
+    ("42 U.S.C.", "1972 Miss. Laws"). A range ("through", "to") or "of Title N" does not cover
+    the fragment and stays whole."""
     head = XREF_HEAD_RE.match(s, a)
     if not head or head.end() > b:
         return []
     taken = spans + [(r["char_start"], r["char_end"]) for r in rows
                      if r["status"] == "extracted" and not (a <= r["char_start"] and r["char_end"] <= b)]
 
-    def shape(num):
-        return num.count("-"), "-" in num or "." in num
+    def plain(num):
+        return not ("-" in num or "." in num)
 
-    out, pos, parts = [(head.group(0), a, head.end())], head.end(), shape(head["num"])
-    while (t := XREF_TAIL_RE.match(s, pos)) and shape(t["num"]) == parts \
+    def lead(num):
+        return re.match(r"\d+", num)[0]
+
+    h = head["num"]
+
+    def member(num):
+        return plain(num) == plain(h) and (num.count("-") == h.count("-") or lead(num) == lead(h))
+
+    out, pos = [(head.group(0), a, head.end())], head.end()
+    while (t := XREF_TAIL_RE.match(s, pos)) and member(t["num"]) \
             and not any(t.start("cite") < e and s_ < t.end("cite") for s_, e in taken):
         out.append((f"Section {t['cite']}", t.start("cite"), t.end("cite")))
         pos = t.end()
