@@ -142,9 +142,13 @@ class TestSwe2ComplaintModeReview(Base):
             self.assertIn("record-not-in-store", codes(r, "BLOCK"), mode)
 
     def test_p3_roman_heading_with_rule_stays_a_heading(self):
-        # Rule 99 is not logged: if the heading were read as text it would block
-        r = self.m.check("I. Leave is proper under Rule 99(z).\n\nText. Doc. 16.")
-        self.assertNotIn("authority-not-logged", codes(r, "BLOCK"))
+        # superseded in round 2: a heading keeps its section role (it ends the facts) and its
+        # rule cite is now checked too (Rule 99 is not logged, so it blocks)
+        r = self.m.check("STATEMENT OF FACTS\n\nThe arrest happened at home on a holiday.\n\n"
+                         "I. Leave is proper under Rule 99(z).\n\nThe motion should be denied because the claims are plausible.\n")
+        self.assertEqual([f.cite for f in r.findings if f.code == "uncited-fact"],
+                         ["The arrest happened at home on a holiday."])
+        self.assertIn("authority-not-logged", codes(r, "BLOCK"))
 
     def test_p3_summary_mentions_listed_quotations(self):
         r = self.m.check('3. The captain said "stand down" to him.', mode="complaint")
@@ -167,4 +171,43 @@ class TestSwe2ComplaintModeReview(Base):
 
     def test_p3_readme_states_the_actual_rule(self):
         readme = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
-        self.assertIn("never a heading when it contains a cite or a quotation", readme)
+        self.assertIn("Headings are still read for cites and quotations", readme)
+
+
+class TestSwe2ComplaintModeReviewRound2(Base):
+    """SWE-2 round-2 re-review of complaint mode (2026-10-25)."""
+
+    def test_p2_cites_inside_headings_are_checked(self):
+        for mode in ("brief", "complaint"):
+            for draft in ("1. Rule 99(z) Standard.", "3. Claims Under 99 U.S.C. 1983.",
+                          "2. Facts Under Local Rule 99.", "II. Argument Under Rule 99.", "## The Rule 99 Standard"):
+                r = self.m.check(draft, mode=mode)
+                self.assertIn("authority-not-logged", codes(r, "BLOCK"), (mode, draft))
+
+    def test_p2_headings_keep_their_section_role(self):
+        r = self.m.check("STATEMENT OF FACTS\n\nThe arrest happened at home on a holiday.\n\n"
+                         "II. Argument Under Rule 15\n\nThe motion should be denied because the claims are plausible.\n")
+        self.assertEqual([f.cite for f in r.findings if f.code == "uncited-fact"],
+                         ["The arrest happened at home on a holiday."])
+
+    def test_p3_quote_only_lettered_heading_reaches_quote_checks(self):
+        r = self.m.check('A. He said "the file is closed"')
+        self.assertIn("quote-uncited", codes(r, "UNCHECKED"))
+        r = self.m.check('A. He said "the file is closed"', mode="complaint")
+        self.assertEqual([q for _, q in r.notes], ["the file is closed"])
+
+    def test_p3_numbered_fact_subheading_does_not_close_the_fact_section(self):
+        r = self.m.check("1. Statement of Facts.\n\n2. Plaintiff Was Arrested.\n\n"
+                         "He was held for days without a hearing.\n")
+        self.assertEqual([f.cite for f in r.findings if f.code == "uncited-fact"],
+                         ["He was held for days without a hearing."])
+
+    def test_p3_numbered_argument_heading_closes_the_fact_section(self):
+        r = self.m.check("1. Statement of Facts.\n\nThe arrest happened at home on a holiday.\n\n2. Argument.\n\n"
+                         "The motion should be denied because the claims are plausible.\n")
+        self.assertEqual([f.cite for f in r.findings if f.code == "uncited-fact"],
+                         ["The arrest happened at home on a holiday."])
+
+    def test_heading_is_never_flagged_as_an_uncited_fact(self):
+        r = self.m.check("STATEMENT OF FACTS\n\n## What Happened On The Holiday Weekend\n\nText. Doc. 16.\n")
+        self.assertEqual([f.code for f in r.findings if f.code == "uncited-fact"], [])

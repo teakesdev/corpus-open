@@ -159,6 +159,8 @@ COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 QUOTE_RE = re.compile(r"“([^”]{1,1500})”|\"([^\"\n]{1,1500})\"")
 SIGNALS = {"see", "also", "cf", "cf.", "e.g.", "e.g.,", "accord", "compare", "but", "contra", "citing",
            "quoting", "and", "with", "see,", "generally"}
+NONFACT_HEADING = re.compile(r"\b(?:argument|standard|discussion|analysis|conclusion|law|legal|relief|prayer|"
+                             r"counts?|claims?|causes? of action|jurisdiction|venue|damages|remed)", re.I)
 FACT_HEADING = re.compile(r"\b(facts?|background|statement of (?:the )?(?:case|facts)|procedural history|allegations)\b", re.I)
 ABBREV = {
     "v", "vs", "id", "no", "nos", "doc", "docs", "dkt", "dkts", "ecf", "compl", "am", "ex", "exs", "fed", "r",
@@ -458,6 +460,7 @@ class Unit:
     text: str
     fact_section: bool
     tags: list = field(default_factory=list)
+    heading: bool = False  # checked for cites and quotations, never flagged as an uncited fact
 
 
 def _blank(text: str, pattern: re.Pattern) -> str:
@@ -1025,10 +1028,16 @@ class _Checker:
                 continue
             lvl = _heading(block, self.rep.mode)
             if lvl is not None:
+                # a numbered title at the fact heading's own level is a fact subheading
+                # ("2. Plaintiff Was Arrested.") unless it names a non-fact section ("2. Argument.")
+                sub = (lvl == fact_level and re.match(r"\s*\d{1,3}\.\s", block)
+                       and not NONFACT_HEADING.search(block))
                 if FACT_HEADING.search(block):
                     fact_level = lvl
-                elif fact_level is not None and lvl <= fact_level:
+                elif fact_level is not None and lvl <= fact_level and not sub:
                     fact_level = None
+                hs = _lstrip(self.text, bm.start())
+                units.append(Unit(hs, bm.end(), self.text[hs:bm.end()], False, heading=True))
                 continue
             spans = list(_sentence_spans(self.text, bm.start(), bm.end()))
             merged: list[list[int]] = []
@@ -1203,7 +1212,7 @@ class _Checker:
         facts = self.facts(u, line)
         if cites or quotes or facts:
             self.rep.rows.append(Row(line, " ".join(u.text.split()), cites, quotes, facts))
-        elif self.rep.mode == "brief" and u.fact_section and len(u.text.split()) >= 4:
+        elif self.rep.mode == "brief" and u.fact_section and not u.heading and len(u.text.split()) >= 4:
             self.rep.add("UNCHECKED", "uncited-fact", line, " ".join(u.text.split()),
                          "factual sentence with no record, pleading or authority cite")
 
