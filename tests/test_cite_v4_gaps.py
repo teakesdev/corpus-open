@@ -27,7 +27,10 @@ def exact(text: str, needle: str) -> None:
 class TestParserCapability(unittest.TestCase):
     def test_experimental_at_capability_level(self):
         self.assertEqual(citations.PARSER_CAPABILITY, "experimental")
-        self.assertEqual(citations.PARSER_ID, "kit-cite-0.4")
+        # 0.6 (ty 2026-10-24): hyphenated and dotted "Section" numbers read whole (0.5 on
+        # feat/matter-capture) plus whole state heads on "Code Ann." / "Stat. Ann." cites.
+        # holdout_v3 scored the 0.4 blob.
+        self.assertEqual(citations.PARSER_ID, "kit-cite-0.6")
 
     def test_unparsable_section_is_still_occurrence_failure(self):
         rows = citations.extract_citations("See § for details.")

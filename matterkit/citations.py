@@ -38,7 +38,13 @@ LEGACY_VERIFICATION = {"verified-official"}  # readable, never written by kit co
 # Capability-level label (chair 2026-09-09): the extractor is experimental until
 # a fresh holdout_v3 acceptance pass. Do NOT mark every row extraction-failed.
 PARSER_CAPABILITY = "experimental"
-PARSER_ID = "kit-cite-0.4"
+# 0.6 (ty 2026-10-24): two extractor changes, each called 0.5 on its own branch, combined:
+#   "Section 21-23-8" and "Section 552.101" are read whole, not cut to "Section 21" / "Section 552"
+#   (fix/brief-dotted-section, which landed on feat/matter-capture as 0.5); and "Code Ann." /
+#   "Stat. Ann." heads start at the state ("W. Va.", "Ariz. Rev."), not one word before "Code"
+#   (fix/state-abbrev-cites). On feat/matter-capture, kit-cite-0.5 rows come from the first change
+#   alone. holdout_v3 scored the 0.4 blob, and its acceptance covers neither.
+PARSER_ID = "kit-cite-0.6"
 
 
 class StageOrderError(ValueError):
@@ -53,6 +59,19 @@ def now_iso() -> str:
 # Extraction (stdlib patterns; order matters — most specific first, and a
 # span already claimed by an earlier pattern is never re-claimed)
 # --------------------------------------------------------------------------
+# A cross-reference section number: 80 · 106A · 21-23-8 · 552.101 · 13-1-4.1.
+# A dot or hyphen continues the number only before a digit, so a sentence-final
+# period is not taken; "5.1" and "5.10" stay two different numbers.
+_SEC_NUM = r"\d+[A-Za-z]?(?:[-.]\d+[A-Za-z]?)*"
+
+# State and territory abbreviations (Bluebook T1), without the final dot; then
+# the names cited without one ("Am. Samoa" ends in a word, not a dot). Any
+# whitespace may sit inside a two-part one ("W.  Va." in double-spaced or PDF text).
+_STATE_DOTTED = (r"Ala|Ariz|Ark|Cal|Colo|Conn|Del|Fla|Ga|Haw|Ill|Ind|Kan|Ky|La|Me|Md|Mass|Mich|Minn|"
+                 r"Miss|Mo|Mont|Neb|Nev|Okla|Or|Pa|Tenn|Tex|Vt|Va|Wash|Wis|Wyo|W\.\s*Va|"
+                 r"N\.\s*[CDHJMY]|S\.\s*[CD]|R\.\s*I|D\.\s*C|P\.\s*R|V\.\s*I|N\.\s*Mar\.\s*I")
+_STATE_UNDOTTED = r"Alaska|Idaho|Iowa|Ohio|Utah|Guam|Am\.\s*Samoa"
+
 _PATTERNS = [
     # Public laws spelled out:           Public Law 107-204
     re.compile(r"\bPublic\s+Law\s+\d+\s*[–\-—]\s*\d+\b"),
@@ -76,8 +95,15 @@ _PATTERNS = [
     re.compile(r"\b\d+\s+C\.F\.R\.\s*§+\s*[\dA-Za-z.\-]+"),
     # Delaware:            8 Del. C. § 141
     re.compile(r"\b\d+\s+Del\.\s+C\.\s*§+\s*\d+[a-z]?(?:\s*\([^)]{1,24}\))?"),
-    # State Code Ann.:     Miss. Code Ann. § 57-1-319 / Wyo. Stat. Ann. § 17-29-802
-    re.compile(r"\b[A-Z][A-Za-z.]*\.?\s+(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
+    # State Code Ann.:     Miss. Code Ann. § 57-1-319 / Wyo. Stat. Ann. § 17-29-802 ·
+    #   W. Va. Code Ann. § 1-1-1 · Ariz. Rev. Stat. Ann. § 12-341 · Ohio Rev. Code Ann. § 2305.10
+    # The head starts at a state or territory and takes up to four dotted words after it, so
+    # "W. Va." is not read as "Va." and "Ariz. Rev." not as "Rev."; any other head is one word.
+    # One regex, so no inner "Va. Code Ann." row is left inside "W. Va. Code Ann.".
+    re.compile(rf"(?<![\w.])(?:(?:{_STATE_DOTTED})\.\s*|(?:{_STATE_UNDOTTED})\s+)"
+               r"(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){0,4}"
+               r"(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"
+               r"|\b[A-Z][A-Za-z.]*\.?\s+(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
     # Keyword-tail code names (v2): dotted words chain across legitimate
     # spaces; (?<![\w.]) forbids starting mid-acronym (the 'N.Y.' -> 'Y. …'
     # FP) and sentence prefixes can never match (no trailing dot).
@@ -104,10 +130,12 @@ _PATTERNS = [
     # Chapter abbreviation:              ch. 645
     re.compile(r"\bch\.\s+\d+[A-Za-z]?\b"),
     # Cross-reference word family: section 43 of Title 8 · Section 80 ·
-    # sections 106 and 106A · section 401(a) · Sec. 107
+    # sections 106 and 106A · section 401(a) · Sec. 107 · Section 21-23-8 ·
+    # Section 552.101 (a hyphenated or dotted number is one section, not
+    # "Section 21" or "Section 552")
     re.compile(
-        r"\b(?:[Ss]ections?|Sec\.)\s+\d+[A-Za-z]?"
-        r"(?:\s*\([^)]{1,24}\))*(?:\s+(?:and|or|through|to)\s+\d+[A-Za-z]?"
+        rf"\b(?:[Ss]ections?|Sec\.)\s+{_SEC_NUM}"
+        rf"(?:\s*\([^)]{{1,24}}\))*(?:\s+(?:and|or|through|to)\s+{_SEC_NUM}"
         r"(?:\s*\([^)]{1,24}\))*)*(?:\s+of\s+Title\s+\d+)?"
     ),
     # Short-form section cite: § 1983 / § 309(c) / § 330016(1)(L). Digit-start
@@ -189,8 +217,8 @@ def extract_citations(text: str, document_sha256: str | None = None,
             # its own item): 'section 502 or 503' also yields 'section 502'
             # and the trailing member as separate nested rows.
             xref = re.match(
-                r"((?:sections?|Sec\.)\s+\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)"
-                r"(\s+(?:and|or|through|to)\s+)(\d+[A-Za-z]?(?:\s*\([^)]{1,24}\))?)",
+                rf"((?:sections?|Sec\.)\s+{_SEC_NUM}(?:\s*\([^)]{{1,24}}\))?)"
+                rf"(\s+(?:and|or|through|to)\s+)({_SEC_NUM}(?:\s*\([^)]{{1,24}}\))?)",
                 frag)
             if xref:
                 head_s = s + xref.start(1)

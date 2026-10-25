@@ -1,0 +1,10 @@
+e77da0c: 111 wrapped drafts, crashes 7
+    5 x AttributeError briefcheck.py:260   first: 'Under Fed.\nR. Civ. P. 12(b)(6) and '
+    2 x AttributeError briefcheck.py:273   first: '.R. 7(b)(2) govern; Local\nBankruptcy Rule 3 too. R'
+bebaaac: 111 wrapped drafts, crashes 0
+ff4a364: 111 wrapped drafts, crashes 7
+    5 x AttributeError briefcheck.py:301   first: 'Under Fed.\nR. Civ. P. 12(b)(6) and '
+    2 x AttributeError briefcheck.py:318   first: '.R. 7(b)(2) govern; Local\nBankruptcy Rule 3 too. R'
+f523e2d: 111 wrapped drafts, crashes 7
+    5 x AttributeError briefcheck.py:301   first: 'Under Fed.\nR. Civ. P. 12(b)(6) and '
+    2 x AttributeError briefcheck.py:318   first: '.R. 7(b)(2) govern; Local\nBankruptcy Rule 3 too. R'

@@ -1,0 +1,42 @@
+* 'The clerk acted under W. Va. Code § 21-23-7, as the order notes. The order says so.'
+    6ac2b01 sentences ['The clerk acted under W. Va.', 'Code § 21-23-7, as the order notes.', 'The order says so.']
+    74190c0 sentences ['The clerk acted under W. Va. Code § 21-23-7, as the order notes.', 'The order says so.']
+* 'Venue lies under Mass. Gen. Laws ch. 223, § 1. The court agreed.'
+    6ac2b01 sentences ['Venue lies under Mass.', 'Gen. Laws ch. 223, § 1.', 'The court agreed.']
+    74190c0 sentences ['Venue lies under Mass. Gen. Laws ch. 223, § 1.', 'The court agreed.']
+* 'The claim is timely under Or. Rev. Stat. § 12.110, as pleaded.'
+    6ac2b01 sentences ['The claim is timely under Or.', 'Rev. Stat. § 12.110, as pleaded.']
+    74190c0 sentences ['The claim is timely under Or. Rev. Stat. § 12.110, as pleaded.']
+* 'Fees follow under Ky. Rev. Stat. Ann. § 12-341. The court agreed.'
+    6ac2b01 sentences ['Fees follow under Ky.', 'Rev. Stat. Ann. § 12-341.', 'The court agreed.']
+    74190c0 sentences ['Fees follow under Ky. Rev. Stat. Ann. § 12-341.', 'The court agreed.']
+* "See Smith v. Pa. Dep't of Corr., 1 F.3d 1 (3d Cir. 2000)."
+    6ac2b01 sentences ['See Smith v. Pa.', "Dep't of Corr., 1 F.3d 1 (3d Cir. 2000)."]
+    6ac2b01 cases ["Dep't of Corr., 1 F.3d 1"]
+    74190c0 sentences ["See Smith v. Pa. Dep't of Corr., 1 F.3d 1 (3d Cir. 2000)."]
+    74190c0 cases ["Smith v. Pa. Dep't of Corr., 1 F.3d 1"]
+* 'See Doe v. Roe, 1 A.3d 1 (Pa. 2010). The court agreed.'
+    6ac2b01 sentences ['See Doe v. Roe, 1 A.3d 1 (Pa.', '2010).', 'The court agreed.']
+    6ac2b01 cases ['Doe v. Roe, 1 A.3d 1']
+    74190c0 sentences ['See Doe v. Roe, 1 A.3d 1 (Pa. 2010).', 'The court agreed.']
+    74190c0 cases ['Doe v. Roe, 1 A.3d 1']
+= 'He was ill. The doctor came.'
+    sentences ['He was ill.', 'The doctor came.']
+= 'She called me. Then she left.'
+    sentences ['She called me.', 'Then she left.']
+= 'It reached critical mass. The reaction began.'
+    sentences ['It reached critical mass.', 'The reaction began.']
+= 'The trade was a wash. The parties settled.'
+    sentences ['The trade was a wash.', 'The parties settled.']
+= 'She said or. Then she left.'
+    sentences ['She said or.', 'Then she left.']
+* 'Plaintiff lives in Richmond, Va. She was arrested on May 1. Doc. 16 at 2.'
+    6ac2b01 sentences ['Plaintiff lives in Richmond, Va.', 'She was arrested on May 1.', 'Doc. 16 at 2.']
+    74190c0 sentences ['Plaintiff lives in Richmond, Va. She was arrested on May 1.', 'Doc. 16 at 2.']
+* 'He attended Mass. Afterwards he went home.'
+    6ac2b01 sentences ['He attended Mass.', 'Afterwards he went home.']
+    74190c0 sentences ['He attended Mass. Afterwards he went home.']
+= 'The company is a Del. corporation. It was formed in 2001.'
+    sentences ['The company is a Del. corporation.', 'It was formed in 2001.']
+= 'Plaintiff lives in Jackson, Miss. She was arrested on May 1. Doc. 16 at 2.'
+    sentences ['Plaintiff lives in Jackson, Miss. She was arrested on May 1.', 'Doc. 16 at 2.']

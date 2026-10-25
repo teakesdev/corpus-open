@@ -1,0 +1,82 @@
+parser 6ac2b01: kit-cite-0.4   74190c0: kit-cite-0.5
+evals: 56 docs, 570 rows at 6ac2b01; 0 docs differ on (char_start, char_end, raw_fragment, status)
+
+probes (extracted fragments; '=' same at both commits):
+  * 'See W. Va. Code Ann. § 1-1-1.'
+      6ac2b01: ['Va. Code Ann. § 1-1-1', '§ 1-1-1']
+      74190c0: ['W. Va. Code Ann. § 1-1-1', '§ 1-1-1']
+  = 'See W.Va. Code Ann. § 1-1-1.'
+      ['W.Va. Code Ann. § 1-1-1', '§ 1-1-1']
+  = 'See Va. Code Ann. § 1-1-1.'
+      ['Va. Code Ann. § 1-1-1', '§ 1-1-1']
+  * 'See N. H. Rev. Stat. Ann. § 1-1.'
+      6ac2b01: ['Rev. Stat. Ann. § 1-1', '§ 1-1']
+      74190c0: ['N. H. Rev. Stat. Ann. § 1-1', '§ 1-1']
+  * 'See N.H. Rev. Stat. Ann. § 1-1.'
+      6ac2b01: ['Rev. Stat. Ann. § 1-1', '§ 1-1']
+      74190c0: ['N.H. Rev. Stat. Ann. § 1-1', '§ 1-1']
+  * 'See S. C. Code Ann. § 15-3-530.'
+      6ac2b01: ['C. Code Ann. § 15-3-530', '§ 15-3-530']
+      74190c0: ['S. C. Code Ann. § 15-3-530', '§ 15-3-530']
+  * 'See N. Y. Code Ann. § 1.'
+      6ac2b01: ['Y. Code Ann. § 1', '§ 1']
+      74190c0: ['N. Y. Code Ann. § 1', '§ 1']
+  = 'See D.C. Code Ann. § 1-1.'
+      ['D.C. Code Ann. § 1-1', '§ 1-1']
+  * 'See N. Mar. I. Code Ann. § 1.'
+      6ac2b01: ['I. Code Ann. § 1', '§ 1']
+      74190c0: ['N. Mar. I. Code Ann. § 1', '§ 1']
+  * 'See Am. Samoa Code Ann. § 1.'
+      6ac2b01: ['Samoa Code Ann. § 1', '§ 1']
+      74190c0: ['Am. Samoa Code Ann. § 1', '§ 1']
+  * 'See Ariz. Rev. Stat. Ann. § 12-341.'
+      6ac2b01: ['Rev. Stat. Ann. § 12-341', '§ 12-341']
+      74190c0: ['Ariz. Rev. Stat. Ann. § 12-341', '§ 12-341']
+  * 'See Ky. Rev. Stat. Ann. § 413.140.'
+      6ac2b01: ['Rev. Stat. Ann. § 413.140', '§ 413.140']
+      74190c0: ['Ky. Rev. Stat. Ann. § 413.140', '§ 413.140']
+  * 'See La. Rev. Stat. Ann. § 9:5604.'
+      6ac2b01: ['Rev. Stat. Ann. § 9', '§ 9']
+      74190c0: ['La. Rev. Stat. Ann. § 9', '§ 9']
+  * 'See Ohio Rev. Code Ann. § 2305.10.'
+      6ac2b01: ['Rev. Code Ann. § 2305.10', '§ 2305.10']
+      74190c0: ['Ohio Rev. Code Ann. § 2305.10', '§ 2305.10']
+  * 'See Tex. Civ. Prac. & Rem. Code Ann. § 16.003.'
+      6ac2b01: ['Rem. Code Ann. § 16.003', '§ 16.003']
+      74190c0: ['Tex. Civ. Prac. & Rem. Code Ann. § 16.003', '§ 16.003']
+  * 'See Cal. Bus. & Prof. Code Ann. § 17200.'
+      6ac2b01: ['Prof. Code Ann. § 17200', '§ 17200']
+      74190c0: ['Cal. Bus. & Prof. Code Ann. § 17200', '§ 17200']
+  = 'Acme, Inc. Miss. Code Ann. § 1-1-1.'
+      ['Miss. Code Ann. § 1-1-1', '§ 1-1-1']
+  = 'See Exhibit A. Va. Code Ann. § 1-1-1 there.'
+      ['Va. Code Ann. § 1-1-1', '§ 1-1-1']
+  * 'Miss. Code Ann. § 1; W. Va. Code Ann. § 2.'
+      6ac2b01: ['Miss. Code Ann. § 1', '§ 1', 'Va. Code Ann. § 2', '§ 2']
+      74190c0: ['Miss. Code Ann. § 1', '§ 1', 'W. Va. Code Ann. § 2', '§ 2']
+  = 'Under Wyo. Stat. Ann. § 17-29-800.'
+      ['Wyo. Stat. Ann. § 17-29-800', '§ 17-29-800']
+  = 'Id. Miss. Code Ann. § 1-1-1 also applies.'
+      ['Miss. Code Ann. § 1-1-1', '§ 1-1-1']
+  = 'Smith Co. Tex. Code Ann. § 1 applies.'
+      ['Tex. Code Ann. § 1', '§ 1']
+  = "See Tex. Gov't Code Ann. § 3.005."
+      ['§ 3.005']
+  = 'See Cal. Health & Safety Code Ann. § 11362.5.'
+      ['Safety Code Ann. § 11362.5', '§ 11362.5']
+  = 'See Exampleton Code Ann. § 1-2.'
+      ['Exampleton Code Ann. § 1-2', '§ 1-2']
+  = 'See Iowa Code Ann. § 614.1.'
+      ['Iowa Code Ann. § 614.1', '§ 614.1']
+  = 'See Mo. Ann. Stat. § 516.120.'
+      ['Mo. Ann. Stat. § 516.120', '§ 516.120']
+  = 'See Md. Code Ann., Cts. & Jud. Proc. § 5-101.'
+      ['§ 5-101']
+  = 'See W. Va. Code Annotated § 21-23-7.'
+      ['§ 21-23-7']
+  = 'See W. Va. Code § 1-1-1.'
+      ['W. Va. Code § 1-1-1', '§ 1-1-1']
+  = 'See Or. Rev. Stat. § 12.110.'
+      ['Or. Rev. Stat. § 12.110', '§ 12.110']
+  = 'See Wash. Rev. Code § 4.16.080.'
+      ['Wash. Rev. Code § 4.16.080', '§ 4.16.080']

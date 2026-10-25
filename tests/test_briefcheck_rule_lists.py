@@ -45,7 +45,7 @@ class TestRuleListKeys(unittest.TestCase):
         cite = "Miss. Code Ann. §§ 21-21-3, 21-3-15"
         keys = briefcheck.authority_keys(cite)
         self.assertEqual(rule_keys(cite), set())
-        self.assertEqual(keys, {"statute:misscodeann21-21-3", "statute:misscodeann21-3-15",
+        self.assertEqual(keys, {"statute:misscode21-21-3", "statute:misscode21-3-15",
                                 "full:" + briefcheck._norm_key(cite)})
 
     def test_segment_after_a_statute_does_not_inherit_an_earlier_rule_prefix(self):

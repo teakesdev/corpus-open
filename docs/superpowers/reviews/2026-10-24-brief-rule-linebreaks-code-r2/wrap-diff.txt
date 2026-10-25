@@ -1,0 +1,8 @@
+11f607b: 618 wrapped variants of 13 drafts; crashes 38, lost cites 32, gained cites 2; probes {'list paren in a draft': 'CRASH AttributeError', 'list paren stored': 'CRASH AttributeError'}
+    e.g. crash AttributeError: 'Under Fed.\nR. Civ. P. 12(b)(6)'
+    e.g. lost rule:fedrcivp12: 'Under Fed. \nR. Civ. P. 12(b)(6'
+    e.g. lost rule:fedrcivp12: 'Under Fed.  \nR. Civ. P. 12(b)('
+    e.g. crash AttributeError: 'Under Fed. R.\nCiv. P. 12(b)(6) an'
+    e.g. lost rule:fedrcivp12: 'Under Fed. R. \nCiv. P. 12(b)(6) a'
+    e.g. lost rule:fedrcivp12: 'Under Fed. R.  \nCiv. P. 12(b)(6) '
+16659e9: 618 wrapped variants of 13 drafts; crashes 0, lost cites 0, gained cites 0; probes {'list paren in a draft': 'exit 1', 'list paren stored': 'exit 0'}

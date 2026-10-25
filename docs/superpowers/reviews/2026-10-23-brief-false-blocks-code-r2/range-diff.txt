@@ -1,0 +1,74 @@
+1:  267ab37 ! 1:  c0764f5 fix(brief): three cite styles no longer read as authority-not-logged
+    @@ matterkit/briefcheck.py: def scan_authorities(s: str, bare_rule: str = "Fed. R.
+                  yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
+     -                   "bare-rule", bare)
+     +                   "bare-rule", (bare, m["num"]))
+    -     for row in citations.extract_citations(s):
+    -         frag = row["raw_fragment"]
+    +     # The extractor rejects "§§" (no digit after the first "§"), so scan with each list's "§§" read as "§ "
+    +     # (same length: offsets hold) and yield every listed section as the single cite "<code> § <section>".
+    +     lists = list(SECTION_LIST_RE.finditer(s))
+    +@@ matterkit/briefcheck.py: def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
+              if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
+                  continue
+              a, b = row["char_start"], row["char_end"]
+     +        if frag.startswith("§") and (head := _ANNOTATED_HEAD.search(s, 0, a)):
+     +            a, frag = head.start(), s[head.start():b]
+    -         if free(a, b):
+    -             spans.append((a, b))
+    -             key, sec = _statute_base(frag)
+    +         lst = next((m for m in lists if a <= m.start() < b), None)
+    +         if lst is None:
+    +             if free(a, b):
+     @@ matterkit/briefcheck.py: class _Checker:
+              self.last_unit_targets: set = set()
+              self.full_cases: dict = {}   # (vol, rep) -> case key seen in draft
+2:  4a17f4d = 2:  0b0b3f2 review: hand the brief-check false-BLOCK fix to SWE-2
+3:  0333007 = 3:  2a59df5 review: relaunch SWE-2 on the brief-check false-BLOCK fix
+4:  0d9188f = 4:  c36e04d review: record SWE-2's APPROVE WITH CHANGES of the brief-check false-BLOCK fix
+5:  549a612 = 5:  d2466e8 fix(brief): a "Code Annotated" head starts at the state, not a preceding abbreviation
+6:  c3402e1 ! 6:  2082c21 fix(brief): check each member of a coordinated "Section X, Y or Z" cross-reference
+    @@ matterkit/briefcheck.py: _STATE_ABBREV = (r"(?:Ala|Ariz|Ark|Cal|Colo|Conn|Del|D\
+      def _statute_base(frag: str) -> tuple[str, str | None]:
+          """'42 U.S.C. § 1983(a)' -> ('statute:42usc1983', '1983'). 'Ann.' / 'Annotated' is not part
+     @@ matterkit/briefcheck.py: def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
+    -             spans.append(m.span())
+    -             yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
+    -                    "bare-rule", (bare, m["num"]))
+    --    for row in citations.extract_citations(s):
+    -+    rows = citations.extract_citations(s)
+    -+    for row in rows:
+    -         frag = row["raw_fragment"]
+    -         if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
+    +         lst = next((m for m in lists if a <= m.start() < b), None)
+    +         if lst is None:
+    +             if free(a, b):
+    +-                spans.append((a, b))
+    +-                key, sec = _statute_base(frag)
+    +-                yield (key, frag, None, a, b, "statute", sec)
+    ++                members = _xref_members(s, a, b, rows, spans)
+    ++                spans.append((a, members[-1][2] if members else b))
+    ++                for disp, ma, mb in members or [(frag, a, b)]:
+    ++                    key, sec = _statute_base(disp)
+    ++                    yield (key, disp, None, ma, mb, "statute", sec)
+                  continue
+    -@@ matterkit/briefcheck.py: def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
+    -         if frag.startswith("§") and (head := _ANNOTATED_HEAD.search(s, 0, a)):
+    -             a, frag = head.start(), s[head.start():b]
+    -         if free(a, b):
+    --            spans.append((a, b))
+    --            key, sec = _statute_base(frag)
+    --            yield (key, frag, None, a, b, "statute", sec)
+    -+            members = _xref_members(s, a, b, rows, spans)
+    -+            spans.append((a, members[-1][2] if members else b))
+    -+            for disp, ma, mb in members or [(frag, a, b)]:
+    -+                key, sec = _statute_base(disp)
+    -+                yield (key, disp, None, ma, mb, "statute", sec)
+    - 
+    - 
+    - def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.") -> set:
+    +         code, pos = s[a:lst.start()], lst.start("secs")
+    +         for i, part in enumerate(re.split(f"({_SEC_SEP})", lst["secs"])):
+     
+      ## tests/test_briefcheck_false_blocks.py ##
+     @@ tests/test_briefcheck_false_blocks.py: class TestHyphenatedSectionCrossReference(FalseBlockBase):
