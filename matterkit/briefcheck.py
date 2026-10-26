@@ -139,7 +139,23 @@ _SEC_SEP = r"\s*[,&]\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+"
 SECTION_LIST_RE = re.compile(rf"§§\s*(?P<secs>{_SEC}(?:(?:{_SEC_SEP})(?:{_SEC}|{_SUBSEC}))*)")
 SEC_RE = re.compile(_SEC)
 LIST_MEMBER_RE = re.compile(rf"(?:{_SEC_SEP})(?:(?P<sec>{_SEC})|{_SUBSEC})")
-LISTED_SEC_RE = re.compile(r"\d[\dA-Za-z.\-]*(?:\s*\([A-Za-z0-9]{1,4}\))*")  # a listed section: number + "(2)(ii)"
+_MARKS = r"(?:\s*\([A-Za-z0-9]{1,4}\))*"  # subsection marks after a section number: "(a)", "(2)(ii)", "(2018)"
+LISTED_SEC_RE = re.compile(rf"\d[\dA-Za-z.\-]*{_MARKS}")  # a listed section: number + "(2)(ii)"
+_PAREN_TAIL_RE = re.compile(r"(?:\s*\([^)]*\))+\s*$")  # [^)] as the extractor's: "(550 U.S. 544 (2007)" is one
+_MARK_RE = re.compile(r"\s*\([A-Za-z0-9]{1,4}\)")
+
+
+def _without_parentheticals(frag: str) -> str:
+    """frag up to its first trailing parenthetical that is not a subsection mark; that parenthetical
+    is scanned as its own text. '§ 21-23-9(a) (550 U.S. 544)' -> '§ 21-23-9(a)'; '§ 1983 (2018)' stays.
+    Everything from the first non-mark on is cut, so '§ 1983 (Rev. 2019) (a)' -> '§ 1983'; the key,
+    which drops trailing parentheticals anyway, is the same."""
+    if not (tail := _PAREN_TAIL_RE.search(frag)):
+        return frag
+    pos = tail.start()
+    while m := _MARK_RE.match(frag, pos):
+        pos = m.end()
+    return frag if pos >= len(frag.rstrip()) else frag[:pos]
 LOCAL_WORDS_RE = re.compile(
     r"(?<![\w.])Local(?:\s+(?:Uniform|Civil|Criminal|Bankruptcy|Admiralty|Court))*\s+Rules?\s+"
     r"(?P<num>\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
@@ -217,9 +233,13 @@ _ANNOTATED_HEAD = re.compile(rf"(?<![\w.]){_STATE_ABBREV}\s*(?:[A-Z][\w'&]*\.\s*
 # A coordinated cross-reference: "Section 21-23-7, 21-23-8, or 21-23-9" / "sections 106 and 106A" /
 # "Sections 552.101 and 552.102". The number shape is the extractor's, so the two read one section.
 _XREF_NUM = citations._SEC_NUM
-XREF_HEAD_RE = re.compile(rf"(?:[Ss]ections?|Sec\.)\s+(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*")
-XREF_TAIL_RE = re.compile(rf"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)"
-                          rf"(?P<cite>(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*)"
+# As in a "§§" list, the walk passes any parenthetical ("Section 21-23-7 (Rev. 2020) or 21-23-9",
+# "… (550 U.S. 544), 21-23-9"), but a member claims only its number and subsection marks, so a cite
+# in the parenthetical is scanned on its own.
+XREF_HEAD_RE = re.compile(rf"(?:[Ss]ections?|Sec\.)\s+(?P<num>{_XREF_NUM}){_MARKS}")
+XREF_TAIL_RE = re.compile(r"(?:\s*\([^)]{1,24}\))*"
+                          rf"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)"
+                          rf"(?P<cite>(?P<num>{_XREF_NUM}){_MARKS})"
                           r"(?![\w\-§]|\.\w|\s+[A-Z][\w'&]*\.)")
 
 
@@ -240,8 +260,9 @@ def _xref_members(s: str, a: int, b: int, rows, spans, stops=None) -> list[tuple
     head = XREF_HEAD_RE.match(s, a)
     if not head or head.end() > b:
         return []
+    # rows that start inside the fragment are the extractor's own pieces of it ("503 (550 U.S. 544)")
     taken = spans + [(r["char_start"], r["char_end"]) for r in rows
-                     if r["status"] == "extracted" and not (a <= r["char_start"] and r["char_end"] <= b)]
+                     if r["status"] == "extracted" and not a <= r["char_start"] < b]
 
     def plain(num):
         return not ("-" in num or "." in num)
@@ -389,15 +410,17 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
         frag = row["raw_fragment"]
         if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
             continue
-        a, b = row["char_start"], row["char_end"]
+        a = row["char_start"]
+        frag = _without_parentheticals(frag)  # "§ 21-23-9 (550 U.S. 544)": the case is its own cite
+        b = a + len(frag)
         if frag.startswith("§") and (head := _ANNOTATED_HEAD.search(s, 0, a)):
             a, frag = head.start(), s[head.start():b]
         lst = next((m for m in lists if a <= m.start() < b), None)
         if lst is None:
-            if free(a, b):
-                members = _xref_members(s, a, b, rows, spans, stops)
-                spans.append((a, members[-1][2] if members else b))
-                for disp, ma, mb in members or [(frag, a, b)]:
+            # each member claims its own text, so a cite in a parenthetical between members stays free
+            for disp, ma, mb in _xref_members(s, a, b, rows, spans, stops) or [(frag, a, b)]:
+                if free(ma, mb):
+                    spans.append((ma, mb))
                     key, sec = _statute_base(disp)
                     yield (key, disp, None, ma, mb, "statute", sec)
             continue
