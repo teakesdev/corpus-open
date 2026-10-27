@@ -211,7 +211,9 @@ NAME_CONNECT = {"v.", "of", "the", "and", "&", "for", "de", "la", "ex", "rel.", 
 
 
 def _norm_key(s: str) -> str:
-    return re.sub(r"[\s.§,]", "", s).lower()
+    """Drops spaces, "§", commas and dots, except a dot between two digits: "§ 5.1" keys as
+    "5.1", not "51", while "U.S.C." and a sentence-final period still drop."""
+    return re.sub(r"[\s§,]|(?<!\d)\.|\.(?!\d)", "", s).lower()
 
 
 def _rep_key(rep: str) -> str:
@@ -489,7 +491,8 @@ def authority_keys(citation: str, bare_rule: str = "Fed. R. Civ. P.", local_rule
         a, b, pos = pos, pos + len(seg), pos + len(seg) + 1
         inside = [k for k, _, _, s, *_ in found if a <= s < b]
         if inside:
-            prefix = re.sub(r"\d+$", "", inside[-1]) if inside[-1].startswith("rule:") else None
+            # the key keeps a rule number's dot ("rule:fedrcivp5.1"), so strip the whole number
+            prefix = re.sub(r"\d+(?:\.\d+)*$", "", inside[-1]) if inside[-1].startswith("rule:") else None
         elif prefix and (m := RULE_CONT_RE.fullmatch(seg.strip().rstrip("."))):
             keys.add(prefix + _norm_key(m["num"]))
         else:

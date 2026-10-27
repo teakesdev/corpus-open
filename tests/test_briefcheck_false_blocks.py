@@ -52,7 +52,7 @@ class TestBareRuleBindsToEarlierFullRuleCite(FalseBlockBase):
                          "Rule 5.1(b) requires the court to set conditions.\n")
         self.assertEqual(unlogged(r), [])
         [c] = cites(r, "Rule 5.1(b)")
-        self.assertEqual(c.target, "rule:missrcrimp51")
+        self.assertEqual(c.target, "rule:missrcrimp5.1")
         self.assertIn("read as Miss. R. Crim. P. 5.1(b)", c.display)
         self.assertIn("line 1", c.display)  # the binding names the full cite it followed
 
@@ -92,18 +92,18 @@ class TestBareRuleBindsToEarlierFullRuleCite(FalseBlockBase):
     def test_full_cite_later_in_the_same_sentence_does_not_bind_backward(self):
         r = self.m.check("Rule 5.1(b) requires a hearing. Miss. R. Crim. P. 5.1.")
         [c] = cites(r, "Rule 5.1(b)")
-        self.assertEqual(c.target, "rule:fedrcivp51")
+        self.assertEqual(c.target, "rule:fedrcivp5.1")
         self.assertIn("Rule 5.1(b)", unlogged(r))
 
     def test_most_recent_full_cite_wins(self):
         r = self.m.check("Fed. R. Civ. P. 5.1 covers constitutional challenges.\n\n"
                          "Miss. R. Crim. P. 5.1 covers first appearances.\n\nRule 5.1(b) applies here.\n")
         [c] = cites(r, "Rule 5.1(b)")
-        self.assertEqual(c.target, "rule:missrcrimp51")
+        self.assertEqual(c.target, "rule:missrcrimp5.1")
         r = self.m.check("Miss. R. Crim. P. 5.1 covers first appearances.\n\n"
                          "Fed. R. Civ. P. 5.1 covers constitutional challenges.\n\nRule 5.1(b) applies here.\n")
         [c] = cites(r, "Rule 5.1(b)")
-        self.assertEqual(c.target, "rule:fedrcivp51")
+        self.assertEqual(c.target, "rule:fedrcivp5.1")
 
     def test_local_rule_is_not_a_binding_target(self):
         # Local rules are short-cited as "Local Rule 7"; a bare "Rule 7" stays bare_rule so an

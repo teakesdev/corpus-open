@@ -4,7 +4,7 @@ and drew only a WARN. The fallback must match a whole section number.
 
 How it could fail:
   1. A tail of a section number binds: "§ 983" -> 1983, "§ 3-8" / "§ 23-8" -> 21-23-8,
-     or a section that differs only by a dot: "§ 1.01" -> 101 (keys drop dots).
+     or a section that differs only by a dot: "§ 1.01" -> 101 (keys used to drop dots).
   2. The fix over-corrects and a whole section stops binding: "§ 1983" or "§ 21-23-8"
      (with or without a subsection), or a logged cite written without "§"
      ("42 U.S.C. 1983"), now BLOCKs as authority-not-logged.
@@ -84,7 +84,7 @@ class TestPartialSectionDoesNotBind(ShortSectionBase):
         self.assert_unbound("Under § 23-8, the board meets monthly.", "§ 23-8", "statute:misscode21-23-8")
 
     def test_section_that_differs_only_by_a_dot_does_not_bind(self):
-        # keys drop dots, so "§ 1.01" and "§ 101" share a key tail; the sections differ
+        # keys used to drop dots, so "§ 1.01" and "§ 101" shared a key tail; the sections differ
         self.m.authority("42 U.S.C. § 101", "source-checked", via="https://example.org/official",
                          evidence="opened the official text")
         self.m.conn.commit()
@@ -95,7 +95,7 @@ class TestPartialSectionDoesNotBind(ShortSectionBase):
         self.m.authority("42 U.S.C. § 2.2", "source-checked", via="https://example.org/official",
                          evidence="opened the official text")
         self.m.conn.commit()
-        self.assert_unbound("Under § 2, the term is defined.", "§ 2", "statute:42usc22")
+        self.assert_unbound("Under § 2, the term is defined.", "§ 2", "statute:42usc2.2")
 
     def test_tail_after_full_cite_of_another_section_does_not_bind(self):
         # the earlier full cite is to § 1983, not § 983: no in-draft binding, and no fallback one
@@ -124,7 +124,7 @@ class TestPartialSectionDoesNotBind(ShortSectionBase):
 
     def test_section_a_dot_splits_does_not_bind(self):
         self.log("42 U.S.C. § 1.01")
-        self.assert_unbound("Under § 101, the term is defined.", "§ 101", "statute:42usc101")
+        self.assert_unbound("Under § 101, the term is defined.", "§ 101", "statute:42usc1.01")
 
 
 class TestWholeSectionStillBinds(ShortSectionBase):
@@ -210,7 +210,7 @@ class TestEveryLoggedStatuteKeyHasItsSection(unittest.TestCase):
             "5 U.S.C. § 552(b)(2)": {"statute:5usc552": {"552"}},
             "8 U.S.C. § 1108": {"statute:8usc1108": {"1108"}},
             "5 U.S.C. § 552a": {"statute:5usc552a": {"552a"}},
-            "12 CFR 1026.1": {"statute:12cfr10261": {"1026.1"}},
+            "12 CFR 1026.1": {"statute:12cfr1026.1": {"1026.1"}},
             "Miss. Code Ann. § 41-1983 (1983)": {"statute:misscode41-1983": {"41-1983"}},
             "42 U.S.C. § 11983; 5 U.S.C. § 1983": {"statute:42usc11983": {"11983"},
                                                    "statute:5usc1983": {"1983"}},

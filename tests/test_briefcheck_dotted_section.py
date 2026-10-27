@@ -104,7 +104,7 @@ class TestDottedSectionExtraction(unittest.TestCase):
         self.assertFalse([g for g in got if g.startswith("Sections")], got)
 
     def test_statute_base_keeps_the_dotted_section(self):
-        self.assertEqual(briefcheck._statute_base("Section 552.101"), ("statute-short:section552101", "552.101"))
+        self.assertEqual(briefcheck._statute_base("Section 552.101"), ("statute-short:section552.101", "552.101"))
         self.assertEqual(briefcheck._statute_base("Section 552.101(a)")[1], "552.101")
 
 
@@ -142,21 +142,21 @@ class TestDottedSectionBinding(DottedBase):
         r = self.m.check("Under Section 552.101, records are closed.")
         self.assertEqual(unlogged(r), [])
         [c] = cites(r, "Section 552.101")
-        self.assertEqual(c.target, "statute:texgov'tcode552101")
+        self.assertEqual(c.target, "statute:texgov'tcode552.101")
 
     def test_section_word_binds_to_earlier_full_cite(self):
         r = self.m.check("Tex. Gov't Code § 552.101 closes them. Section 552.101 also applies.")
         self.assertEqual(codes(r, "BLOCK"), [])
         self.assertNotIn("short-form-without-full-cite", codes(r, "WARN"))
         [c] = cites(r, "Section 552.101")
-        self.assertEqual(c.target, "statute:texgov'tcode552101")
+        self.assertEqual(c.target, "statute:texgov'tcode552.101")
 
     def test_section_word_binds_like_section_sign(self):
         by_word = self.m.check("The records are closed by Section 552.102.")
         by_sign = self.m.check("The records are closed by § 552.102.")
         w, s = by_word.rows[0].cites[0], by_sign.rows[0].cites[0]
         self.assertEqual(w.target, s.target)
-        self.assertEqual(w.target, "statute:texgov'tcode552102")
+        self.assertEqual(w.target, "statute:texgov'tcode552.102")
         self.assertEqual((codes(by_word, "BLOCK"), codes(by_word, "WARN")),
                          (codes(by_sign, "BLOCK"), codes(by_sign, "WARN")))
 
@@ -185,7 +185,7 @@ class TestDecimalStyleNumbersStayDistinct(Base):
         r = self.m.check("The name must be distinct under Section 5.1.")
         self.assertEqual(unlogged(r), [])
         [c] = cites(r, "Section 5.1")
-        self.assertEqual(c.target, "statute:texbusorgscode51")
+        self.assertEqual(c.target, "statute:texbusorgscode5.1")
 
 
 class TestDottedCoordinatedMembers(DottedBase):
@@ -206,7 +206,7 @@ class TestDottedCoordinatedMembers(DottedBase):
         r = self.m.check(self.FULL + "Sections 552.101, 552.102, and 552.103 close them.")
         self.assertEqual(unlogged(r), ["Section 552.103"])
         [c] = cites(r, "Section 552.102")
-        self.assertEqual(c.target, "statute:texgov'tcode552102")
+        self.assertEqual(c.target, "statute:texgov'tcode552.102")
 
     def test_all_members_logged_pass(self):
         r = self.m.check(self.FULL + "Sections 552.101 and 552.102 close them.")
@@ -214,7 +214,7 @@ class TestDottedCoordinatedMembers(DottedBase):
         self.assertEqual(r.exit_code, 0)
         # each member binds its own Texas section, not 5 U.S.C. § 552
         self.assertEqual([c.target for c in cites(r, "Sections 552.101") + cites(r, "Section 552.102")],
-                         ["statute:texgov'tcode552101", "statute:texgov'tcode552102"])
+                         ["statute:texgov'tcode552.101", "statute:texgov'tcode552.102"])
 
     def test_a_plain_count_after_a_dotted_section_is_not_a_member(self):
         r = self.m.check(self.FULL + "Under Section 552.101, 552 pages were withheld.")
@@ -255,7 +255,7 @@ class TestMembersOfAnotherDepth(DottedBase):
         r = self.m.check(self.FULL + "Sections 552.101, 552.103.5, and 552.102 close them.")
         self.assertEqual(unlogged(r), ["Section 552.103.5"])
         [c] = cites(r, "Section 552.102")
-        self.assertEqual(c.target, "statute:texgov'tcode552102")
+        self.assertEqual(c.target, "statute:texgov'tcode552.102")
 
     def test_dotted_subsection_of_a_hyphenated_section(self):
         r = self.m.check("Miss. Code Ann. § 21-23-7 applies. Section 21-23-7, 21-23-7.1 governs the time.")
@@ -334,7 +334,7 @@ class TestDottedShortFormBindsOnlyItsOwnSection(Base):
         self.log("Tex. Gov't Code § 2552.101")
         r = self.m.check("Under Section 552.101, records are closed.")
         self.assertEqual(unlogged(r), ["Section 552.101"])
-        self.assertFalse(self.bound_to(r, "statute:texgov'tcode2552101"))
+        self.assertFalse(self.bound_to(r, "statute:texgov'tcode2552.101"))
 
     def test_member_does_not_bind_a_longer_section(self):
         self.log("Tex. Gov't Code § 552.101", "Tex. Gov't Code § 1552.102")

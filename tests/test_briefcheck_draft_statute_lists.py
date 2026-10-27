@@ -212,9 +212,9 @@ class TestListMemberBoundaries(unittest.TestCase):
     def test_numeric_range_does_not_end_the_list(self):
         fla = "Fla. Stat. §§ 605.0101, 605.0102 - 605.1108"
         self.assertEqual(statute_cites(f"The company is formed. {fla}."),
-                         [("statute:flastat6050101", "Fla. Stat. §§ 605.0101"), ("statute:flastat6050102", "605.0102")])
+                         [("statute:flastat605.0101", "Fla. Stat. §§ 605.0101"), ("statute:flastat605.0102", "605.0102")])
         self.assertEqual({k for k in briefcheck.authority_keys(fla) if k.startswith("statute")},
-                         {"statute:flastat6050101", "statute:flastat6050102"})
+                         {"statute:flastat605.0101", "statute:flastat605.0102"})
 
 
 class TestListsWithAnnotatedHeads(unittest.TestCase):
