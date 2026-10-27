@@ -1,0 +1,155 @@
+# a6885cb (pre-fix merge) -> 115f0ec
+'Miss. Code Ann. § 21-23-9 (550 U.S. 544 (2007)'
+   base: [['case:550 us 544', 'full:misscodeann21-23-9(550us544(2007)'], {}]
+   fix:  [['case:550 us 544', 'full:misscodeann21-23-9(550us544(2007)', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9']}]
+'Section 21-23-7 (42 U.S.C. § 1983) or 21-23-9'
+   base: [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7(42usc1983)or21-23-9'], {}]
+   fix:  [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'Section 21-23-7 (42 U.S.C. § 1983) or 21-23-9.'
+   base: [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7(42usc1983)or21-23-9'], {}]
+   fix:  [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'Section 21-23-7 (550 U.S. 544) or 21-23-9.'
+   base: [['case:550 us 544', 'full:section21-23-7(550us544)or21-23-9'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-7(550us544)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7 (550 U.S. 544), 21-23-9'
+   base: [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9', 'statute-short:section21-23-7'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7 (550 U.S. 544), 21-23-9.'
+   base: [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9', 'statute-short:section21-23-7'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7 (Rev. 2020) or 21-23-9'
+   base: [['full:section21-23-7(rev2020)or21-23-9', 'statute:section21-23-7(rev2020)or21-23-9'], {'statute:section21-23-7(rev2020)or21-23-9': ['21-23-7']}]
+   fix:  [['full:section21-23-7(rev2020)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7, 21-23-9 (Rev. 2020), 21-23-10'
+   base: [['full:section21-23-721-23-9(rev2020)21-23-10', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+   fix:  [['full:section21-23-721-23-9(rev2020)21-23-10', 'statute-short:section21-23-10', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 7 or 8 (Supp. 2019) or 9'
+   base: [['full:section7or8(supp2019)or9', 'statute:section7or8(supp2019)or9'], {'statute:section7or8(supp2019)or9': ['7']}]
+   fix:  [['full:section7or8(supp2019)or9', 'statute-short:section7', 'statute-short:section8', 'statute-short:section9'], {}]
+'The agency must act under sections 502 (West 2019) and 503.'
+   base: [['full:theagencymustactundersections502(west2019)and503', 'statute:sections502(west2019)and503'], {'statute:sections502(west2019)and503': ['502']}]
+   fix:  [['full:theagencymustactundersections502(west2019)and503', 'statute-short:section503', 'statute-short:sections502'], {}]
+'The board must act under Section 21-23-7 (42 U.S.C. § 1983) or 21-23-9.'
+   base: [['full:theboardmustactundersection21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7(42usc1983)or21-23-9'], {}]
+   fix:  [['full:theboardmustactundersection21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'The board must act under Section 21-23-7 (550 U.S. 544), 21-23-9.'
+   base: [['case:550 us 544', 'full:theboardmustactundersection21-23-7(550us544)21-23-9', 'statute-short:section21-23-7'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactundersection21-23-7(550us544)21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'The board must act under Section 21-23-7 (Rev. 2020) or 21-23-9.'
+   base: [['full:theboardmustactundersection21-23-7(rev2020)or21-23-9', 'statute:section21-23-7(rev2020)or21-23-9'], {'statute:section21-23-7(rev2020)or21-23-9': ['21-23-7']}]
+   fix:  [['full:theboardmustactundersection21-23-7(rev2020)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'The board must act under Section 21-23-7 (Rev. 2020) or 21-23-9. '
+   base: [['full:theboardmustactundersection21-23-7(rev2020)or21-23-9', 'statute:section21-23-7(rev2020)or21-23-9'], {'statute:section21-23-7(rev2020)or21-23-9': ['21-23-7']}]
+   fix:  [['full:theboardmustactundersection21-23-7(rev2020)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'The board must act under Section 21-23-7, 21-23-9 (Rev. 2020), 21-23-10.'
+   base: [['full:theboardmustactundersection21-23-721-23-9(rev2020)21-23-10', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+   fix:  [['full:theboardmustactundersection21-23-721-23-9(rev2020)21-23-10', 'statute-short:section21-23-10', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'The board must act under Section 7 or 8 (Supp. 2019) or 9.'
+   base: [['full:theboardmustactundersection7or8(supp2019)or9', 'statute:section7or8(supp2019)or9'], {'statute:section7or8(supp2019)or9': ['7']}]
+   fix:  [['full:theboardmustactundersection7or8(supp2019)or9', 'statute-short:section7', 'statute-short:section8', 'statute-short:section9'], {}]
+'The board must act. Miss. Code Ann. § 21-23-9 (550 U.S. 544 (2007).'
+   base: [['case:550 us 544', 'full:theboardmustactmisscodeann21-23-9(550us544(2007)'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactmisscodeann21-23-9(550us544(2007)', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9']}]
+'The claim lies under Section 1983 (550 U.S. 544), 555.'
+   base: [['case:550 us 544', 'full:theclaimliesundersection1983(550us544)555', 'statute-short:section1983'], {}]
+   fix:  [['case:550 us 544', 'full:theclaimliesundersection1983(550us544)555', 'statute-short:section1983', 'statute-short:section555'], {}]
+'sections 21-23-7 (42 U.S.C. § 1983) or 21-23-9.'
+   base: [['full:sections21-23-7(42usc1983)or21-23-9', 'statute-short:sections21-23-7(42usc1983)or21-23-9'], {}]
+   fix:  [['full:sections21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-9', 'statute-short:sections21-23-7', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'sections 502 (West 2019) and 503'
+   base: [['full:sections502(west2019)and503', 'statute:sections502(west2019)and503'], {'statute:sections502(west2019)and503': ['502']}]
+   fix:  [['full:sections502(west2019)and503', 'statute-short:section503', 'statute-short:sections502'], {}]
+444 citations, 20 differ in authority_keys or statute_sections
+
+# e4e4f0c (round-1 base) -> 115f0ec
+'Miss. Code Ann. § 21-23-7 applies. Section 21-23-7, 21-23, and 21-23-8 govern the time.'
+   base: [['full:misscodeann21-23-7appliessection21-23-721-23and21-23-8governthetime', 'statute-short:section21-23-7', 'statute:misscode21-23-7'], {'statute:misscode21-23-7': ['21-23-7']}]
+   fix:  [['full:misscodeann21-23-7appliessection21-23-721-23and21-23-8governthetime', 'statute-short:section21-23', 'statute-short:section21-23-7', 'statute-short:section21-23-8', 'statute:misscode21-23-7'], {'statute:misscode21-23-7': ['21-23-7']}]
+'Miss. Code Ann. § 21-23-9 (42 U.S.C. § 1983)'
+   base: [['full:misscodeann21-23-9(42usc1983)', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9']}]
+   fix:  [['full:misscodeann21-23-9(42usc1983)', 'statute:42usc1983', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9'], 'statute:42usc1983': ['1983']}]
+'Miss. Code Ann. § 21-23-9 (550 U.S. 544 (2007)'
+   base: [['case:550 us 544', 'full:misscodeann21-23-9(550us544(2007)'], {}]
+   fix:  [['case:550 us 544', 'full:misscodeann21-23-9(550us544(2007)', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9']}]
+'Miss. Code Ann. § 21-23-9 (550 U.S. 544)'
+   base: [['case:550 us 544', 'full:misscodeann21-23-9(550us544)'], {}]
+   fix:  [['case:550 us 544', 'full:misscodeann21-23-9(550us544)', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9']}]
+'Section 21-23-7 (42 U.S.C. § 1983) or 21-23-9'
+   base: [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+   fix:  [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'Section 21-23-7 (42 U.S.C. § 1983) or 21-23-9.'
+   base: [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+   fix:  [['full:section21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'Section 21-23-7 (550 U.S. 544) or 21-23-9.'
+   base: [['case:550 us 544', 'full:section21-23-7(550us544)or21-23-9'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-7(550us544)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7 (550 U.S. 544), 21-23-9'
+   base: [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7 (550 U.S. 544), 21-23-9.'
+   base: [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-7(550us544)21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7 or 21-23-9 (550 U.S. 544)'
+   base: [['case:550 us 544', 'full:section21-23-7or21-23-9(550us544)'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-7or21-23-9(550us544)', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-7, 21-23-9 (550 U.S. 544)'
+   base: [['case:550 us 544', 'full:section21-23-721-23-9(550us544)', 'statute-short:section21-23-7'], {}]
+   fix:  [['case:550 us 544', 'full:section21-23-721-23-9(550us544)', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'Section 21-23-9 (Fed. R. Civ. P. 15)'
+   base: [['full:section21-23-9(fedrcivp15)', 'rule:fedrcivp15'], {}]
+   fix:  [['full:section21-23-9(fedrcivp15)', 'rule:fedrcivp15', 'statute-short:section21-23-9'], {}]
+'Section 552.101 or 552.102-1 governs.'
+   base: [['full:section552101or552102-1governs', 'statute:section552101or552102-1'], {'statute:section552101or552102-1': ['552.101']}]
+   fix:  [['full:section552101or552102-1governs', 'statute-short:section552101', 'statute-short:section552102-1'], {}]
+'Sections 21-23-7 and 21-23-9 (see 42 U.S.C. § 1983)'
+   base: [['full:sections21-23-7and21-23-9(see42usc1983)', 'statute-short:section21-23-9', 'statute-short:sections21-23-7'], {}]
+   fix:  [['full:sections21-23-7and21-23-9(see42usc1983)', 'statute-short:section21-23-9', 'statute-short:sections21-23-7', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'Sections 552.101, 552.102-1, and 552.103 govern.'
+   base: [['full:sections552101552102-1and552103govern', 'statute-short:sections552101'], {}]
+   fix:  [['full:sections552101552102-1and552103govern', 'statute-short:section552102-1', 'statute-short:section552103', 'statute-short:sections552101'], {}]
+'The agency must act under sections 502 or 503 (550 U.S. 544).'
+   base: [['case:550 us 544', 'full:theagencymustactundersections502or503(550us544)', 'statute-short:sections502'], {}]
+   fix:  [['case:550 us 544', 'full:theagencymustactundersections502or503(550us544)', 'statute-short:section503', 'statute-short:sections502'], {}]
+'The board must act under Section 21-23-7 (42 U.S.C. § 1983) or 21-23-9.'
+   base: [['full:theboardmustactundersection21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+   fix:  [['full:theboardmustactundersection21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'The board must act under Section 21-23-7 (550 U.S. 544), 21-23-9.'
+   base: [['case:550 us 544', 'full:theboardmustactundersection21-23-7(550us544)21-23-9'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactundersection21-23-7(550us544)21-23-9', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'The board must act. Miss. Code Ann. § 21-23-9 (550 U.S. 544 (2007).'
+   base: [['case:550 us 544', 'full:theboardmustactmisscodeann21-23-9(550us544(2007)'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactmisscodeann21-23-9(550us544(2007)', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9']}]
+'The board must act. Miss. Code Ann. § 21-23-9 (550 U.S. 544).'
+   base: [['case:550 us 544', 'full:theboardmustactmisscodeann21-23-9(550us544)'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactmisscodeann21-23-9(550us544)', 'statute:misscode21-23-9'], {'statute:misscode21-23-9': ['21-23-9']}]
+'The board must act. Section 21-23-7 or 21-23-9 (550 U.S. 544).'
+   base: [['case:550 us 544', 'full:theboardmustactsection21-23-7or21-23-9(550us544)'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactsection21-23-7or21-23-9(550us544)', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'The board must act. Section 21-23-7, 21-23-9 (550 U.S. 544).'
+   base: [['case:550 us 544', 'full:theboardmustactsection21-23-721-23-9(550us544)', 'statute-short:section21-23-7'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactsection21-23-721-23-9(550us544)', 'statute-short:section21-23-7', 'statute-short:section21-23-9'], {}]
+'The board must act. Section 21-23-9 (550 U.S. 544).'
+   base: [['case:550 us 544', 'full:theboardmustactsection21-23-9(550us544)'], {}]
+   fix:  [['case:550 us 544', 'full:theboardmustactsection21-23-9(550us544)', 'statute-short:section21-23-9'], {}]
+'The board must act. Section 21-23-9 (Fed. R. Civ. P. 15).'
+   base: [['full:theboardmustactsection21-23-9(fedrcivp15)', 'rule:fedrcivp15'], {}]
+   fix:  [['full:theboardmustactsection21-23-9(fedrcivp15)', 'rule:fedrcivp15', 'statute-short:section21-23-9'], {}]
+'The board must act. Sections 21-23-7 and 21-23-9 (see 42 U.S.C. § 1983).'
+   base: [['full:theboardmustactsections21-23-7and21-23-9(see42usc1983)', 'statute-short:section21-23-9', 'statute-short:sections21-23-7'], {}]
+   fix:  [['full:theboardmustactsections21-23-7and21-23-9(see42usc1983)', 'statute-short:section21-23-9', 'statute-short:sections21-23-7', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'The board must act. {SEC9} (550 U.S. 544). Section 21-23-7, 21-23-9 (42 U.S.C. § 1983).'
+   base: [['case:550 us 544', 'full:theboardmustact{sec9}(550us544)section21-23-721-23-9(42usc1983)', 'statute-short:section21-23-7', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+   fix:  [['case:550 us 544', 'full:theboardmustact{sec9}(550us544)section21-23-721-23-9(42usc1983)', 'statute-short:section21-23-7', 'statute-short:section21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'The claim lies under Section 1983 (550 U.S. 544), 555.'
+   base: [['case:550 us 544', 'full:theclaimliesundersection1983(550us544)555'], {}]
+   fix:  [['case:550 us 544', 'full:theclaimliesundersection1983(550us544)555', 'statute-short:section1983', 'statute-short:section555'], {}]
+'sections 21-23-7 (42 U.S.C. § 1983) or 21-23-9.'
+   base: [['full:sections21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-9', 'statute-short:sections21-23-7'], {}]
+   fix:  [['full:sections21-23-7(42usc1983)or21-23-9', 'statute-short:section21-23-9', 'statute-short:sections21-23-7', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+'sections 502 or 503 (550 U.S. 544)'
+   base: [['case:550 us 544', 'full:sections502or503(550us544)', 'statute-short:sections502'], {}]
+   fix:  [['case:550 us 544', 'full:sections502or503(550us544)', 'statute-short:section503', 'statute-short:sections502'], {}]
+'§ 21-23-9 (citing 42 U.S.C. § 1983)'
+   base: [['full:21-23-9(citing42usc1983)', 'statute-short:21-23-9'], {}]
+   fix:  [['full:21-23-9(citing42usc1983)', 'statute-short:21-23-9', 'statute:42usc1983'], {'statute:42usc1983': ['1983']}]
+444 citations, 30 differ in authority_keys or statute_sections

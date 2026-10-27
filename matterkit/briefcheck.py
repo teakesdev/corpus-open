@@ -139,7 +139,23 @@ _SEC_SEP = r"\s*[,&]\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+"
 SECTION_LIST_RE = re.compile(rf"§§\s*(?P<secs>{_SEC}(?:(?:{_SEC_SEP})(?:{_SEC}|{_SUBSEC}))*)")
 SEC_RE = re.compile(_SEC)
 LIST_MEMBER_RE = re.compile(rf"(?:{_SEC_SEP})(?:(?P<sec>{_SEC})|{_SUBSEC})")
-LISTED_SEC_RE = re.compile(r"\d[\dA-Za-z.\-]*(?:\s*\([A-Za-z0-9]{1,4}\))*")  # a listed section: number + "(2)(ii)"
+_MARKS = r"(?:\s*\([A-Za-z0-9]{1,4}\))*"  # subsection marks after a section number: "(a)", "(2)(ii)", "(2018)"
+LISTED_SEC_RE = re.compile(rf"\d[\dA-Za-z.\-]*{_MARKS}")  # a listed section: number + "(2)(ii)"
+_PAREN_TAIL_RE = re.compile(r"(?:\s*\([^)]*\))+\s*$")  # [^)] as the extractor's: "(550 U.S. 544 (2007)" is one
+_MARK_RE = re.compile(r"\s*\([A-Za-z0-9]{1,4}\)")
+
+
+def _without_parentheticals(frag: str) -> str:
+    """frag up to its first trailing parenthetical that is not a subsection mark; that parenthetical
+    is scanned as its own text. '§ 21-23-9(a) (550 U.S. 544)' -> '§ 21-23-9(a)'; '§ 1983 (2018)' stays.
+    Everything from the first non-mark on is cut, so '§ 1983 (Rev. 2019) (a)' -> '§ 1983'; the key,
+    which drops trailing parentheticals anyway, is the same."""
+    if not (tail := _PAREN_TAIL_RE.search(frag)):
+        return frag
+    pos = tail.start()
+    while m := _MARK_RE.match(frag, pos):
+        pos = m.end()
+    return frag if pos >= len(frag.rstrip()) else frag[:pos]
 LOCAL_WORDS_RE = re.compile(
     r"(?<![\w.])Local(?:\s+(?:Uniform|Civil|Criminal|Bankruptcy|Admiralty|Court))*\s+Rules?\s+"
     r"(?P<num>\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
@@ -217,34 +233,76 @@ _ANNOTATED_HEAD = re.compile(rf"(?<![\w.]){_STATE_ABBREV}\s*(?:[A-Z][\w'&]*\.\s*
 # A coordinated cross-reference: "Section 21-23-7, 21-23-8, or 21-23-9" / "sections 106 and 106A" /
 # "Sections 552.101 and 552.102". The number shape is the extractor's, so the two read one section.
 _XREF_NUM = citations._SEC_NUM
-XREF_HEAD_RE = re.compile(rf"(?:[Ss]ections?|Sec\.)\s+(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*")
-XREF_TAIL_RE = re.compile(rf"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)"
-                          rf"(?P<cite>(?P<num>{_XREF_NUM})(?:\s*\([^)]{{1,24}}\))*)"
+# As in a "§§" list, the walk passes any parenthetical ("Section 21-23-7 (Rev. 2020) or 21-23-9",
+# "… (550 U.S. 544), 21-23-9"), but a member claims only its number and subsection marks, so a cite
+# in the parenthetical is scanned on its own.
+XREF_HEAD_RE = re.compile(rf"(?:[Ss]ections?|Sec\.)\s+(?P<num>{_XREF_NUM}){_MARKS}")
+# A fragment that ends in one "§ N" ("42 U.S.C. § 1983", "Miss. Code Ann. § 21-23-7", "§ 1983") heads a
+# list the same way: "42 U.S.C. § 1983, 1985" and "… § 1983 and 1985" go on past the extractor's comma.
+SIGN_HEAD_RE = re.compile(rf"(?<!§)§\s*(?P<num>{_XREF_NUM}){_MARKS}\Z")
+XREF_TAIL_RE = re.compile(r"(?:\s*\([^)]{1,24}\))*"
+                          rf"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)"
+                          rf"(?P<cite>(?P<num>{_XREF_NUM}){_MARKS})"
                           r"(?![\w\-§]|\.\w|\s+[A-Z][\w'&]*\.)")
 
 
-def _xref_members(s: str, a: int, b: int, rows, spans) -> list[tuple[str, int, int]]:
+def _xref_members(s: str, a: int, b: int, rows, spans, stops=None) -> list[tuple[str, int, int]]:
     """(display, start, end) for each member of a coordinated cross-reference whose extracted
     fragment is s[a:b], or [] when it is not one. The extractor keeps "Section X or Y" as one
-    fragment and stops "Section X, Y" at X, so each member becomes its own short-form cite.
-    A member has the head's number shape: as many hyphenated parts, and plain (no hyphen or dot)
-    only if the head is plain. So "552" after "Section 552.101," is a count, not a member, while
-    "552.103.5" and "21-23-7.1" are members whatever their dotted depth. The list stops at a
-    number another cite claims or one followed by a dotted word ("42 U.S.C.", "1972 Miss.
-    Laws"). A range ("through", "to") or "of Title N" does not cover the fragment and stays whole."""
+    fragment and stops "Section X, Y" at X, so each member becomes its own short-form cite. A
+    fragment ending in one "§ N" heads a list too, and its members carry its code: "1985" after
+    "42 U.S.C. § 1983," is "42 U.S.C. § 1985", after "§ 1983," it is "§ 1985".
+    A member is plain (no hyphen or dot) exactly when the head is, and has the head's number of
+    hyphenated parts or begins with the head's leading number and the separator after it (the
+    same title or chapter, written the same way). So "552" after "Section 552.101," is a count,
+    and "1972-73" or "2-1" after "Section 21-23-7," or "552-553" after "Section 552.101," is not a
+    member, while "552.103.5" and "552.102-1" after 552.101, "21-23" after 21-23-7, and
+    "11-46-11.1" after 21-23-7 are. The list ends at a number another cite claims or one followed
+    by a dotted word ("42 U.S.C.", "1972 Miss. Laws"). A range ("through", "to") or "of Title N"
+    does not cover the fragment and stays whole.
+    After the fragment, where a number may be prose, a plain number must also be within one digit
+    of a plain head's length: "§ 1983, 1985" and "Sections 9, 10" are lists, "§ 1983, 12 plaintiffs"
+    and "Section 552, 5 records" are not.
+    A number after the fragment that is not a member ends the list too; when `stops` is a list,
+    it gets (number, start, end) for it, so the caller can say the list was not read further."""
+    code = None  # the text before "§" when a "§" fragment heads the list
     head = XREF_HEAD_RE.match(s, a)
     if not head or head.end() > b:
-        return []
+        if not (head := SIGN_HEAD_RE.search(s, a, b)):
+            return []
+        code = s[a:head.start()]
+    # rows that start inside the fragment are the extractor's own pieces of it ("503 (550 U.S. 544)")
     taken = spans + [(r["char_start"], r["char_end"]) for r in rows
-                     if r["status"] == "extracted" and not (a <= r["char_start"] and r["char_end"] <= b)]
+                     if r["status"] == "extracted" and not a <= r["char_start"] < b]
 
-    def shape(num):
-        return num.count("-"), "-" in num or "." in num
+    def plain(num):
+        return not ("-" in num or "." in num)
 
-    out, pos, parts = [(head.group(0), a, head.end())], head.end(), shape(head["num"])
-    while (t := XREF_TAIL_RE.match(s, pos)) and shape(t["num"]) == parts \
+    def lead(num):
+        return re.match(r"\d+[-.]?", num)[0]
+
+    def digits(num):
+        return len(re.match(r"\d+", num)[0])
+
+    h = head["num"]
+
+    def member(num, after):
+        if plain(num) != plain(h):
+            return False
+        if plain(h):
+            return not after or abs(digits(num) - digits(h)) <= 1
+        return num.count("-") == h.count("-") or lead(num) == lead(h)
+
+    out, pos = [(s[a:head.end()], a, head.end())], head.end()
+    while (t := XREF_TAIL_RE.match(s, pos)) \
             and not any(t.start("cite") < e and s_ < t.end("cite") for s_, e in taken):
-        out.append((f"Section {t['cite']}", t.start("cite"), t.end("cite")))
+        after = t.start("cite") >= b
+        if not member(t["num"], after):
+            if stops is not None and after:  # inside the fragment the composite BLOCKs
+                stops.append((t["cite"], t.start("cite"), t.end("cite")))
+            break
+        disp = f"Section {t['cite']}" if code is None else f"{code}§ {t['cite']}"
+        out.append((disp, t.start("cite"), t.end("cite")))
         pos = t.end()
     return out if len(out) > 1 and pos >= b else []
 
@@ -300,8 +358,10 @@ def _case_name(prefix: str) -> str:
     return " ".join(name)
 
 
-def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R."):
-    """Yield (key, display, pin, start, end, kind, extra) for authority cites in s."""
+def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str = "L.U.Civ.R.", stops=None):
+    """Yield (key, display, pin, start, end, kind, extra) for authority cites in s. When `stops` is a
+    list, a coordinated "Section X, Y" list that ends at a number it does not read as a member adds
+    (number, start, end) to it (see _xref_members); stored citations are scanned without one."""
     spans = []
 
     def free(a, b):
@@ -370,15 +430,20 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
         frag = row["raw_fragment"]
         if row["status"] != "extracted" or not re.search(r"§|U\.?S\.?C|C\.?F\.?R|Code|Stat\.|Pub|[Ss]ection|Sec\.", frag):
             continue
-        a, b = row["char_start"], row["char_end"]
+        a = row["char_start"]
+        frag = _without_parentheticals(frag)  # "§ 21-23-9 (550 U.S. 544)": the case is its own cite
+        b = a + len(frag)
         if frag.startswith("§") and (head := _ANNOTATED_HEAD.search(s, 0, a)):
             a, frag = head.start(), s[head.start():b]
         lst = next((m for m in lists if a <= m.start() < b), None)
         if lst is None:
-            if free(a, b):
-                members = _xref_members(s, a, b, rows, spans)
-                spans.append((a, members[-1][2] if members else b))
-                for disp, ma, mb in members or [(frag, a, b)]:
+            # each member claims its own text, so a cite in a parenthetical between members stays free
+            # a fragment already claimed is the extractor's nested "§ 1983" in "42 U.S.C. § 1983": the
+            # outer cite has walked its list, so its stops are not reported twice
+            walk = _xref_members(s, a, b, rows, spans, stops if free(a, b) else None)
+            for disp, ma, mb in walk or [(frag, a, b)]:
+                if free(ma, mb):
+                    spans.append((ma, mb))
                     key, sec = _statute_base(disp)
                     yield (key, disp, None, ma, mb, "statute", sec)
             continue
@@ -1079,8 +1144,8 @@ class _Checker:
                 secs.setdefault(k, set()).update(v)
         return secs
 
-    def _scan_authorities(self, s: str):
-        return scan_authorities(s, *rule_prefixes(self.docket))
+    def _scan_authorities(self, s: str, stops=None):
+        return scan_authorities(s, *rule_prefixes(self.docket), stops=stops)
 
     def _lookup(self, key):
         rows = list({r["id"]: r for r in self.auth_index.get(key) or []}.values())
@@ -1171,7 +1236,8 @@ class _Checker:
             if c.target:
                 self.check_paras(c, line)
             cites.append(c)
-        for key, disp, pin, a, b, kind, extra in self._scan_authorities(u.text):
+        stops: list = []
+        for key, disp, pin, a, b, kind, extra in self._scan_authorities(u.text, stops):
             if not free(a, b):
                 continue
             claimed.append((a, b))
@@ -1179,6 +1245,11 @@ class _Checker:
             c = Cite("authority", raw, disp, key, pin, a, b)
             self.resolve_authority(c, kind, extra, line, u.start + a)
             cites.append(c)
+        for num, a, b in stops:
+            if free(a, b):
+                self.rep.add("WARN", "list-member-unchecked", line, num,
+                             "a section list ends here: this number was not read as a section, so if it is one, "
+                             "cite it with its code")
         cites.sort(key=lambda c: c.start)
         for m in ID_RE.finditer(u.text):
             if not free(*m.span()):

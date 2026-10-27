@@ -235,8 +235,9 @@ class TestDottedCoordinatedMembers(DottedBase):
 class TestMembersOfAnotherDepth(DottedBase):
     """SWE-2 P3-2: a comma list stopped silently at a member with more or fewer dotted parts
     than the head ("…, and 552.103.5"), so the rest of the list was never checked and the
-    draft could exit 0. A member keeps the head's hyphenated parts; only a plain number
-    ("552") is held to a plain head."""
+    draft could exit 0. SWE-2's round-2 P3: the same happened at a member with another
+    hyphen count ("…, 552.102-1, and 552.103"). Neither depth ends a list now; only a plain
+    number ("552") is held to a plain head."""
     FULL = "Tex. Gov't Code § 552.101 applies. "
 
     def setUp(self):
@@ -269,6 +270,39 @@ class TestMembersOfAnotherDepth(DottedBase):
         r = self.m.check("Miss. Code Ann. § 21-23-7 applies. Section 21-23-7 or 21-23-7.1 governs.")
         self.assertEqual(unlogged(r), ["Section 21-23-7.1"])
         self.assertFalse([x for x in raws(r) if " or " in x])
+
+    def test_member_with_more_hyphens_does_not_end_the_list(self):
+        r = self.m.check(self.FULL + "Sections 552.101, 552.102-1, and 552.103 govern.")
+        self.assertEqual(unlogged(r), ["Section 552.102-1", "Section 552.103"])
+        self.assertEqual(r.exit_code, 1)
+
+    def test_member_with_fewer_hyphens_does_not_end_the_list(self):
+        r = self.m.check("Miss. Code Ann. § 21-23-7 applies. Section 21-23-7, 21-23, and 21-23-8 govern the time.")
+        self.assertEqual(unlogged(r), ["Section 21-23"])
+        [c] = cites(r, "Section 21-23-8")
+        self.assertEqual(c.target, "statute:misscode21-23-8")
+
+    def test_or_form_with_another_hyphen_count_is_split(self):
+        r = self.m.check(self.FULL + "Section 552.101 or 552.102-1 governs.")
+        self.assertEqual(unlogged(r), ["Section 552.102-1"])
+        self.assertFalse([x for x in raws(r) if " or " in x])
+
+    def test_a_hyphenated_count_after_a_plain_section_is_not_a_member(self):
+        r = self.m.check("Under Section 1983, 2-1 majorities are rare.")
+        self.assertNotIn("Section 2-1", raws(r))
+
+    def test_a_number_of_another_hyphen_count_and_title_is_not_a_member(self):
+        # a member with another hyphen count must share the head's leading number (title or chapter)
+        for draft, phantom in (("Section 21-23-7, 1972-73 amendments aside, governs.", "Section 1972-73"),
+                               ("Under Section 21-23-7, 2-1 majorities are rare.", "Section 2-1")):
+            r = self.m.check("Miss. Code Ann. § 21-23-7 applies. " + draft)
+            self.assertNotIn(phantom, raws(r), draft)
+
+    def test_member_of_another_title_with_the_head_hyphen_count_is_still_checked(self):
+        for tail, member in (("Section 21-23-7, 11-46-9 governs.", "Section 11-46-9"),
+                             ("Section 21-23-7, 11-46-11.1 governs.", "Section 11-46-11.1")):
+            r = self.m.check("Miss. Code Ann. § 21-23-7 applies. " + tail)
+            self.assertEqual(unlogged(r), [member], tail)
 
 
 class TestDottedShortFormBindsOnlyItsOwnSection(Base):
