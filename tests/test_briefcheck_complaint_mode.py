@@ -211,3 +211,19 @@ class TestSwe2ComplaintModeReviewRound2(Base):
     def test_heading_is_never_flagged_as_an_uncited_fact(self):
         r = self.m.check("STATEMENT OF FACTS\n\n## What Happened On The Holiday Weekend\n\nText. Doc. 16.\n")
         self.assertEqual([f.code for f in r.findings if f.code == "uncited-fact"], [])
+
+
+class TestSwe2ComplaintModeReviewRound3(Base):
+    """SWE-2 round-3 re-review of complaint mode (2026-10-26)."""
+
+    def test_more_non_fact_section_names_close_the_fact_section(self):
+        for name in ("Issues Presented", "Questions Presented", "Procedural Posture", "Nature of the Case",
+                     "Introduction", "Summary", "Merits"):
+            r = self.m.check(f"1. Statement of Facts.\n\nThe arrest happened at home on a holiday.\n\n2. {name}.\n\n"
+                             "Whether the court erred is plain on this record.\n")
+            self.assertEqual([f.cite for f in r.findings if f.code == "uncited-fact"],
+                             ["The arrest happened at home on a holiday."], name)
+
+    def test_readme_lists_every_veto_pattern(self):
+        readme = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
+        self.assertIn("short-form or Westlaw cite, Id.", readme)

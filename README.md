@@ -176,7 +176,8 @@ authority and sourced quotation is still checked, and a fact tag labeled
 HYPOTHESIS, INFERENCE or UNKNOWN is flagged. Headings are still read for cites and quotations, in either mode;
 only the uncited-sentence rule skips them, so "II. Argument Under Rule 12" has
 its rule checked. A numbered line counts as a heading only when it is short,
-carries no record, ¶ or case cite, statute sign or quotation, and is either
+carries no record, ¶ or case cite, short-form or Westlaw cite, Id., statute
+sign or quotation, and is either
 unpunctuated ("1. Background") or a title ending in a period or colon
 ("1. Statement of Facts."); "1. On January 1, officers …" and "12. See Doc. 16
 at 3" are paragraphs. Inside a fact section, a numbered title at the same level

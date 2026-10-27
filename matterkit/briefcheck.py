@@ -176,7 +176,9 @@ QUOTE_RE = re.compile(r"“([^”]{1,1500})”|\"([^\"\n]{1,1500})\"")
 SIGNALS = {"see", "also", "cf", "cf.", "e.g.", "e.g.,", "accord", "compare", "but", "contra", "citing",
            "quoting", "and", "with", "see,", "generally"}
 NONFACT_HEADING = re.compile(r"\b(?:argument|standard|discussion|analysis|conclusion|law|legal|relief|prayer|"
-                             r"counts?|claims?|causes? of action|jurisdiction|venue|damages|remed)", re.I)
+                             r"counts?|claims?|causes? of action|jurisdiction|venue|damages|remed|"
+                             r"(?:issues?|questions?) presented|procedural posture|nature of the case|"
+                             r"introduction|summary|merits)", re.I)
 FACT_HEADING = re.compile(r"\b(facts?|background|statement of (?:the )?(?:case|facts)|procedural history|allegations)\b", re.I)
 ABBREV = {
     "v", "vs", "id", "no", "nos", "doc", "docs", "dkt", "dkts", "ecf", "compl", "am", "ex", "exs", "fed", "r",
