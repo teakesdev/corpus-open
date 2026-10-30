@@ -85,3 +85,23 @@ ty approved building (2026-10-30, 10:53). Tasks 1–6 are done in `matterkit/rul
 - **No public FRCP text in the fixtures.** Both test rule sets are synthetic, so nothing is fetched.
 
 **Real-text trial (private, outside the repo).** I built a pack from the 164-page local-rules PDF in a scratch folder with `--start-at PREAMBLE --stop-at "ADMIRALTY AND MARITIME RULES"`. It gave 33 rules, 416 anchors, 0 notes and one two-column warning. The anchors are the same set, in the same order, as the hand-checked prototype's. The trial found the two region-matching bugs that the contents-entry tests now cover. The admiralty rules use their own prefix (L.A.R.) and headings, so they need a pack of their own.
+
+## 8. Revision 2 (2026-10-30): SWE-2's code review
+
+The founder assigned the build (`27ea7fb..9fb77b4`) to SWE-2 (Devin `swe-2-max`, read-only). The verdict was **APPROVE WITH CHANGES**, recorded in [the review](../reviews/2026-10-30-rules-pack-code/SWE2-REVIEW.md). Before amending, I probed each finding with synthetic text against `9fb77b4`. The founder approved fixing every finding except F3 and F8.
+
+| Finding | Amendment here |
+| --- | --- |
+| **P2 F1** A source line shaped like `<a id="…"></a>` became an anchor | An anchor is the tag *and* a bracketed label (`ANCHOR_LINE`); a tag alone stays source text, and `show` prints it as it is |
+| **P2 F2** Dropped page numbers were unrecorded; "- 3 -" was sorted with the roman numerals | The manifest's `dropped` lists each page number left out. Roman or arabic is decided by the number's value, so "- 3 -" and "Page 3 of 40" are arabic. A number that is the only one of its kind gets a warning, because no sequence checks it |
+| **P2 F3** Levels decided by the next marker or by indentation leave no note | Not changed (founder). § 7 keeps notes for guesses. SWE-2's example, (h)(1)(A) then (i) then (1), gives the right anchors |
+| **P2 F4** A wrapped "(b) of this rule" took the 7(b) anchor | When a marker repeats one already anchored, the note names that anchor and its line |
+| **P3 F5** "Local Rules 7" was not read | `show` uses brief check's `LOCAL_WORDS_RE`, so both read the same words |
+| **P3 F6** A non-numeric rule number in `--heading-regex` crashed | The build refuses it with a message |
+| **P3 F7** Two packs could share an anchor prefix; the clash check trusted `rules.json` | Attach refuses a shared anchor prefix and checks prefixes from each pack's manifest. Entries in `rules.json` need `cite_prefix` and `anchor_prefix`, and a hand-edited entry that shares a prefix is not used |
+| **P3 F8** "7(b) and (c)" leaves (c) unchecked | Not changed (founder); a brief-check grammar issue for its own branch |
+| **P3 F9** Future dates read as ok; `stale` trusted a changed pack; attaching the matter folder crashed; `rules.json` was written before the event | A date after today is UNKNOWN. `stale` reports a pack it cannot use as NOT USABLE and exits 1. The matter folder is refused as a pack. The event and `rules.json` are written in one transaction. `rules.json` entries are checked for `review_after_days` and `current_as_of` |
+
+The real-text trial, rebuilt after the fixes, gave the same 416 anchors in the same order and a byte-identical body, with 50 page numbers now listed under `dropped`.
+
+Revision 2 has not been re-reviewed.
