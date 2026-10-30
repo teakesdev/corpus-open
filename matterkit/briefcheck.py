@@ -43,7 +43,7 @@ import unicodedata
 import zlib
 from dataclasses import dataclass, field
 
-from . import citations, ingest, store
+from . import citations, ingest, rules, store
 
 TOOL_ID = "matter-kit brief-check 0.1"
 LIMITS = ("“Tied to a source in the store” means the cited document or authority record exists in this "
@@ -953,6 +953,8 @@ class Report:
         self.docket_path = ".matter/docket.json"
         self.mode = "brief"
         self.notes: list[tuple[int, str]] = []  # complaint mode: alleged quotations with no cited source
+        self.rules_packs: list = []  # rules.Attached for each pack in .matter/rules.json
+        self.rule_texts: list = []  # (line, cite, rules.Attached, anchor id) for rule cites found in a pack
 
     def add(self, severity, code, line, cite, message):
         self.findings.append(Finding(severity, code, line, cite, message))
@@ -989,6 +991,8 @@ class Report:
                                          "still checked)" if self.mode == "complaint" else
                                          " (every factual sentence needs a cite)"),
                f"- Tool: {TOOL_ID} · checked {now_iso()}", ""]
+        if self.rules_packs:
+            out.insert(-1, "- Rules packs: " + "; ".join(_pack_cell(a) for a in self.rules_packs))
         for sev, title in (("BLOCK", "Blocking"), ("UNCHECKED", "Needs a human (not checked)"), ("WARN", "Warnings")):
             items = [f for f in self.findings if f.severity == sev]
             out += [f"## {title} ({len(items)})", ""]
@@ -1018,6 +1022,15 @@ class Report:
             out.append(f"| {esc(a.display)} | {', '.join(map(str, sorted(set(a.lines))))} | "
                        f"{esc(', '.join(p for p in a.pins if p)) or '—'} | {a.store_status or '**not logged**'} | "
                        f"{esc(a.checked_via or '—')} |")
+        if self.rules_packs:
+            out += ["", "## Rule text in attached packs", "",
+                    f"Each rule cite found in an attached rules pack ({rules.DERIVED}). A cite missing from "
+                    "the pack is a warning above.", "",
+                    "| Line | Cite | Pack | Text |", "|---:|---|---|---|"]
+            out += [f"| {ln} | {short(raw, 60)} | `{a.pack.id}@{a.pack.version}` | "
+                    f"`{os.path.join(a.entry['path'], 'rules.md')}#{aid}` |" for ln, raw, a, aid in self.rule_texts]
+            if not self.rule_texts:
+                out.append("| — | none | — | — |")
         out += ["", "## Docket coverage", "",
                 "Entries not in the store: " + (", ".join(self.docket_gaps) or "none below the highest known entry") + "."]
         out += [f"- {esc(x)}" for x in self.docket_refs]
@@ -1032,6 +1045,14 @@ def _cite_cell(c: Cite) -> str:
     via = " (Id.)" if c.via_id else ""
     tgt = f" → `{c.target}`" if c.kind != "authority" and c.target else ""
     return f"{c.display}{pin}{paras}{via}{tgt}"
+
+
+def _pack_cell(a) -> str:
+    if a.pack is None:
+        return f"`{a.entry['id']}@{a.entry['version']}` not used: {a.problem}"
+    m = a.pack.manifest
+    state = rules.staleness(m["current_as_of"], m["review_after_days"])[0]
+    return f"`{a.pack.id}@{a.pack.version}` ({a.pack.cite_prefix}, current as of {m['current_as_of'] or 'UNKNOWN'} [{state}])"
 
 
 MODES = ("brief", "complaint")
@@ -1085,6 +1106,7 @@ class _Checker:
         self.full_rules: dict = {}  # rule number -> [(offset, rule key, prefix, line)] seen in draft
         self.uses: dict = {}
         self._dup_warned: set = set()
+        self.packs = self._rules_packs()
 
     def line(self, off: int) -> int:
         return bisect.bisect_right(self.nl, off - 1) + 1
@@ -1148,6 +1170,34 @@ class _Checker:
             for k, v in statute_sections(r["citation"], *rule_prefixes(self.docket)).items():
                 secs.setdefault(k, set()).update(v)
         return secs
+
+    def _rules_packs(self) -> list:
+        """(rule-key prefix, rules.Attached) for each attached pack that can be read. A pack whose
+        files changed since it was attached is reported once and not used. Read-only."""
+        out = []
+        for a in rules.load_attached(self.rep.matter_dir):
+            self.rep.rules_packs.append(a)
+            if a.pack is None:
+                self.rep.add("WARN", "rules-pack-unreadable", 0, a.entry["id"], f"rules pack not used: {a.problem}")
+            else:
+                out.append(("rule:" + _norm_key(a.pack.cite_prefix), a))
+        return out
+
+    def _rule_text(self, c: Cite, line):
+        """Look a rule cite's subsection up in the pack for its rule set; WARN when the pack lacks it."""
+        for prefix, a in self.packs:
+            num = c.target[len(prefix):] if c.target.startswith(prefix) else ""
+            if re.fullmatch(r"\d+(?:\.\d+)?", num):
+                break
+        else:
+            return
+        m = re.search(r"(?:\d+(?:\.\d+)?)(?P<sub>(?:\s*\([A-Za-z0-9]{1,5}\))*)\s*\.?\s*$", c.raw)
+        res = rules.find(a, num, m["sub"] if m else "")
+        if res.status == "found":
+            self.rep.rule_texts.append((line, c.raw, a, res.hits[0][1]))
+        else:
+            code = "rule-subsection-not-in-pack" if res.nearest else "rule-not-in-pack"
+            self.rep.add("WARN", code, line, c.raw, res.message + "; check the cite against the rule")
 
     def _scan_authorities(self, s: str, stops=None):
         return scan_authorities(s, *rule_prefixes(self.docket), stops=stops)
@@ -1401,6 +1451,8 @@ class _Checker:
                 c.display = f"{c.raw} (read as {prefix} {rest}, after the full cite on line {full_line})"
             else:
                 c.display = f"{c.raw} (read as {bare} {rest})"
+        if kind in ("rule", "bare-rule") and self.packs:
+            self._rule_text(c, line)
         row = self._lookup(c.target)
         self._judge_authority(c.target, self.uses[c.target].display if c.target in self.uses else c.display,
                               row, line, c.pin, c.raw)

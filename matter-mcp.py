@@ -56,6 +56,9 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["path"],
                      "properties": {"path": {"type": "string"}, "pdftotext": {"type": "boolean"},
                                     "mode": {"type": "string", "enum": ["brief", "complaint"], "description": "complaint: allegations need no record cite"}}}},
+    {"name": "matter.rules_show", "description": "Text of a rule or subsection from a rules pack attached to this matter (.matter/rules.json), with the pack id, version and current-as-of date. Cite as 'L.U.Civ.R. 7(b)(4)', 'Fed. R. Civ. P. 15(a)(2)', 'Local Rule 7(b)(4)' or an anchor id. A bare 'Rule 15' names no rule set: it lists every attached pack that has it and picks none unless `pack` is given. Derived text, not the official copy. Read-only. No network.",
+     "inputSchema": {"type": "object", "required": ["cite"],
+                     "properties": {"cite": {"type": "string"}, "pack": {"type": "string", "description": "pack id"}}}},
     {"name": "matter.correspondence_list", "description": "Read the custodian notice ledger, including status, exhibit hashes, confirmation dates, and receipt evidence. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
 ]
@@ -102,6 +105,12 @@ def call(name: str, args: dict):
         report = briefcheck.check(MATTER_DIR, _resolve_in_matter(args["path"]),
                                   use_pdftotext=args.get("pdftotext", True), mode=args.get("mode", "brief"))
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
+    if name == "matter.rules_show":
+        from matterkit import rules
+        code, text = rules.show(MATTER_DIR, args.get("cite", ""), args.get("pack"))
+        if code == 1:
+            raise ValueError(text)
+        return text
     conn = store.connect(MATTER_DIR)
     if name == "matter.status":
         return pk.status_report(conn, MATTER_DIR)

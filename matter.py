@@ -32,6 +32,12 @@ Usage:
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
   matter.py brief check <dir> <draft.md> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
   matter.py docket suggest <dir>
+  matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
+                        [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]
+                        [--source-url U] [--anchor-prefix A] [--heading-regex RE] [--review-after-days N]
+  matter.py rules attach <dir> <pack_dir> [--replace] [--author agent:MODEL [--directed-by PERSON]]
+  matter.py rules list|stale <dir> [--today YYYY-MM-DD]
+  matter.py rules show <dir> "<cite>|<anchor>" [--pack ID]   # exit 2: a bare "Rule 15" lists candidates
 """
 import argparse
 import json
@@ -139,10 +145,17 @@ def cmd_deadline(args):
         if args.sub == "add":
             if not args.label or not args.due:
                 sys.exit("deadline add requires --label and --due")
-            dl.add(conn, args.label, args.due, by, rule=args.rule,
+            rule, note = args.rule, None
+            if rule:  # a rule found in an attached rules pack is stored with its pack, version and anchor
+                from matterkit import rules
+                try:
+                    rule, note = rules.rule_source(args.case_dir, rule)
+                except rules.RulesError as e:
+                    sys.exit(f"refused: {e}")
+            dl.add(conn, args.label, args.due, by, rule=rule,
                    confidence=args.confidence or "working-estimate",
                    verification=args.verification or "unverified")
-            print(f"deadline registered: {args.due} — {args.label}")
+            print(f"deadline registered: {args.due} — {args.label}" + (f"\n  ↳ {note}" if note else ""))
         else:
             if not args.deadline_id:
                 sys.exit("deadline update requires <deadline_id>")
@@ -291,6 +304,53 @@ def cmd_brief(args):
     else:
         print(text)
     sys.exit(report.exit_code)
+
+
+def cmd_rules(args):
+    """rules build|attach|list|show|stale: a court's rules as Markdown with anchors, attached to a matter.
+    show exits 1 when nothing is found and 2 when a bare cite has candidates; stale exits 1 when a pack
+    is past its review window or undated."""
+    from datetime import date
+    from matterkit import rules
+    today = None
+    if getattr(args, "today", None):
+        try:
+            today = date.fromisoformat(args.today)
+        except ValueError:
+            sys.exit(f"--today must be YYYY-MM-DD (got {args.today!r})")
+    try:
+        if args.sub == "build":
+            m = rules.build_pack(args.source, args.out_dir, pack_id=args.pack_id, version=args.version,
+                                 title=args.title, cite_prefix=args.cite_prefix, court=args.court,
+                                 anchor_prefix=args.anchor_prefix, current_as_of=args.current_as_of,
+                                 source_url=args.source_url, start_at=args.start_at, stop_at=args.stop_at,
+                                 heading_re=args.heading_regex, review_after_days=args.review_after_days,
+                                 use_pdftotext=not args.no_pdftotext)
+            print(f"built {m['id']}@{m['version']} in {args.out_dir}: {m['rules']} rules, {m['anchors']} anchors; "
+                  f"{m['words']['body']} words identical to the source text")
+            for kind, items in (("note", m["notes"]), ("⚠", m["warnings"])):
+                for item in items[:10]:
+                    print(f"  {kind} {item}")
+                if len(items) > 10:
+                    print(f"  {kind} … {len(items) - 10} more in {os.path.join(args.out_dir, 'manifest.json')}")
+            return
+        if not os.path.isdir(args.case_dir):
+            sys.exit(f"error: case_dir is not a directory: {args.case_dir}")
+        if args.sub == "attach":
+            try:
+                by = store.attribution(args.author, args.directed_by)
+            except ValueError as e:
+                sys.exit(f"invalid attribution: {e}")
+            print(rules.attach(args.case_dir, args.pack_dir, by, replace=args.replace)[1])
+        elif args.sub == "list":
+            print(rules.list_text(args.case_dir, today))
+        else:
+            code, text = (rules.show(args.case_dir, args.cite, args.pack, today) if args.sub == "show"
+                          else rules.stale_report(args.case_dir, today))
+            print(text)
+            sys.exit(code)
+    except rules.RulesError as e:
+        sys.exit(f"refused: {e}")
 
 
 def cmd_docket(args):
@@ -556,6 +616,35 @@ def main():
 
     p = sub.add_parser("docket"); p.add_argument("sub", choices=["suggest"]); p.add_argument("case_dir")
     p.set_defaults(fn=cmd_docket)
+
+    p = sub.add_parser("rules", help="A court's rules as Markdown with anchors, attached to a matter")
+    commands = p.add_subparsers(dest="sub", required=True)
+    c = commands.add_parser("build", help="Build a rules pack from a .txt or .pdf (no matter needed)")
+    c.add_argument("source"); c.add_argument("out_dir")
+    c.add_argument("--id", dest="pack_id", required=True, help="lowercase pack id, e.g. district-local")
+    c.add_argument("--version", required=True, help="usually the current-as-of date")
+    c.add_argument("--title", required=True); c.add_argument("--cite-prefix", required=True, help="e.g. L.U.Civ.R.")
+    c.add_argument("--current-as-of", help="YYYY-MM-DD the source says it is current as of")
+    c.add_argument("--court"); c.add_argument("--source-url"); c.add_argument("--anchor-prefix")
+    c.add_argument("--start-at", help="exact text of the first line to keep (skips title page and contents)")
+    c.add_argument("--stop-at", help="exact text of the first line not to keep (e.g. the forms section)")
+    c.add_argument("--heading-regex", help="rule heading pattern with a (?P<num>...) group")
+    c.add_argument("--review-after-days", type=int, default=365)
+    c.add_argument("--no-pdftotext", action="store_true")
+    c = commands.add_parser("attach", help="Copy a pack into the matter, register it and record it")
+    c.add_argument("case_dir"); c.add_argument("pack_dir")
+    c.add_argument("--replace", action="store_true", help="attach a new version in place of the attached one")
+    c.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"))
+    c.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"))
+    for action in ("list", "show", "stale"):
+        c = commands.add_parser(action)
+        c.add_argument("case_dir")
+        if action == "show":
+            c.add_argument("cite", help='"L.U.Civ.R. 7(b)(4)", "Local Rule 7(b)(4)", an anchor id, or "Rule 15"')
+            c.add_argument("--pack", help="pack id, to read a bare rule number in that rule set")
+        c.add_argument("--today", help="YYYY-MM-DD to measure staleness against (default: today)")
+    for c in commands.choices.values():
+        c.set_defaults(fn=cmd_rules)
 
     p = sub.add_parser("deadline"); p.add_argument("sub", choices=["add", "list", "update"]); p.add_argument("case_dir")
     p.add_argument("deadline_id", nargs="?", help="update: the deadline to change")

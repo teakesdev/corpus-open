@@ -184,6 +184,42 @@ at 3" are paragraphs. Inside a fact section, a numbered title at the same level
 ("2. Plaintiff Was Arrested.") is a subheading; one naming a non-fact section
 ("2. Argument.") ends it.
 
+## Court rules attached to a case
+
+```bash
+pdftotext -layout local_rules.pdf local_rules.txt
+python3 matter.py rules build local_rules.txt ~/rules/local-2024-12-01 --id my-district-local \
+  --version 2024-12-01 --title "Local Civil Rules" --cite-prefix "L.U.Civ.R." --current-as-of 2024-12-01 \
+  --start-at PREAMBLE --stop-at "OFFICIAL FORMS"
+python3 matter.py rules attach ~/cases/my-case ~/rules/local-2024-12-01 --author agent:MODEL --directed-by "Your Name"
+python3 matter.py rules show ~/cases/my-case "L.U.Civ.R. 7(b)(4)"   # the subsection's text, pack and version
+python3 matter.py rules stale ~/cases/my-case                       # exit 1 when a pack is past its review window
+```
+
+A rules pack is one rule set at one version: `manifest.json` and `rules.md`,
+with one heading per rule and an anchor per subsection (`L.U.Civ.R. 7(b)(4)` is
+`#lucivr-7-b-4`). The build fails unless the Markdown's words, with the added
+headings, anchors and labels removed, are the source text's words in the same
+order. It drops only page numbers (a lone number at a page's top or bottom that
+follows the page sequence) and keeps everything between `--start-at` and
+`--stop-at`. A level it had to guess, or a marker out of sequence, is listed in
+the manifest's `notes`. A page that looks like two columns, or a word that seems
+to have lost letters, is listed in `warnings`, because the word check cannot see
+either. A pack is derived text, not the official copy.
+
+`rules attach` copies the pack to `Research/Rules/<id>_<version>/`, registers
+both files so `verify` covers them, and records it in `.matter/rules.json` and
+`events`. One pack per cite prefix; a new version needs `--replace`, and the
+old entry is kept as history. `rules show` reads `Fed. R. Civ. P. 15(a)(2)`,
+`Local Rule 7(b)(4)` (as the docket map's `local_rule`) or an anchor id. A bare
+`Rule 15` names no rule set, so it lists every pack that has it, exits 2 and
+picks none unless you pass `--pack`. With packs attached, `brief check` looks up
+each rule cite's subsection and warns when the pack lacks it; what blocks is
+unchanged. `deadline add --rule` stores a rule found in a pack as
+`L.U.Civ.R. 7(b)(4) [pack@version#anchor]`, and anything else as the text you
+gave. The MCP tool is `matter.rules_show`. `rules stale` compares dates only;
+it does not check the court's website.
+
 ## Deadlines and subcases
 
 ```bash
