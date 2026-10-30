@@ -205,6 +205,21 @@ class TestAnchors(unittest.TestCase):
         self.assertIn("lucivr-9-i", letter)
         self.assertIn("lucivr-9-j", letter)
 
+    def test_a_repeated_marker_names_the_line_that_took_its_anchor(self):
+        # a wrapped "(b) of this rule" continues the list and takes 7(b); the real (b) then says where 7(b) went
+        text = page("Rule 7.     MOTIONS", "(a)   Form. Every motion cites subsection",
+                    "(b) of this rule when filing.", "(b)   Briefs. Briefs are short.")
+        built = rules.build_text(text, cite_prefix="L.U.Civ.R.")
+        note = next(n for n in built.notes if "Briefs" in n)
+        self.assertIn("7(b) is already anchored", note)
+        self.assertIn("of this rule when filing", note)
+
+    def test_heading_number_that_is_not_digits_is_refused(self):
+        with self.assertRaises(rules.RulesError) as cm:
+            rules.build_text(page("ARTICLE IV   MOTIONS", "(a)   Form."), cite_prefix="L.U.Civ.R.",
+                             heading_re=r"^ARTICLE\s+(?P<num>[IVX]+)\s+(?P<title>.*)$")
+        self.assertIn("'IV'", str(cm.exception))
+
     def test_dotted_rule_numbers(self):
         text = page("Rule 83.1.   ATTORNEYS", "(a)   Admission.", "Rule 83.2.   APPEARANCES", "(a)   Notice.")
         built = rules.build_text(text, cite_prefix="L.U.Civ.R.")
@@ -232,6 +247,21 @@ class TestPageNumbers(unittest.TestCase):
         with self.assertRaises(rules.RulesError) as cm:
             rules.build_text(text, cite_prefix="L.U.Civ.R.")
         self.assertIn("12", str(cm.exception))
+
+    def test_decorated_numbers_follow_the_arabic_sequence(self):
+        # "- 1 -" and "Page 2 of 2" are arabic page numbers; roman front pages keep their own sequence
+        text = "\f".join([page("PREFACE", number="i"), page("A note.", number="ii"),
+                          page("Rule 1.     A", "(a)   One.", number="- 1 -"),
+                          page("(b)   Two.", number="Page 2 of 2")])
+        built = rules.build_text(text, cite_prefix="L.U.Civ.R.")
+        self.assertEqual([t for _, t in built.dropped], ["i", "ii", "- 1 -", "Page 2 of 2"])
+
+    def test_a_lone_page_number_is_dropped_with_a_warning(self):
+        # one number cannot be checked against a sequence, so a person is asked to look
+        text = "\f".join([page("Rule 1.     A", "(a)   One.", number=7), page("(b)   Two.")])
+        built = rules.build_text(text, cite_prefix="L.U.Civ.R.")
+        self.assertEqual(built.dropped, [(1, "7")])
+        self.assertTrue(any("page 1" in w and "'7'" in w for w in built.warnings), built.warnings)
 
 
 class TestWarnings(unittest.TestCase):
@@ -274,6 +304,21 @@ class TestPack(unittest.TestCase):
         self.assertEqual(m["rules_md_sha256"], rules.sha256_file(os.path.join(self.out, "rules.md")))
         self.assertEqual(m["rules"], 3)
         self.assertTrue(m["warnings"])
+
+    def test_manifest_lists_each_dropped_page_number(self):
+        m = self.build()
+        self.assertEqual(m["dropped"], [{"page": p, "text": str(p - 1)} for p in (2, 3, 4, 5)])
+
+    def test_anchor_shaped_source_text_is_not_an_anchor(self):
+        # a source line written like the pack's anchor markup stays text: no fake or colliding subsection
+        with open(self.src, "w", encoding="utf-8") as f:
+            f.write(page("Rule 7.     MOTIONS", "(a)   Form.", '<a id="lucivr-99"></a>fabricated words',
+                         '<a id="lucivr-7"></a>colliding words', "(b)   Briefs."))
+        self.build(start_at=None, stop_at=None)
+        pack = rules.load_pack(self.out)
+        self.assertEqual(sorted(pack.anchors), ["lucivr-7", "lucivr-7-a", "lucivr-7-b"])
+        self.assertEqual(pack.section("lucivr-7-a"), ["**[7(a)]** (a) Form.", '<a id="lucivr-99"></a>fabricated words',
+                                                      '<a id="lucivr-7"></a>colliding words'])
 
     def test_load_round_trip_and_tamper(self):
         self.build()

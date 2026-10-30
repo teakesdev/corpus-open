@@ -115,9 +115,18 @@ class TestPackState(PackBase):
             self.m.check("Responses are due. L.U.Civ.R. 7(b)(4).\n")
 
     def test_a_stale_pack_says_so_in_the_header(self):
-        self.attach(self.local)
+        old = make_pack(self._tmp.name, "old-pack", LOCAL, pack_id="old-local", version="2020-01-01",
+                        title="Old Local Rules", cite_prefix="L.U.Civ.R.", current_as_of="2020-01-01")
+        self.attach(old)
         out = self.m.check("Responses are due. L.U.Civ.R. 7(b)(4).\n").render()
-        self.assertRegex(out, r"Rules packs: .*\[(STALE|ok)")
+        self.assertIn("current as of 2020-01-01 [STALE]", out)
+
+    def test_a_date_after_today_is_not_called_current(self):
+        future = make_pack(self._tmp.name, "future-pack", LOCAL, pack_id="future-local", version="2999-01-01",
+                           title="Future Local Rules", cite_prefix="L.U.Civ.R.", current_as_of="2999-01-01")
+        self.attach(future)
+        out = self.m.check("Responses are due. L.U.Civ.R. 7(b)(4).\n").render()
+        self.assertIn("current as of 2999-01-01 [UNKNOWN]", out)
 
 
 if __name__ == "__main__":

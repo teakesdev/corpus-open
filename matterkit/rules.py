@@ -46,11 +46,11 @@ _NUM = r"\d+(?:\.\d+)?"
 _SUB = r"(?:\s*\([A-Za-z0-9]{1,5}\))*"
 PAGE_NO = re.compile(r"(?:[Pp]age\s+)?[-–]?\s*(?P<n>\d{1,4}|[ivxlc]{1,7})\s*[-–]?(?:\s+of\s+\d{1,4})?")
 MARKER = re.compile(r"\((?P<tok>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\)(?=\s|$)")
-ANCHOR_LINE = re.compile(r'<a id="(?P<id>[^"]+)"></a>')
+# an anchor the builder added: the tag and then a label; source text shaped like a tag alone stays text
+ANCHOR_LINE = re.compile(r'<a id="(?P<id>[^"]+)"></a>(?=\*\*\[)')
 ADDED = re.compile(r'^<a id="[^"]+"></a>\*\*\[[^\]\n]*\]\*\* ?')
 GAP = re.compile(r"\S {5,}\S")
 _CONTENTS = re.compile(r"(?:\.\s?){4,}\s*[\divxlc]+\s*$", re.I)
-LOCAL_WORDS = re.compile(rf"Local(?:\s+(?:Uniform|Civil))*\s+Rule\s+(?P<num>{_NUM})(?P<sub>{_SUB})\s*\.?")
 BARE = re.compile(rf"(?:Rule\s+)?(?P<num>{_NUM})(?P<sub>{_SUB})\s*\.?")
 
 # subsection levels, outermost first: (a) (1) (A) (i), and a (1) list under a capital item
@@ -153,12 +153,18 @@ def _page_value(n: str):
     return int(n) if n.isdigit() else ROMAN_VALUE.get(n)
 
 
-def _check_page_sequence(lines, idx):
+def _check_page_sequence(lines, idx) -> list:
     """Page numbers count up with the pages: value minus page index is the same for every
-    arabic number, and for every roman one. A page may lack a number; a lone number that
-    breaks the sequence is probably rule text, so the build stops."""
+    arabic number ("3", "- 3 -", "Page 3 of 40"), and for every roman one. A page may lack a
+    number; a lone number that breaks the sequence is probably rule text, so the build stops.
+    Returns a warning for a number that is the only one of its kind, which no sequence checks."""
+    warnings = []
     for roman in (True, False):
-        seq = [(lines[i][0], lines[i][1].strip()) for i in idx if lines[i][1].strip().isdigit() != roman]
+        seq = [(lines[i][0], lines[i][1].strip()) for i in idx
+               if PAGE_NO.fullmatch(lines[i][1].strip())["n"].isdigit() != roman]
+        if len(seq) == 1:
+            warnings.append(f"page {seq[0][0]}: {seq[0][1]!r} was left out as the only {'roman' if roman else 'arabic'} "
+                            "page number, so no sequence checks it; confirm it is a page number")
         offsets = [_page_value(PAGE_NO.fullmatch(t)["n"]) - p for p, t in seq]
         if len(set(offsets)) > 1:
             common = max(set(offsets), key=offsets.count)
@@ -166,6 +172,7 @@ def _check_page_sequence(lines, idx):
             raise RulesError("page-number check failed: these lone numbers at a page's top or bottom do not "
                              "follow the page sequence, so they may be rule text: " + ", ".join(bad) +
                              ". Nothing was written; read those pages in the source.")
+    return warnings
 
 
 def _fits(k, indent, lv, ind):
@@ -247,13 +254,16 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
 
     dropped = [i for i in range(start, stop) if i in edges and (m := PAGE_NO.fullmatch(lines[i][1].strip()))
                and _page_value(m["n"]) is not None]
-    _check_page_sequence(lines, dropped)
+    page_warnings = _check_page_sequence(lines, dropped)
     skip = set(dropped)
     region = [i for i in range(start, stop) if i not in skip and lines[i][1].strip()]
 
     heads, last = {}, None
     for i in region:
         m = heading.match(lines[i][1].replace("\f", "").strip())
+        if m and not re.fullmatch(_NUM, m["num"]):
+            raise RulesError(f"the heading pattern read {m['num']!r} as a rule number on page {lines[i][0]}; "
+                             "anchors and cites need digits such as 7 or 83.1. Nothing was written.")
         if m and (last is None or _num_key(m["num"]) > last):
             heads[i], last = m, _num_key(m["num"])
     markers = {i: m["tok"] for i in region if i not in heads and (m := MARKER.match(_norm(lines[i][1])))}
@@ -272,7 +282,7 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
         src += line.split()
         if i in heads:
             num = heads[i]["num"]
-            cur = {"num": num, "lv": [None] * 5, "ind": [None] * 5}
+            cur = {"num": num, "lv": [None] * 5, "ind": [None] * 5, "at": [None] * 5}  # at: (label, line)
             rule_nums.append(num)
             aid = f"{ap}-{num}"
             title = _title(heads[i].groupdict().get("title") or "") or f"Rule {num}"
@@ -283,18 +293,23 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
         if tok is None or cur is None:
             body.append(line)
             continue
-        lv, ind, indent = cur["lv"], cur["ind"], _indent(raw)
+        lv, ind, at, indent = cur["lv"], cur["ind"], cur["at"], _indent(raw)
         k, alts = _level(tok, lv, ind, indent, upcoming.get(i))
         if k is None:
+            # a repeat of the current item means an earlier line, often a wrapped cross-reference, took its anchor
+            took = next((at[j] for j in range(5) if lv[j] == tok and at[j]), None)
             notes.append(f"Rule {cur['num']}: ({tok}) on page {pno} is out of sequence, so it is kept as text, "
-                         f"not a subsection: {line[:70]!r}")
+                         f"not a subsection: {line[:70]!r}" +
+                         (f". {took[0]} is already anchored at the earlier line {took[1][:70]!r}; if that line is a "
+                          "wrapped cross-reference, the anchor is on the wrong line" if took else ""))
             body += ["", line]
             continue
         others = [_label(cur["num"], [p for p in lv[:j] if p is not None] + [tok]) for j in alts]
         lv[k], ind[k] = tok, indent
         for j in range(k + 1, 5):
-            lv[j] = ind[j] = None
+            lv[j] = ind[j] = at[j] = None
         parts = [p for p in lv[: k + 1] if p is not None]
+        at[k] = (_label(cur["num"], parts), line)
         aid = "-".join([f"{ap}-{cur['num']}"] + parts)
         body += ["", f'<a id="{aid}"></a>**[{_label(cur["num"], parts)}]** {line}']
         anchors.append(aid)
@@ -320,7 +335,7 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
     if words["source"] != words["before_start"] + words["after_stop"] + words["page_numbers"] + words["body"]:
         raise RulesError(f"word accounting failed: {words}. Nothing was written.")
     return Built(body, src, rule_nums, anchors, [(lines[i][0], lines[i][1].strip()) for i in dropped], notes,
-                 _warnings(lines, region), words)
+                 page_warnings + _warnings(lines, region), words)
 
 
 def _warnings(lines, region):
@@ -385,7 +400,7 @@ def _header(m: dict) -> str:
         f"amendments before relying on a rule.",
         f"- **Words:** the body below, with its headings, anchors and bracketed labels removed, holds the "
         f"source text's {m['words']['body']} words{span}, unchanged and in order. "
-        f"{m['words']['page_numbers']} page-number words were left out.",
+        f"{m['words']['page_numbers']} page-number words were left out; manifest.json lists each one.",
         f"- **Anchors:** {m['rules']} rules, {m['anchors']} anchors. `{ex}` is `#{m['anchor_prefix']}-7-b-4`. "
         f"Levels are read from the markers: (a) letter, (1) number, (A) capital, (i) roman, and a (1) list under "
         f"a capital item. {len(m['notes'])} placements were guessed or skipped and "
@@ -426,7 +441,8 @@ def build_pack(source_path: str, out_dir: str, *, pack_id: str, version: str, ti
          "source": {"file": os.path.basename(source_path), "sha256": sha256_file(source_path), "url": source_url,
                     "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "extractor": extractor},
          "region": {"start_at": start_at, "stop_at": stop_at, "heading_re": heading_re or DEFAULT_HEADING},
-         "built_at": store.now_iso(), "builder": BUILDER, "words": built.words, "rules": len(built.rules),
+         "built_at": store.now_iso(), "builder": BUILDER, "words": built.words,
+         "dropped": [{"page": p, "text": t} for p, t in built.dropped], "rules": len(built.rules),
          "anchors": len(built.anchors), "rules_md_sha256": None, "notes": built.notes, "warnings": built.warnings}
     md = (_header(m) + "\n".join(built.body).lstrip("\n") + "\n").encode("utf-8")
     m["rules_md_sha256"] = hashlib.sha256(md).hexdigest()
@@ -530,6 +546,8 @@ def staleness(current_as_of, review_after_days, today=None):
     if not current_as_of:
         return "UNKNOWN", "no current-as-of date was recorded; check the court's website for the current rules"
     age = (today - date.fromisoformat(current_as_of)).days
+    if age < 0:
+        return "UNKNOWN", f"current as of {current_as_of}, which is after today ({today}); check the date in the pack"
     if age > review_after_days:
         return "STALE", (f"{age} days since {current_as_of}, past its {review_after_days}-day review window; "
                          "check the court's website for amendments")
@@ -556,10 +574,16 @@ def read_attachments(case_dir: str) -> dict:
     if not isinstance(d, dict) or d.get("format") != ATTACH_FORMAT or not isinstance(d.get("packs"), list) \
             or not isinstance(d.get("history", []), list):
         raise RulesError(f"{p}: expected {{'format': {ATTACH_FORMAT!r}, 'packs': [...], 'history': [...]}}")
+    # the file is not a registered document, so a hand edit is caught here rather than by verify
+    keys = ("id", "version", "path", "cite_prefix", "anchor_prefix", "manifest_sha256", "rules_md_sha256")
     for e in d["packs"]:
-        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) for k in
-                                              ("id", "version", "path", "manifest_sha256", "rules_md_sha256")):
-            raise RulesError(f"{p}: each pack needs id, version, path, manifest_sha256 and rules_md_sha256")
+        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) for k in keys):
+            raise RulesError(f"{p}: each pack needs {', '.join(keys)}")
+        days = e.get("review_after_days", REVIEW_AFTER_DAYS)
+        if not isinstance(days, int) or isinstance(days, bool) or days < 1:
+            raise RulesError(f"{p}: {e['id']}: review_after_days must be a positive number of days")
+        if e.get("current_as_of") is not None and not _is_date(e["current_as_of"]):
+            raise RulesError(f"{p}: {e['id']}: current_as_of must be YYYY-MM-DD")
         if ingest.resolve_document_path(os.path.abspath(case_dir), e["path"]) is None:
             raise RulesError(f"{p}: pack path {e['path']!r} is not inside the matter")
     d.setdefault("history", [])
@@ -575,8 +599,9 @@ class Attached:
 
 def load_attached(case_dir: str) -> list:
     """Each attached pack, read and checked against the bytes recorded when it was attached.
-    A pack that fails comes back with pack=None and the reason; it is never used."""
-    out = []
+    A pack that fails comes back with pack=None and the reason; it is never used. So does a pack
+    that shares a cite or anchor prefix with one listed before it (possible only by hand-editing)."""
+    out, cites, anchors = [], {}, {}
     for e in read_attachments(case_dir)["packs"]:
         d = ingest.resolve_document_path(os.path.abspath(case_dir), e["path"])
         try:
@@ -586,7 +611,15 @@ def load_attached(case_dir: str) -> list:
             continue
         if pack.rules_md_sha256 != e["rules_md_sha256"] or pack.manifest_sha256 != e["manifest_sha256"]:
             out.append(Attached(e, None, f"{e['path']} changed after it was attached; run verify"))
+            continue
+        cite = default_anchor_prefix(pack.cite_prefix)
+        if cite in cites:
+            out.append(Attached(e, None, f"shares the cite prefix {pack.cite_prefix!r} with {cites[cite]}"))
+        elif pack.anchor_prefix in anchors:
+            out.append(Attached(e, None, f"shares the anchor prefix {pack.anchor_prefix!r} with "
+                                         f"{anchors[pack.anchor_prefix]}"))
         else:
+            cites[cite] = anchors[pack.anchor_prefix] = pack.id
             out.append(Attached(e, pack, None))
     return out
 
@@ -596,6 +629,8 @@ def attach(case_dir: str, pack_dir: str, by: str, replace: bool = False) -> tupl
     record it in .matter/rules.json and the events table. Returns (entry, message)."""
     if not os.path.isdir(case_dir):
         raise RulesError(f"case_dir is not a directory: {case_dir}")
+    if os.path.abspath(pack_dir) == os.path.abspath(case_dir):
+        raise RulesError("the pack folder is the matter folder itself; keep a pack in a folder of its own")
     pack = load_pack(pack_dir)
     att = read_attachments(case_dir)
     cur = next((e for e in att["packs"] if e["id"] == pack.id), None)
@@ -605,11 +640,17 @@ def attach(case_dir: str, pack_dir: str, by: str, replace: bool = False) -> tupl
     if cur and not replace:
         raise RulesError(f"{pack.id} is attached at version {cur['version']}; pass --replace to attach "
                          f"{pack.version} in its place")
-    clash = [e for e in att["packs"] if e["id"] != pack.id and
-             default_anchor_prefix(e.get("cite_prefix", "")) == default_anchor_prefix(pack.cite_prefix)]
-    if clash:
-        raise RulesError(f"{clash[0]['id']} already answers to the cite prefix {pack.cite_prefix!r}; two rule sets "
-                         "would claim the same cites")
+    for a in load_attached(case_dir):  # prefixes from each pack's own manifest where it can be read
+        if a.entry["id"] == pack.id:
+            continue
+        cite, anchor = (a.pack.cite_prefix, a.pack.anchor_prefix) if a.pack else \
+            (a.entry["cite_prefix"], a.entry["anchor_prefix"])
+        if default_anchor_prefix(cite) == default_anchor_prefix(pack.cite_prefix):
+            raise RulesError(f"{a.entry['id']} already answers to the cite prefix {pack.cite_prefix!r}; two rule "
+                             "sets would claim the same cites")
+        if anchor == pack.anchor_prefix:
+            raise RulesError(f"{a.entry['id']} already uses the anchor prefix {anchor!r}; two packs would share "
+                             "anchor ids. Rebuild this pack with another --anchor-prefix")
 
     abs_case, abs_pack = os.path.abspath(case_dir), os.path.abspath(pack_dir)
     inside = ingest.is_within_matter(abs_pack, abs_case)
@@ -647,13 +688,14 @@ def attach(case_dir: str, pack_dir: str, by: str, replace: bool = False) -> tupl
             att["packs"].remove(cur)
             att["history"].append(dict(cur, replaced_at=now, replaced_by=by))
         att["packs"].append(entry)
-        _write_atomic(_attach_path(case_dir), (json.dumps(att, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
         text = f"rules pack {pack.id}@{pack.version} attached from {rel}" + \
             (f" in place of {cur['version']}" if cur else "")
-        with conn:
+        with conn:  # the event commits only if rules.json was written, so neither exists without the other
             conn.execute("INSERT INTO events (id,occurred_on,text,actors,sources) VALUES (?,?,?,?,?)",
                          (store.new_id("ev_"), date.today().isoformat(), text, by,
                           json.dumps([os.path.join(rel, n) for n in shas])))
+            _write_atomic(_attach_path(case_dir),
+                          (json.dumps(att, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     finally:
         conn.close()
     return entry, text
@@ -725,8 +767,8 @@ def resolve(case_dir: str, cite: str, pack_id: str | None = None) -> Resolution:
     for a in usable:
         if m := _prefix_re(a.pack.cite_prefix).fullmatch(s):
             return find(a, m["num"], m["sub"])
-    if m := LOCAL_WORDS.fullmatch(s):
-        from . import briefcheck  # lazy: briefcheck imports this module
+    from . import briefcheck  # lazy: briefcheck imports this module
+    if m := briefcheck.LOCAL_WORDS_RE.fullmatch(s.rstrip(".")):  # the words brief check reads as a local rule
         local = briefcheck.rule_prefixes(briefcheck.load_docket(case_dir)[0])[1]
         a = next((a for a in usable if default_anchor_prefix(a.pack.cite_prefix) == default_anchor_prefix(local)),
                  None)
@@ -803,13 +845,17 @@ def list_text(case_dir: str, today=None) -> str:
 
 
 def stale_report(case_dir: str, today=None) -> tuple:
-    """(exit code, text): 1 if any attached pack is past its review window or has no date."""
-    packs = read_attachments(case_dir)["packs"]
-    if not packs:
+    """(exit code, text): 1 if any attached pack is past its review window, has no date, or cannot be used."""
+    attached = load_attached(case_dir)
+    if not attached:
         return 0, "no rules pack is attached"
     out, worst = [], 0
-    for e in packs:
-        state, why = staleness(e.get("current_as_of"), e.get("review_after_days", REVIEW_AFTER_DAYS), today)
+    for a in attached:
+        e = a.entry
+        if a.pack is None:
+            state, why = "NOT USABLE", a.problem
+        else:
+            state, why = staleness(a.pack.manifest["current_as_of"], a.pack.manifest["review_after_days"], today)
         worst = max(worst, 0 if state == "ok" else 1)
         out.append(f"[{state}] {e['id']}@{e['version']}: {why}")
     out.append("No court website was checked; this compares dates only.")

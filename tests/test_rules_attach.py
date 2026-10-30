@@ -88,6 +88,10 @@ class Base(unittest.TestCase):
         with open(os.path.join(self.dir, ".matter", "rules.json"), encoding="utf-8") as f:
             return json.load(f)
 
+    def write_attachments(self, att):
+        with open(os.path.join(self.dir, ".matter", "rules.json"), "w", encoding="utf-8") as f:
+            json.dump(att, f)
+
 
 class TestAttach(Base):
     def test_attach_copies_registers_records_and_verifies(self):
@@ -132,6 +136,65 @@ class TestAttach(Base):
         out = self.attach(other, check=False)
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("same cites", out.stderr)
+
+    def test_second_pack_with_the_same_anchor_prefix_is_refused(self):
+        # anchor ids would name two packs' text, so `show lucivr-7` could answer from either
+        self.attach(self.local)
+        other = make_pack(self._tmp.name, "same-anchors", FEDERAL, pack_id="other", version="1", title="Other",
+                          cite_prefix="Other R.", anchor_prefix="lucivr")
+        out = self.attach(other, check=False)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("anchor prefix 'lucivr'", out.stderr)
+        self.assertEqual(len(self.attachments()["packs"]), 1)
+
+    def test_hand_edited_attachments_are_checked_when_read(self):
+        # .matter/rules.json is not a registered document, so its entries are checked every time it is read
+        self.attach(self.local)
+        other = make_pack(self._tmp.name, "same-anchors", FEDERAL, pack_id="other", version="1", title="Other",
+                          cite_prefix="Other R.", anchor_prefix="lucivr")
+        import shutil
+        shutil.copytree(other, os.path.join(self.dir, "Research", "other"))
+        att = self.attachments()
+        pack = rules.load_pack(other)
+        att["packs"].append({"id": "other", "version": "1", "path": os.path.join("Research", "other"),
+                             "cite_prefix": "Other R.", "anchor_prefix": "lucivr",
+                             "manifest_sha256": pack.manifest_sha256, "rules_md_sha256": pack.rules_md_sha256})
+        self.write_attachments(att)
+        listed = self.cli("rules", "list", self.dir, "--today", "2030-06-01").stdout
+        self.assertIn("other@1", listed)
+        self.assertIn("NOT USABLE: shares the anchor prefix 'lucivr' with example-local", listed)
+        del att["packs"][1]["cite_prefix"]
+        self.write_attachments(att)
+        out = self.show("lucivr-7")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("refused:", out.stderr)
+        self.assertIn("cite_prefix", out.stderr)
+
+    def test_the_matter_folder_itself_is_not_a_pack(self):
+        import shutil
+        for name in ("manifest.json", "rules.md"):
+            shutil.copy(os.path.join(self.local, name), self.dir)
+        out = self.attach(self.dir, check=False)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("refused:", out.stderr)
+        self.assertNotIn("Traceback", out.stderr)
+
+    def test_a_failed_event_leaves_the_pack_unattached(self):
+        # the event row and .matter/rules.json are written together, or neither is
+        from unittest import mock
+        new_id = rules.store.new_id
+
+        def failing(prefix=""):
+            if prefix == "ev_":
+                raise RuntimeError("event id failed")
+            return new_id(prefix)
+        with mock.patch.object(rules.store, "new_id", failing):
+            with self.assertRaises(RuntimeError):
+                rules.attach(self.dir, self.local, "agent:test-model")
+        self.assertFalse(os.path.exists(os.path.join(self.dir, ".matter", "rules.json")))
+        self.assertEqual(self.rows("SELECT id FROM events WHERE text LIKE 'rules pack%'"), [])
+        self.attach(self.local)  # the copied and registered files do not block a second try
+        self.assertEqual(len(self.attachments()["packs"]), 1)
 
     def test_a_pack_already_inside_the_matter_is_registered_in_place(self):
         inside = os.path.join(self.dir, "Research", "my-rules")
@@ -208,6 +271,13 @@ class TestShow(Base):
         self.assertEqual(out.returncode, 0, out.stdout)
         self.assertIn("read as L.U.Civ.R. 7(b)(4)", out.stdout)
 
+    def test_local_rule_words_match_brief_check(self):
+        # brief check reads "Local Rules 7" and "Local Civil Rule 7" as the docket local_rule; so does show
+        for cite in ("Local Rules 7(b)(4)", "Local Civil Rule 7(b)(4)."):
+            out = self.show(cite)
+            self.assertEqual(out.returncode, 0, out.stdout)
+            self.assertIn("read as L.U.Civ.R. 7(b)(4)", out.stdout)
+
     def test_anchor_id(self):
         out = self.show("lucivr-7-b-4-A")
         self.assertEqual(out.returncode, 0)
@@ -250,6 +320,32 @@ class TestStale(Base):
         out = self.cli("rules", "stale", self.dir, check=False)
         self.assertEqual(out.returncode, 1)
         self.assertIn("[UNKNOWN] undated@1", out.stdout)
+
+    def test_a_date_after_today_is_flagged(self):
+        self.attach(self.local)  # current as of 2030-01-01
+        out = self.cli("rules", "stale", self.dir, "--today", "2029-06-01", check=False)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("[UNKNOWN] example-local@2030-01-01", out.stdout)
+        self.assertIn("after today", out.stdout)
+
+    def test_a_pack_changed_after_attach_is_flagged(self):
+        self.attach(self.local)
+        rel = os.path.join(self.dir, "Research", "Rules", "example-local_2030-01-01", "rules.md")
+        with open(rel, "a", encoding="utf-8") as f:
+            f.write("edited\n")
+        out = self.cli("rules", "stale", self.dir, "--today", "2030-06-01", check=False)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("[NOT USABLE] example-local@2030-01-01", out.stdout)
+
+    def test_a_malformed_review_window_is_refused(self):
+        self.attach(self.local)
+        att = self.attachments()
+        att["packs"][0]["review_after_days"] = "soon"
+        self.write_attachments(att)
+        out = self.cli("rules", "stale", self.dir, check=False)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("refused:", out.stderr)
+        self.assertNotIn("Traceback", out.stderr)
 
 
 class TestDeadlineRule(Base):
