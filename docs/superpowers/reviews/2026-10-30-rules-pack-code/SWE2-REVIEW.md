@@ -1,0 +1,67 @@
+**Verdict: APPROVE WITH CHANGES**
+
+The build/attach/resolve core is sound and well-tested: the word-identity contract (C1) holds against every drop/merge/reorder/change path I could construct except the documented page-number channel, and the loader checks bytes end-to-end. The findings below are hardening of the new pack contract plus a few silent-failure edges in the level heuristics — worth fixing while the format is young, but none breaks the primary build→attach→resolve path on honest input.
+
+## Findings
+
+### P1
+None.
+
+### P2
+
+**F1 — A source line that starts `<a id="...">` mints a fake addressable anchor (rules.py:515-522, 50, 135-138).**
+`load_pack` registers every body line matching `ANCHOR_LINE` at position 0, requiring only uniqueness and the `anchor_prefix-` prefix. The builder's word check (C1) is blind to this: a source line `<a id="lucivr-99"></a>some text` contains no `**[label]**`, so `ADDED` doesn't strip it — it is preserved verbatim as genuine source words, passes the check, and then registers as a real anchor. Scenario: source text containing `<a id="lucivr-99"></a>fabricated` at a line start → `rules show lucivr-99` returns that text labelled "L.U.Civ.R. 99"; `<a id="lucivr-7">` collides with the real rule anchor → the whole pack refuses to load forever. A colliding id is a silent DoS; a non-colliding id is a fabricated subsection. **Edit:** in `load_pack`, accept an anchor only on lines matching the emitted shape `<a id="…"></a>**[…]**` (require the label), or refuse label-less anchor-shaped lines.
+
+**F2 — Dropped page-number lines are never recorded; two classes slip the sequence check (rules.py:248-252, 156-168, 318-321).**
+`Built.dropped` exists in memory but `build_pack`'s manifest (423-430) stores only `words.page_numbers` as a count — the single channel through which the word check can legitimately lose source text leaves no auditable artifact. Separately, `_check_page_sequence` partitions buckets by `lines[i][1].strip().isdigit()` (line 161), i.e. by the literal line, not the parsed value: decorated arabic numbers (`- 3 -`, `Page 3 of 40`) land in the "roman" bucket. Consequences: (a) any *single* candidate in a bucket can never fail (`len(set(offsets)) == 1`), so one decorated `- 99 -` at a page edge — or one lone "3" in a doc whose other pages are unnumbered — is dropped unconditionally with nothing written down; (b) a document mixing roman `i,ii` edges and decorated `- 3 -` edges inside the region refuses even when both sequences are correct (fail-closed, but with no override flag). Scenario: 40 pages numbered 1–40 plus a page whose last filled line is a stray "99"… arabic bucket catches it; make it `- 99 -` and it is silently dropped as the sole roman-bucket member. **Edit:** write `dropped` (page, text) into `manifest.json`; bucket by `PAGE_NO.fullmatch(t)["n"].isdigit()`; add a note when a bucket has one member.
+
+**F3 — Ambiguous subsection decisions resolved by lookahead or indent-fit leave no note (rules.py:200-208).**
+`_level` returns `alts=[]` when the `(i)`-as-letter-or-roman question is settled by the next marker (`ROMAN_NEXT`/`_next_alpha`/`"1"`) and when exactly one candidate `_fits` the indent — yet both are guesses over an ambiguous `cands` set. The design's stated contract (C3, and the header in `rules.md`) is that guessed placements are listed in `notes`; these are not. Scenario: `(i)` ending subsection `(h)(1)(A)`, where the next marker `(1)` opens a *different* list under `(c)` → the `(i)` is placed as letter-i, `lv[1..4]` is cleared (rules.py:295-296), cascading anchors onto the wrong parent — silently, no note. **Edit:** return the rejected candidates in `alts` for the lookahead and single-fit paths so every ambiguous placement lands in `notes`/`manifest.json`.
+
+**F4 — A wrapped cross-reference equal to the next expected marker becomes a subsection, and the wrong anchor persists (rules.py:282-291).**
+Scenario: `(a) Form. Every motion cites\n(b) of this rule when filing …` followed later by the real `(b) Briefs.` — the wrapped line continues the letter sequence, so `lucivr-7-b` is anchored at the cross-reference; the real `(b)` then trips an out-of-sequence note (good), but `show "L.U.Civ.R. 7(b)"` still returns the cross-reference's text under a "7(b)" label. Partly inherent to the sequence heuristic, but the notes point at the displaced real marker, not at the suspect anchor. **Edit:** when a marker is noted out-of-sequence and an earlier marker already claimed that level, name the earlier anchor in the note so a human knows which entry to check.
+
+### P3
+
+**F5 — `LOCAL_WORDS` diverges from `briefcheck.LOCAL_WORDS_RE` (rules.py:53 vs briefcheck.py:159-161).**
+`resolve` accepts only `Uniform|Civil` and singular "Rule"; briefcheck also accepts `Criminal|Bankruptcy|Admiralty|Court` and "Rules". `rules show "Local Rules 7"` or `"Local Criminal Rule 5"` → "not a rule cite" while the same draft cite is parsed by brief check. Align the two grammars.
+
+**F6 — Custom `--heading-regex` can crash unhandled (rules.py:256-258).**
+A `num` group that isn't `\d+(\.\d+)?` (e.g. `(?P<num>[IVX]+)`, or `7.1.2`) makes `_num_key` raise bare `ValueError` (and `7.1.2` would also build anchors `_NUM`-patterns can never resolve). Not a `RulesError`, so `cmd_rules` doesn't catch it → traceback. Validate `num` with `_NUM` or translate into `RulesError`.
+
+**F7 — Prefix/anchor collision checks can be bypassed or missed (rules.py:608-612, 559-562).**
+The attach-time clash check reads `cite_prefix` from the *entry* (`e.get("cite_prefix","")`), but `read_attachments` doesn't require that key — a hand-edited `rules.json` entry without it bypasses the check, after which `resolve`'s first-match loop (721-727) silently picks the first pack. `anchor_prefix` collisions (reachable via `--anchor-prefix` reuse) are never checked, so anchor-id lookups can hit the wrong pack. Derive the clash check from the loaded packs' manifest fields and require `cite_prefix`/`anchor_prefix` in entry validation.
+
+**F8 — "7(b) and (c)" leaves (c) unchecked (briefcheck.py:134, 1189).**
+`RULE_TAIL_RE` requires a digit after the separator, so `(c)` is never a cite; `_rule_text` warns only on what exists. A draft citing `L.U.Civ.R. 7(b) and (c)` where the pack lacks 7(c) produces no warning. Pre-existing grammar limitation, but it now bounds the new feature's coverage — worth documenting or extending the tail to bare subsection members.
+
+**F9 — Minor robustness/UX (rules.py:526-536, 614-617, 640-658; ingest.py:107).**
+Negative `current_as_of` ages report as `[ok]`; hand-edited non-int `review_after_days` crashes `list`/`stale` with TypeError; `stale` trusts entry metadata without consulting `load_attached` (a tampered pack reports `[ok]`); `attach` with `pack_dir == case_dir` raises uncaught `ValueError` from `to_rel_path`; `rules.json` is written before the events insert, so a failed insert leaves an attached pack with no event (copied-then-refused files remain but re-attach self-heals on matching bytes).
+
+## Answers to points 1–9
+
+**1. Can the build pass with altered words?** Only through the documented page-number channel (F2). Every other path preserves order and content: `## `-prefixed source lines and label-shaped source lines fail closed (`body_words` drops them → mismatch → refuse; test `test_source_line_that_looks_like_markup_fails_closed` pins this); the heading's source text is preserved verbatim after the label; form feeds are page boundaries by construction; `stop_at` mid-rule truncates cleanly and the word accounting (318-321) balances by construction. The residual hole: a source line starting `<a id="…"></a>` *without* a `**[` label survives as text but changes the pack's *structure* (F1) — words pass, semantics change.
+
+**2. Can a real line be dropped as a page number?** Yes, in three cases: (a) the only candidate in its roman/arabic bucket is never sequence-checked; (b) decorated arabic is bucketed with romans (line 161), so a lone `- 99 -` or `Page 99 of 200` drops unconditionally; (c) a real one-word line that coincidentally holds the constant offset. `_page_value` correctly refuses non-canonical romans (`ic`, `iiii` stay as text), and multi-number sequences must agree — good. But nothing records what was dropped (F2) — the control the design promises ("the dropped lines are exactly the page-number sequence") is test-only, not auditable post-build.
+
+**3. Mislabeled anchors.** The five-level state machine is well-reasoned: line-start-only markers, `(a)(1)` on one line correctly fails `MARKER`'s lookahead and stays text (though without a note — silently unanchored); deeper-than-5 lists fall out as out-of-sequence notes; out-of-sequence markers stay text *with* notes; the (e)(3)(B)(1) nested-list fixture is properly pinned. Weak spots: cross-references matching the next expected marker (F4); `(i)` lookahead guessing without a note (F3); a mid-document `Rule 83. <Capitalized>` cross-reference becomes a heading when 83 > last seen (cascades as notes, but the fake rule anchor persists); roman-directly-under-letter `(a)(i)` is unsupported and becomes a note.
+
+**4. Pack integrity and attach.** Strong: manifest field validation, `rules.md` sha vs manifest, unique+prefixed anchors, `resolve_document_path` blocks `..`/absolute escapes, `load_attached` re-hashes both files against attach-time entries, same-bytes-elsewhere refused (needed because `documents.sha256` is UNIQUE), `--replace` keeps history. Gaps: F1 (anchor-shaped source lines), F7 (entry-level clash check + anchor-prefix collisions), F9 (rules.json written before the event row; `pack_dir == case_dir` traceback). Packs inside a nested matter are refused via `nested_matter_root` — correct.
+
+**5. Wrong rule text returned.** Prefix patterns are literal-with-`\s*` and `fullmatch`, so one pack can't steal another's cite; identical normalized prefixes are refused at attach. `7` vs `7.1` and `7` vs `79` are exact-dict + `aid + "-"` prefix-safe in `section()` — no bleed. `show --pack` with a cite of another pack's prefix degrades to "not a rule cite" (right refusal, slightly misleading message). Anchor-id lookup crosses packs — collisions need `--anchor-prefix` misuse (F7).
+
+**6. Brief check.** BLOCK/UNCHECKED/exit-code semantics are provably unchanged (the tests assert it); the additions are WARN-only and the header/section appear only when a pack exists — a no-pack report is byte-identical. A malformed `rules.json` raises `RulesError` (a `ValueError`) — the whole check refuses (deliberate, pinned by `test_a_malformed_attachment_file_refuses_the_check`); honest note: that's fail-closed but broad. `_rule_text`'s regex picks the right trailing `num+sub` on normal raws including wrapped and `Local Rule` cites; `7(b) and (c)` misses `(c)` (F8); pack selection by `_norm_key(cite_prefix)` is consistent with how targets are keyed, including docket remaps — a docket `local_rule` of e.g. "Local Rule" simply means those cites read as a set no pack claims, so they're unchecked — consistent, not a bug.
+
+**7. Deadlines, CLI, MCP.** `rule_source` → `resolve` is correct for found/candidates/not-found; `cmd_deadline` refuses on `RulesError` before `dl.add` — ordering right; malformed `rules.json` aborts the whole add (same deliberate breadth as briefcheck). A deadline can't silently record the wrong pack absent F7's collision. `cmd_rules` wiring is complete and `--today` is restricted to the right subcommands. MCP: `code==2 → text` and `code==1 → raise` is right (candidates are information, not failure); `RulesError` propagates into the generic `isError` handler — consistent.
+
+**8. Tests.** 62 tests genuinely pin C1 (identity, accounting, fail-closed on markup-shaped source, form feeds), C2 (drops, missing number, broken sequence), C3 (nested-under-capital, indent resolution, out-of-sequence, `(i)` both ways, dotted rules), C4 (columns, glyphs), C5 (bare → candidates, `--pack`, prefix disambiguation), C6 (WARN-only, exit-code equality, tamper, no-pack invariance), C7 (idempotence, `--replace` history, same-prefix refusal, in-place attach, tamper). Discriminating controls: `test_indentation_ends_the_nested_list`, the contents-entry start/stop tests, `test_changed_body_fails_the_check`. Missing and worth adding: injected `<a id>` source lines; dropped-values persistence; lookahead-`(i)` across subsections; a cross-ref that *matches* the next marker (the F4 positive case); singleton decorated page numbers; `"Local Rules 7"`; MCP candidates (exit 2); `deadline add` with malformed `rules.json`.
+
+**9. Gaps.** Manifest doesn't record `dropped` values or the anchor list (only counts) — the two auditability gaps that matter (F1/F2 fixes both live there). `rules stale`/`list` read entry metadata without flagging unreadable packs. `(a)(1)` combined markers and `(a)(i)` roman-under-letter are silent/only-noted — README should state the level grammar limits. No anchor-listing debug surface.
+
+## Readiness
+
+Ready to land on `feat/matter-capture` **after the P2 edits** — they are small and mechanical: (1) require the `**[label]**` shape when registering anchors in `load_pack`; (2) persist `dropped` in the manifest and fix the page-number bucketing; (3) propagate `alts` through the lookahead/fit paths in `_level`; (4) name the suspect anchor in out-of-sequence notes. With those, the rest is safe to land now and iterate (P3s are edge hardening, several documented).
+
+## Model serving me
+
+SWE-2 Max (Devin).
