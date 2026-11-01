@@ -74,20 +74,24 @@ def notes_xml(kind, notes):
     return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:{kind}s {NS}>{sep}{out}</w:{kind}s>'
 
 
-def lvl(ilvl, fmt, text, start=1, pstyle=None):
+def lvl(ilvl, fmt, text, start=1, pstyle=None, restart=None):
     ps = f'<w:pStyle w:val="{pstyle}"/>' if pstyle else ""
-    return (f'<w:lvl w:ilvl="{ilvl}"><w:start w:val="{start}"/><w:numFmt w:val="{fmt}"/>{ps}'
+    rs = f'<w:lvlRestart w:val="{restart}"/>' if restart is not None else ""
+    return (f'<w:lvl w:ilvl="{ilvl}"><w:start w:val="{start}"/><w:numFmt w:val="{fmt}"/>{rs}{ps}'
             f'<w:lvlText w:val="{text}"/></w:lvl>')
 
 
 def numbering_xml(abstracts, nums):
-    """abstracts: {abstractId: [lvl(...), ...]}; nums: {numId: abstractId or (abstractId, {ilvl: startOverride})}."""
+    """abstracts: {abstractId: [lvl(...) or raw XML, ...]}; nums: {numId: abstractId or (abstractId, {ilvl: override})}.
+    An override is a startOverride value, or raw XML for the inside of the w:lvlOverride."""
     out = ""
     for a, levels in abstracts.items():
         out += f'<w:abstractNum w:abstractNumId="{a}">{"".join(levels)}</w:abstractNum>'
     for n, v in nums.items():
         a, ov = v if isinstance(v, tuple) else (v, {})
-        over = "".join(f'<w:lvlOverride w:ilvl="{i}"><w:startOverride w:val="{s}"/></w:lvlOverride>' for i, s in ov.items())
+        over = "".join(f'<w:lvlOverride w:ilvl="{i}">'
+                       + (s if str(s).startswith("<") else f'<w:startOverride w:val="{s}"/>') + "</w:lvlOverride>"
+                       for i, s in ov.items())
         out += f'<w:num w:numId="{n}"><w:abstractNumId w:val="{a}"/>{over}</w:num>'
     return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering {NS}>{out}</w:numbering>'
 
