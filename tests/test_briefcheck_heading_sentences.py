@@ -260,5 +260,41 @@ class TestSWE2RoundTwo(Base):
                                                     "The motion should be denied because the claims are plausible."])
 
 
+class TestPortKnownLimit(Base):
+    """SWE-2's round-3 P2, carried through the port as a known limit (docs/superpowers/reviews/
+    2026-10-23-brief-heading-sentences-code-r3/ and 2026-11-01-port-brief-heading-sentences-code/).
+
+    A numbered or multi-letter-roman line that names a fact section but carries a checkable cite is
+    text, not a heading, so the section it names never opens and the uncited facts under it pass
+    (silent). The lettered form opens ("A. Background Doc. 16"), and so does the all-caps roman one.
+    The README states the limit. A code fix would run the fact rule before the cite check in the
+    numbered and roman branches, as _titled does for the lettered one.
+    """
+    FACT = "The arrest happened at home on a holiday."
+
+    def test_known_limit_numbered_and_roman_fact_headings_with_a_cite_are_text(self):
+        for line in ["1. Statement of Facts Doc. 16",
+                     "II. Facts Established At The Hearing Doc. 16",
+                     "1. Facts Under \u00a7 1983"]:
+            with self.subTest(line=line):
+                self.assertIsNone(briefcheck._heading(line))
+
+    def test_the_lettered_and_all_caps_twins_still_open_a_section(self):
+        self.assertEqual(briefcheck._heading("A. Background Doc. 16"), 2)
+        self.assertEqual(briefcheck._heading("II. FACTS FROM DOC. 16"), 1)
+
+    def test_known_limit_end_to_end_the_fact_section_never_opens(self):
+        for heading in ["1. Statement of Facts Doc. 16",
+                        "II. Facts Established At The Hearing Doc. 16",
+                        "1. Facts Under \u00a7 1983"]:
+            with self.subTest(heading=heading):
+                r = self.m.check(heading + "\n\n" + self.FACT + "\n")
+                self.assertEqual(found(r, "uncited-fact"), [])   # the gap: this fact passes
+
+    def test_the_lettered_twin_flags_the_same_fact(self):
+        r = self.m.check("A. Background Doc. 16\n\n" + self.FACT + "\n")
+        self.assertEqual(found(r, "uncited-fact"), [self.FACT])
+
+
 if __name__ == "__main__":
     unittest.main()

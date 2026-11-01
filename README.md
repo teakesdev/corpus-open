@@ -216,24 +216,28 @@ authority and sourced quotation is still checked, and a fact tag labeled
 HYPOTHESIS, INFERENCE or UNKNOWN is flagged.
 
 Headings mark where fact sections start and end.
-Headings are still read for cites and quotations, in either mode, and for
-fact tags; only the uncited-sentence rule skips them, so "II. Argument Under
-Rule 12" has its rule checked. A numbered line (and, in complaint mode, a
-lettered one other than I, V, X, L or C) counts as a heading only when it is
-short, carries no record, ¶ or case cite, short-form or Westlaw cite, Id.,
-statute sign or quotation, and is either unpunctuated ("1. Background") or a
-title ending in a period or colon ("1. Statement of Facts."); "1. On January 1,
-officers …" and "12. See Doc. 16 at 3" are paragraphs. After any other single letter, the rest of the line
-must read as a title: short and unpunctuated, or Title Case, with no cite and
-no abbreviation at the start. So "J. Smith testified …", "W. Va. Code
-§ 21-23-7 controls." and "I. Leave is proper under Rule 99(z)." are sentences;
-number such a point heading "II." or give it a title. A short line naming a
-fact section ("A. Factual background.", "A. Background Doc. 16") is always a
-heading. Inside a fact section, a numbered title at the same level
-("2. Plaintiff Was Arrested.") is a subheading, and one naming a non-fact
-section ("2. Argument.") ends it. A fact section never narrows: "I. FACTS"
-stays open through "A." and "B." subsections until a heading at its own level
-or higher.
+Headings are still read for cites and quotations, in either mode, and for fact
+tags; only the uncited-sentence rule skips them, so "II. Argument Under Rule
+12" has its rule checked. A numbered line (and, in complaint mode, a lettered
+one other than I, V, X, L or C) counts as a heading only when it is short,
+carries no record, ¶ or case cite, short-form or Westlaw cite, Id., statute
+sign or quotation, and is either unpunctuated ("1. Background") or a title
+ending in a period or colon ("1. Statement of Facts."); "1. On January 1,
+officers …" and "12. See Doc. 16 at 3" are paragraphs. After any other single
+letter, the rest of the line must read as a title: short and unpunctuated, or
+Title Case, with no cite and no abbreviation at the start. So "J. Smith
+testified …", "W. Va. Code § 21-23-7 controls." and "I. Leave is proper under
+Rule 99(z)." are sentences; number such a point heading "II." or give it a
+title. In brief mode, a short lettered line naming a fact section ("A. Factual
+background.", "A. Background Doc. 16") is always a heading, even with a cite.
+Known limit: the same line numbered or in roman ("1. Statement of Facts Doc.
+16", "II. Facts Established At The Hearing Doc. 16"), or lettered in complaint
+mode, is text when it carries a cite, so the fact section it names does not
+open and the uncited facts under it are not flagged. Inside a fact section, a
+numbered title at the same level ("2. Plaintiff Was Arrested.") is a
+subheading, and one naming a non-fact section ("2. Argument.") ends it. A fact
+section never narrows: "I. FACTS" stays open through "A." and "B." subsections
+until a heading at its own level or higher.
 
 ## Changes for the next amended pleading
 

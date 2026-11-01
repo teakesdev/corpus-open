@@ -2,7 +2,7 @@
 
 `fix/brief-heading-sentences` (tip `05c66f4`, forked from `eadb780`) was cut from the history that existed before the first push. That history carried SWE-2 transcripts and home paths, so it was not pushed. This commit applies the branch's net change to `feat/matter-capture` as one commit. The branch itself stays local.
 
-**Reviews on the branch:** Round 1 APPROVE WITH CHANGES, round 2 APPROVE WITH CHANGES, round 3 APPROVE WITH CHANGES (all SWE-2). The open P3s in the round 3 report are not addressed by this port.
+**Reviews on the branch:** Round 1 APPROVE WITH CHANGES, round 2 APPROVE WITH CHANGES, round 3 APPROVE WITH CHANGES (all SWE-2). The round 3 report's open item is a **P2**, not a P3: a numbered or multi-letter-roman line that names a fact section but carries a cite is text, so its fact section never opens and the uncited facts under it pass. Its required change (extend the title rule to those branches, or pin the gap and scope the README) was not made on the original branch, and this port carries it as a known limit; see "Changes after review". The report's smaller items are not addressed either: the dead `v.` and `vs.` in `_SMALL_WORDS`, a stale test name, and the lone-fragment residual.
 
 ## What differs from the reviewed branch
 
@@ -11,6 +11,17 @@
 - `README.md` conflicted with later public changes. I kept the branch's heading paragraph and added the public line's "short-form or Westlaw cite, Id." to its list of what a heading may not carry.
 
 Everything else is the branch's net diff. Comparing the lines the branch adds and removes with the lines this commit adds and removes, file by file, found no other difference.
+
+## Changes after review
+
+SWE-2 reviewed this port (APPROVE WITH CHANGES, `docs/superpowers/reviews/2026-11-01-port-brief-heading-sentences-code/SWE2-REVIEW.md`). The founder approved these follow-ups, which change documentation and tests only, no code:
+
+- The README sentence that said a short line naming a fact section "is always a heading" is scoped to brief mode, and the known limit above is stated.
+- This note says P2, where it said P3s.
+- `TestPortKnownLimit` in `tests/test_briefcheck_heading_sentences.py` pins the gap (the three lines return no heading level, and the fact under them is not flagged) and its lettered twin (which opens the section and flags the fact).
+- One long README line is rewrapped.
+
+These follow-ups were not re-reviewed.
 
 ## Not re-reviewed
 
