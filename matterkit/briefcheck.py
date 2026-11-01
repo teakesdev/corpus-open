@@ -43,7 +43,7 @@ import unicodedata
 import zlib
 from dataclasses import dataclass, field
 
-from . import citations, ingest, rules, store
+from . import citations, draftdocs, ingest, rules, store
 
 TOOL_ID = "matter-kit brief-check 0.1"
 LIMITS = ("“Tied to a source in the store” means the cited document or authority record exists in this "
@@ -62,9 +62,10 @@ STATUS_LOCATED = {"resolved", "research-pending"}
 class Finding:
     severity: str  # BLOCK | UNCHECKED | WARN
     code: str
-    line: int
+    line: int  # a line of the text brief check read; sorts findings into document order
     cite: str
     message: str
+    where: str = ""  # a .docx or .pdf draft: "para. 14", "fn. 3", "p. 3:12" (empty for .md and .txt: use line)
 
 
 @dataclass
@@ -95,6 +96,7 @@ class Row:
     cites: list = field(default_factory=list)
     quotes: list = field(default_factory=list)
     facts: list = field(default_factory=list)
+    where: str = ""  # see Finding.where
 
 
 @dataclass
@@ -584,6 +586,7 @@ class Unit:
     fact_section: bool
     tags: list = field(default_factory=list)
     heading: bool = False  # checked for cites and quotations, never flagged as an uncited fact
+    flow: str = "body"  # "fn" for a Word footnote or endnote, which keeps its own Id. antecedent
 
 
 def _blank(text: str, pattern: re.Pattern) -> str:
@@ -1037,9 +1040,20 @@ class Report:
         self.notes: list[tuple[int, str]] = []  # complaint mode: alleged quotations with no cited source
         self.rules_packs: list = []  # rules.Attached for each pack in .matter/rules.json
         self.rule_texts: list = []  # (line, cite, rules.Attached, anchor id) for rule cites found in a pack
+        self.draft = None  # the draftdocs.Draft read from a .docx or .pdf draft: it knows where each line came from
+        self.headings: list = []  # (line, level, text, opens a fact section) for a .docx or .pdf draft
+
+    @property
+    def structured(self) -> bool:
+        return self.draft is not None and self.draft.kind != "text"
+
+    def where(self, line: int) -> str:
+        """The location of a text line in the draft as a person finds it ("para. 14", "fn. 3", "p. 3:12");
+        empty for a .md or .txt draft, whose location is the line number itself."""
+        return self.draft.where(line) if self.draft is not None else ""
 
     def add(self, severity, code, line, cite, message):
-        self.findings.append(Finding(severity, code, line, cite, message))
+        self.findings.append(Finding(severity, code, line, cite, message, self.where(line)))
 
     @property
     def exit_code(self) -> int:
@@ -1073,14 +1087,20 @@ class Report:
                                          "still checked)" if self.mode == "complaint" else
                                          " (every factual sentence needs a cite)"),
                f"- Tool: {TOOL_ID} · checked {now_iso()}", ""]
+        head, rule = ("Where", "|---|") if self.structured else ("Line", "|---:|")
+        loc = lambda line, where: esc(where) if where else line  # noqa: E731
+        if self.structured:
+            i = next(k for k, ln in enumerate(out) if ln.startswith("- Draft: "))
+            out[i + 1:i + 1] = [f"- Draft read: {self.draft.reader} · {self.draft.counts}"] + \
+                [f"  - {n}" for n in self.draft.notes]
         if self.rules_packs:
             out.insert(-1, "- Rules packs: " + "; ".join(_pack_cell(a) for a in self.rules_packs))
         for sev, title in (("BLOCK", "Blocking"), ("UNCHECKED", "Needs a human (not checked)"), ("WARN", "Warnings")):
             items = [f for f in self.findings if f.severity == sev]
             out += [f"## {title} ({len(items)})", ""]
             if items:
-                out += ["| Line | Cite or sentence | Problem | Code |", "|---:|---|---|---|"]
-                out += [f"| {f.line} | {short(f.cite, 90)} | {esc(f.message)} | `{f.code}` |"
+                out += [f"| {head} | Cite or sentence | Problem | Code |", rule + "---|---|---|"]
+                out += [f"| {loc(f.line, f.where)} | {short(f.cite, 90)} | {esc(f.message)} | `{f.code}` |"
                         for f in sorted(items, key=lambda f: f.line)]
             else:
                 out.append("None.")
@@ -1088,28 +1108,39 @@ class Report:
         if self.mode == "complaint":
             out += [f"## Alleged quotations with no cited source ({len(self.notes)})", "",
                     "The pleader vouches for these by signing. Confirm each against any recording or transcript.", ""]
-            out += [f"- line {ln}: “{short(q, 120)}”" for ln, q in self.notes] or ["None."]
+            out += [f"- {self.where(ln) if self.structured else f'line {ln}'}: “{short(q, 120)}”"
+                    for ln, q in self.notes] or ["None."]
+            out.append("")
+        if self.structured:
+            out += ["## Headings read", "",
+                    "The headings brief check recognized. The uncited-sentence rule runs only inside a fact section "
+                    "(a heading marked ←), so a heading missing here means that rule did not run under it.", ""]
+            out += [f"- {self.where(ln) or ln} · {esc(text)}" + (" ← fact section" if opens else "")
+                    for ln, _, text, opens in self.headings] or ["None: no heading was recognized, so no fact section was found."]
             out.append("")
         out += ["## Proposition-to-source table", "",
-                "| Line | Proposition | Cited source | Quotes |", "|---:|---|---|---|"]
+                f"| {head} | Proposition | Cited source | Quotes |", rule + "---|---|---|"]
         for r in self.rows:
             cites = "<br>".join(esc(_cite_cell(c)) for c in r.cites) + \
                 ("<br>" if r.cites and r.facts else "") + "<br>".join(f"fact `{a}`" for a in r.facts)
             quotes = "<br>".join(f"{q.status}: “{short(q.text, 50)}”" + (f" ({esc(q.where)})" if q.where else "")
                                  for q in r.quotes) or "—"
-            out.append(f"| {r.line} | {short(r.text)} | {cites or '—'} | {quotes} |")
+            out.append(f"| {loc(r.line, r.where)} | {short(r.text)} | {cites or '—'} | {quotes} |")
         out += ["", "## Authorities", "",
-                "| Authority | Lines | Pins | Store status | Checked via |", "|---|---|---|---|---|"]
+                f"| Authority | {'Where' if self.structured else 'Lines'} | Pins | Store status | Checked via |",
+                "|---|---|---|---|---|"]
         for a in self.authorities:
-            out.append(f"| {esc(a.display)} | {', '.join(map(str, sorted(set(a.lines))))} | "
+            lines = sorted(set(a.lines))
+            where = list(dict.fromkeys(self.where(ln) or str(ln) for ln in lines)) if self.structured else lines
+            out.append(f"| {esc(a.display)} | {esc(', '.join(map(str, where)))} | "
                        f"{esc(', '.join(p for p in a.pins if p)) or '—'} | {a.store_status or '**not logged**'} | "
                        f"{esc(a.checked_via or '—')} |")
         if self.rules_packs:
             out += ["", "## Rule text in attached packs", "",
                     f"Each rule cite found in an attached rules pack ({rules.DERIVED}). A cite missing from "
                     "the pack is a warning above.", "",
-                    "| Line | Cite | Pack | Text |", "|---:|---|---|---|"]
-            out += [f"| {ln} | {short(raw, 60)} | `{a.pack.id}@{a.pack.version}` | "
+                    f"| {head} | Cite | Pack | Text |", rule + "---|---|---|"]
+            out += [f"| {loc(ln, self.where(ln))} | {short(raw, 60)} | `{a.pack.id}@{a.pack.version}` | "
                     f"`{os.path.join(a.entry['path'], 'rules.md')}#{aid}` |" for ln, raw, a, aid in self.rule_texts]
             if not self.rule_texts:
                 out.append("| — | none | — | — |")
@@ -1147,13 +1178,17 @@ def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_p
     sourced quotation is still checked, and a HYPOTHESIS/INFERENCE/UNKNOWN fact tag is flagged."""
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}; use one of: {', '.join(MODES)}")
+    if draft_path.lower().endswith((".docx", ".pdf")) and os.path.getsize(draft_path) > draftdocs.MAX_DRAFT_BYTES:
+        raise ValueError(f"the draft is over {draftdocs.MAX_DRAFT_BYTES} bytes; brief check will not read it")
     with open(draft_path, "rb") as f:
         raw = f.read()
-    if draft_path.lower().endswith((".docx", ".pdf", ".doc")):
-        raise ValueError("brief check reads Markdown or plain text; check the .md copy of the draft")
-    text = raw.decode("utf-8", "replace")
+    draft = draftdocs.read_draft(raw, draft_path, use_pdftotext)  # a ValueError says why a draft was refused
     rep = Report(matter_dir, draft_path, hashlib.sha256(raw).hexdigest())
     rep.mode = mode
+    if draft.kind != "text":
+        rep.draft = draft
+        for code, subject, message in draft.warnings:
+            rep.add("WARN", f"draft-{code}", 0, subject, message)
     conn = store.connect_readonly(matter_dir)
     try:
         docket, rep.docket_sha = load_docket(matter_dir, docket_path)
@@ -1161,7 +1196,7 @@ def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_p
         docs = Docs(conn, matter_dir, docket, use_pdftotext)
         rep.pdftotext_version = docs.pdftotext_version
         try:
-            _Checker(rep, conn, docs, docket, text).run()
+            _Checker(rep, conn, docs, docket, draft).run()
         finally:
             docs.close()
         rep.inputs = dict(docs.read)
@@ -1172,7 +1207,9 @@ def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_p
 
 class _Checker:
     def __init__(self, rep, conn, docs, docket, text):
-        self.rep, self.conn, self.docs, self.docket = rep, conn, docs, docket
+        draft = text if isinstance(text, draftdocs.Draft) else draftdocs.Draft(kind="text", text=text)
+        text = draft.text
+        self.rep, self.conn, self.docs, self.docket, self.draft = rep, conn, docs, docket, draft
         self.raw_text = text
         tags = [(m.start(), m.group("a") or m.group("b")) for m in FACT_TAG_RE.finditer(text)]
         self.text = _blank(_blank(text, COMMENT_RE), FACT_TAG_RE)
@@ -1200,7 +1237,11 @@ class _Checker:
             block = bm.group(0)
             if not block.strip():
                 continue
-            lvl = _heading(block, self.rep.mode)
+            meta = self.draft.blocks.get(self.line(_lstrip(self.text, bm.start())))  # .docx and .pdf drafts only
+            flow = meta.flow if meta else "body"
+            lvl = None if flow == "fn" else _heading(block, self.rep.mode)
+            if lvl is None and meta and meta.heading and len(block.split()) <= 60 and "\n" not in block.strip():
+                lvl = meta.heading  # the Word heading style, when the text alone does not look like a heading
             if lvl is not None:
                 # a numbered title at the fact heading's own level is a fact subheading
                 # ("2. Plaintiff Was Arrested.") unless it names a non-fact section ("2. Argument.")
@@ -1212,6 +1253,9 @@ class _Checker:
                     fact_level = None
                 hs = _lstrip(self.text, bm.start())
                 units.append(Unit(hs, bm.end(), self.text[hs:bm.end()], False, heading=True))
+                if self.draft.kind != "text":
+                    self.rep.headings.append((self.line(hs), lvl, " ".join(block.split())[:100],
+                                              bool(FACT_HEADING.search(block))))
                 continue
             spans = list(_sentence_spans(self.text, bm.start(), bm.end()))
             merged: list[list[int]] = []
@@ -1220,7 +1264,7 @@ class _Checker:
                     merged[-1][1] = e
                 else:
                     merged.append([s, e])
-            units += [Unit(s, e, self.text[s:e], fact_level is not None) for s, e in merged]
+            units += [Unit(s, e, self.text[s:e], fact_level is not None, flow=flow) for s, e in merged]
         for off, aid in self.tags:
             host = [u for u in units if u.start <= off] or units[:1]
             if host:
@@ -1335,7 +1379,15 @@ class _Checker:
 
     # ---- per-unit ---------------------------------------------------------
     def run(self):
+        # Word footnotes and endnotes sit in the unit stream right after the paragraph that cites them (so a Facts
+        # section governs them), but an "Id." in a note refers only to an earlier note and one in the body only
+        # to an earlier body cite; each flow keeps its own antecedent.
+        flows, cur = {}, "body"
         for u in self.units():
+            if u.flow != cur:
+                flows[cur] = (self.last_target, self.last_unit_targets)
+                self.last_target, self.last_unit_targets = flows.get(u.flow, (None, set()))
+                cur = u.flow
             self.unit(u)
         self.rep.authorities = list(self.uses.values())
         self.coverage()
@@ -1396,7 +1448,9 @@ class _Checker:
             prev = [x for x in cites if x.start < m.start()]
             base = max(prev, key=lambda c: c.start) if prev else self.last_target
             if base is None:
-                self.rep.add("BLOCK", "id-unbound", line, m.group(0), "Id. has no preceding citation")
+                self.rep.add("BLOCK", "id-unbound", line, m.group(0), "Id. has no preceding citation" if u.flow == "body"
+                             else "Id. in a note has no preceding citation in an earlier note (it never refers to the text); "
+                                  "give the full cite")
                 continue
             if not prev and len(self.last_unit_targets) > 1:
                 self.rep.add("WARN", "id-ambiguous", line, m.group(0),
@@ -1420,7 +1474,7 @@ class _Checker:
         quotes = self.quotes(u, cites, line)
         facts = self.facts(u, line)
         if cites or quotes or facts:
-            self.rep.rows.append(Row(line, " ".join(u.text.split()), cites, quotes, facts))
+            self.rep.rows.append(Row(line, " ".join(u.text.split()), cites, quotes, facts, self.rep.where(line)))
         elif self.rep.mode == "brief" and u.fact_section and not u.heading and len(u.text.split()) >= 4:
             self.rep.add("UNCHECKED", "uncited-fact", line, " ".join(u.text.split()),
                          "factual sentence with no record, pleading or authority cite")

@@ -68,7 +68,9 @@ a case, and subcases show under their parent. In the browser you can:
 - read, copy or save the counsel packet.
 
 Everything else, including adding or changing deadlines, stays in the CLI for
-now. Word and PDF drafts need a `.txt` copy before brief check can read them.
+now. In the browser page, Word and PDF drafts still need a `.txt` copy before
+brief check can read them; the command line reads `.docx` and `.pdf` drafts
+directly (see "Word and PDF drafts" below).
 
 Your name is recorded as the author of everything you add (`human:Your Name`).
 The page can't choose a different author. The link the command prints carries a
@@ -203,8 +205,8 @@ python3 matter.py authority check ~/cases/my-case "Dietz v. Bouldin, 579 U.S. 40
 python3 matter.py brief check ~/cases/my-case Filings/drafts/RESPONSE_v1.md --out RESPONSE_v1_CHECK.md
 ```
 
-`brief check` reads a Markdown or text draft and the store (read-only) and
-reports every record cite (`Doc. 16 at 2`, `Docs. 16 and 18`, `ECF No. 19`),
+`brief check` reads a Markdown, text, Word (`.docx`) or PDF draft and the store
+(read-only) and reports every record cite (`Doc. 16 at 2`, `Docs. 16 and 18`, `ECF No. 19`),
 pleading cite (`Compl. ¶ 59`), authority (`X v. Y, 579 U.S. 40, 45`, short
 forms, `Id.`, `Fed. R. Civ. P.`, `Rule 15`, `L.U.Civ.R.`, statutes), quotation
 and fact tag (`<!-- fact:a_… -->`) that is not tied to a hash-verified source.
@@ -283,6 +285,68 @@ python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --re
   past `unverified` are left alone, and nothing is ever marked
   `source-checked`. The next `brief check` then shows the cite as located but
   not source-checked instead of blocking it.
+
+### Word and PDF drafts
+
+```bash
+python3 matter.py brief check ~/cases/my-case Filings/drafts/RESPONSE_v1.docx --out RESPONSE_v1_CHECK.md
+python3 matter.py brief check ~/cases/my-case Filings/drafts/RESPONSE_v1.pdf
+```
+
+The report says `Where` instead of `Line`, and every finding has a location a
+person can find: `para. 14`, `fn. 3`, `endnote ii`, or `p. 3:12`. The `.md` and
+`.txt` path is unchanged. `.doc`, `.rtf` and `.odt` drafts are refused: in Word,
+File > Save As > Word Document (`.docx`). A file whose bytes are some other
+format than its name says is refused rather than read as garbage.
+
+**Word (`.docx`).**
+
+- Read: body paragraphs, tables, footnotes and endnotes, with the numbers Word
+  prints for auto-numbered headings and lists ("II.", "A.", "1.") rendered from
+  the document's numbering, so the Facts-section and heading rules work as they
+  do for a `.md` draft. A Word heading style (or outline level) marks a heading
+  the text alone does not show.
+- Footnotes and endnotes sit right after the paragraph that cites them, so a
+  Facts section governs them, and are reported as `fn. N` / `endnote ii` (in the
+  order the references appear; a warning says when the document restarts
+  numbering). An `Id.` in a note refers only to an earlier note, never to the
+  text: with none, it is a blocking `id-unbound`. Give the full cite.
+- `para. N` counts the non-empty paragraphs in reading order (a table cell says
+  which table, row and cell; a numbered one says its number, as `numbered II.`).
+  Word has no paragraph numbers or page numbers to read, so none is invented:
+  look for the quoted sentence next to the location.
+- Refused: tracked changes (insertions, deletions, moves). The file holds two
+  versions of the text and brief check will not guess which one you mean; accept
+  or reject them in Word, save a copy and check that.
+- Warned, never silent: comments (not part of the filing), hidden text, text
+  boxes, symbol-font characters (their code means nothing outside that font, so
+  none is guessed at), formatting-only tracked changes (also in the styles,
+  numbering and settings, which are never refused), a list whose numbers could
+  not be rendered, a reference to a missing note, content in elements brief
+  check does not read (including a table directly inside a table or row). Said in the report as not read:
+  headers and footers, table-of-contents and table-of-authorities lines (by
+  style), unreferenced notes.
+- Smart quotes, non-breaking spaces and thin spaces around `§` and in
+  `Fed. R. Civ. P.` are normalized so the cite is read, and `’` in `App’x` is
+  read as `'`.
+- The package is opened defensively (stdlib only): a DOCTYPE or entity, a
+  non-UTF-8 part, a duplicated or encrypted part, a forged or oversized zip
+  directory, or a decompression bomb is refused with a reason (RFC 0005 §4a,
+  ported from `feat/docx-structural-extraction`, and applied to every part
+  read). Nothing is written or stored.
+
+**PDF.** Reads with `pdftotext -layout`, which must be installed (poppler);
+without it, or with `--no-pdftotext`, a PDF draft is refused with the reason.
+The text is held in memory for one check and never stored. Page numbers (a lone
+number at a page's top or bottom that follows the page sequence) and running
+headers and footers (the same line, digits aside, on most pages) are dropped.
+Locations are `p. PAGE:LINE`: the PDF's page order (the first page is 1, not
+the printed number) and the text line counted from the top of the page,
+running header included. Paragraphs are rebuilt from spacing and indentation,
+so check the headings the report recognized. Known limits: footnote text in a PDF
+is read where it sits on the page and can split a sentence that crosses a page;
+pleading-paper margin numbers are not recognized; a scan with no text layer is
+refused (no OCR). A `.docx` gives the more reliable check.
 
 ## Changes for the next amended pleading
 

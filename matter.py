@@ -51,7 +51,7 @@ Usage:
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
-  matter.py brief check <dir> <draft.md> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
+  matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
   matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
                         # sends the draft's case cites, nothing else, to CourtListener; needs a
