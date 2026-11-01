@@ -40,6 +40,12 @@ Review against these decisions. Don't reopen them unless one breaks an invariant
 
 You may read the files named above, and only those, to check me.
 
+## Look closely at these three (the founder's coordinator asked)
+
+- **A. Security of the docx extraction.** Everything in `matterkit/draftdocs.py` from `_read_zip_tail_records` through `_Package.part`, and every place a part's bytes or its parsed tree can reach later code. Zip bombs, forged central directories and ZIP64 tails, duplicate and encrypted members, entity expansion and external entities, encodings, deep nesting, and what the catch-all in `read_docx` hides.
+- **B. Footnote, numbering and tracked-change handling.** For tracked changes: is the refusal complete? See `_TRACKED`, `_FORMAT_CHANGES` and the loop that scans the document, footnotes and endnotes parts (headers, footers and comments are not scanned). Is any shape of tracked change left that still changes the text brief check reads (paragraph-mark `w:ins`/`w:del`, moves, table-cell changes, content inside `w:sdt` or fields)? For footnotes and numbering, see points 3 and 4 below.
+- **C. Is every finding's location right?** `para. N` (which paragraphs count, how TOC/TOA lines and empty paragraphs affect the count, the `numbered X.` and table labels), `fn. N` / `endnote x` against the number Word prints, the PDF `p. P:L` count (pages, non-blank lines, dropped header lines), `Report.where` and `Draft.where` mapping a text line to a label (including line 0, blank lines, and a sentence that starts on one line and cites on another), and the Authorities table. A location that points a person at the wrong place is a defect.
+
 ## What to check
 
 1. **Archive and XML guards** (`matterkit/draftdocs.py`: `_read_zip_tail_records`, `_prolog_has_doctype`, `_Package`). Compare with `ref-branch-extract-docx.py` and `ref-rfc0005.md`. Is anything lost in the bytes port? Is any part parsed or any ZIP member read without going through `_Package.part`? Resource use: up to 7 parts of 32 MiB, the catch-all in `read_docx`, `RecursionError` paths.
@@ -66,6 +72,6 @@ Your final message is the report. It should contain:
 
 1. **Verdict:** `APPROVE`, `APPROVE WITH CHANGES` (list the exact edits), or `REQUEST CHANGES`.
 2. **Findings,** ranked P1, P2 or P3. Give each one the file:line at `d6f4fab` and a failure scenario worked out by reading.
-3. **Answers to points 1 to 9.**
+3. **Answers to points 1 to 9, and to A, B and C above.**
 4. **Readiness:** whether it is ready for the founder to decide merge versus port and to rebase onto `a5c8efb`.
 5. **The model serving you,** as your runtime reports it.
