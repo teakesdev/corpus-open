@@ -21,10 +21,12 @@ Usage:
                             [--author agent:MODEL [--directed-by PERSON]]   # appends a history row
   matter.py deadline add <dir> --label L --due YYYY-MM-DD [--rule R] [--confidence hard|working-estimate]
                               [--verification verified-official|secondary-source|unverified]
+                              [--owner ours|theirs|court]   # who must act by the date
                               [--author agent:MODEL [--directed-by PERSON]]
-  matter.py deadline list <dir> [--all]            # open dates in the past are marked OVERDUE
+  matter.py deadline list <dir> [--all] [--owner ours|theirs|court]   # open dates in the past are marked OVERDUE
   matter.py deadline update <dir> <deadline_id> --reason TEXT
                               [--state open|met|superseded|lapsed|vacated] [--due YYYY-MM-DD]
+                              [--owner ours|theirs|court]
                               [--verification verified-official|secondary-source|unverified]
                               [--confidence hard|working-estimate] [--source rel@loc]...
                               [--author agent:MODEL [--directed-by PERSON]]   # appends an events row
@@ -185,8 +187,11 @@ def cmd_deadline(args):
     from matterkit import deadlines as dl
     conn = store.connect(args.case_dir)
     if args.sub == "list":
-        q = "SELECT * FROM deadlines" + ("" if args.all else " WHERE state='open'") + " ORDER BY due_date"
-        for r in conn.execute(q):
+        try:
+            rows = dl.select(conn, include_closed=args.all, owner=args.owner)
+        except dl.DeadlineError as e:
+            sys.exit(f"refused: {e}")
+        for r in rows:
             print(dl.list_line(r, show_state=args.all))
         return
     try:
@@ -206,14 +211,14 @@ def cmd_deadline(args):
                     sys.exit(f"refused: {e}")
             dl.add(conn, args.label, args.due, by, rule=rule,
                    confidence=args.confidence or "working-estimate",
-                   verification=args.verification or "unverified")
+                   verification=args.verification or "unverified", owner=args.owner)
             print(f"deadline registered: {args.due} — {args.label}" + (f"\n  ↳ {note}" if note else ""))
         else:
             if not args.deadline_id:
                 sys.exit("deadline update requires <deadline_id>")
             dl.update(conn, args.case_dir, args.deadline_id, args.reason, by, state=args.state,
                       verification=args.verification, confidence=args.confidence, due=args.due,
-                      sources=args.source)
+                      sources=args.source, owner=args.owner)
             print(f"deadline {args.deadline_id} updated by {by}; events row recorded")
     except dl.DeadlineError as e:
         sys.exit(f"refused: {e}")
@@ -769,6 +774,8 @@ def main():
     p.add_argument("--confidence", choices=["hard", "working-estimate"])
     p.add_argument("--verification", choices=["verified-official", "secondary-source", "unverified"])
     p.add_argument("--state", choices=["open", "met", "superseded", "lapsed", "vacated"])
+    p.add_argument("--owner", choices=["ours", "theirs", "court"],
+                   help="who must act by the date; list: show only that owner's deadlines")
     p.add_argument("--reason", help="update: why the deadline changed (required)")
     p.add_argument("--source", action="append", default=[], help="update: rel_path@locator of a registered document")
     p.add_argument("--all", action="store_true")

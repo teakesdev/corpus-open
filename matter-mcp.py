@@ -38,15 +38,17 @@ TOOLS = [
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
     {"name": "matter.amend_list", "description": "List the amendment list with each change's status, paragraphs, text, reason, linked facts and documents, and history. status: 'open' (default: proposed + approved, approved first), 'all', or one of proposed|approved|incorporated|dropped. target limits it to one pleading. Read-only.",
      "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}, "target": {"type": "string"}}}},
-    {"name": "matter.deadline_list", "description": "List deadlines (open only unless all=true) with confidence and verification status. Open deadlines dated before today carry overdue=true and marker '⚠ OVERDUE'.",
-     "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}}}},
-    {"name": "matter.deadline_update", "description": "Change a deadline's state (open|met|superseded|lapsed|vacated), verification, confidence or due date. A reason is required; each change appends an events row (old->new, reason, sources, actor). Sources are 'rel_path@locator' refs that must be registered documents. Refuses unknown ids, invalid values, no-op updates and unregistered sources, and changes nothing when it refuses.",
+    {"name": "matter.deadline_list", "description": "List deadlines (open only unless all=true) with confidence, verification status and owner (who must act: ours, theirs or court; null when not set). owner limits the list to one owner. Open deadlines dated before today carry overdue=true and marker '⚠ OVERDUE'.",
+     "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"},
+                                                      "owner": {"enum": ["ours", "theirs", "court"]}}}},
+    {"name": "matter.deadline_update", "description": "Change a deadline's state (open|met|superseded|lapsed|vacated), verification, confidence, due date or owner (ours|theirs|court). A reason is required; each change appends an events row (old->new, reason, sources, actor). Sources are 'rel_path@locator' refs that must be registered documents. Refuses unknown ids, invalid values, no-op updates and unregistered sources, and changes nothing when it refuses.",
      "inputSchema": {"type": "object", "required": ["deadline_id", "reason"],
                      "properties": {"deadline_id": {"type": "string"}, "reason": {"type": "string"},
                                     "state": {"enum": ["open", "met", "superseded", "lapsed", "vacated"]},
                                     "verification": {"enum": ["verified-official", "secondary-source", "unverified"]},
                                     "confidence": {"enum": ["hard", "working-estimate"]},
                                     "due": {"type": "string", "description": "YYYY-MM-DD"},
+                                    "owner": {"enum": ["ours", "theirs", "court"]},
                                     "sources": {"type": "array", "items": {"type": "string"}},
                                     "created_by": {"type": "string"},
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
@@ -157,10 +159,9 @@ def call(name: str, args: dict):
         from matterkit import amendments
         return json.dumps(amendments.list_(conn, args.get("status", "open"), args.get("target")), indent=1)
     if name == "matter.deadline_list":
-        q = "SELECT * FROM deadlines" + ("" if args.get("all") else " WHERE state='open'") + " ORDER BY due_date"
         from matterkit import deadlines as dl
         rows = []
-        for r in conn.execute(q):
+        for r in dl.select(conn, include_closed=bool(args.get("all")), owner=args.get("owner")):
             od = dl.is_overdue(r["due_date"], r["state"])
             rows.append(dict(r, overdue=od, marker=dl.OVERDUE_MARK if od else None))
         return json.dumps(rows, indent=1)
@@ -169,7 +170,7 @@ def call(name: str, args: dict):
         by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
         dl.update(conn, MATTER_DIR, args.get("deadline_id"), args.get("reason"), by, state=args.get("state"),
                   verification=args.get("verification"), confidence=args.get("confidence"),
-                  due=args.get("due"), sources=args.get("sources") or [])
+                  due=args.get("due"), sources=args.get("sources") or [], owner=args.get("owner"))
         return f"deadline {args['deadline_id']} updated by {by}; events row recorded"
     if name == "matter.packet_render":
         return pk.packet(conn, MATTER_DIR, layer=args.get("layer", "3min"))

@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS assertion_sources (
 CREATE TABLE IF NOT EXISTS deadlines (
   id TEXT PRIMARY KEY, label TEXT NOT NULL, due_date TEXT NOT NULL,
   rule_source TEXT, confidence TEXT DEFAULT 'working-estimate',
-  verification_status TEXT DEFAULT 'unverified', state TEXT DEFAULT 'open'
+  verification_status TEXT DEFAULT 'unverified', state TEXT DEFAULT 'open',
+  owner TEXT
 );
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY, occurred_on TEXT NOT NULL, text TEXT NOT NULL,
@@ -204,6 +205,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(authorities)")]
     if cols and "check_evidence" not in cols:
         conn.execute("ALTER TABLE authorities ADD COLUMN check_evidence TEXT")
+        conn.commit()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(deadlines)")]
+    if cols and "owner" not in cols:  # who must act by the deadline (deadlines.OWNERS); NULL = not set
+        conn.execute("ALTER TABLE deadlines ADD COLUMN owner TEXT")
         conn.commit()
 
 

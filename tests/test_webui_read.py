@@ -74,6 +74,15 @@ class TestDeadlines(ServerCase):
         self.assertTrue(rows["Reply brief"]["overdue"])
         self.assertFalse(rows["Status report"]["overdue"])
         self.assertEqual(rows["Reply brief"]["verification"], "unverified")
+        self.assertIsNone(rows["Reply brief"]["owner"])
+
+    def test_owner_is_returned(self):
+        conn = store.connect(self.alpha)
+        conn.execute("UPDATE deadlines SET owner='theirs' WHERE label='Reply brief'")
+        conn.commit()
+        conn.close()
+        _, _, data = self.api("GET", self.case_path("Alpha v. City", "/deadlines"))
+        self.assertEqual({d["label"]: d["owner"] for d in data["deadlines"]}["Reply brief"], "theirs")
 
     def test_all_includes_closed(self):
         conn = store.connect(self.alpha)

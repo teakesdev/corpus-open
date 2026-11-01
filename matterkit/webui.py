@@ -447,7 +447,7 @@ def h_deadlines(app, req, case):
                             + " ORDER BY due_date").fetchall()
     return {"deadlines": [{"id": r["id"], "label": r["label"], "due_date": r["due_date"],
                            "rule_source": r["rule_source"], "confidence": r["confidence"],
-                           "verification": r["verification_status"], "state": r["state"],
+                           "verification": r["verification_status"], "state": r["state"], "owner": r["owner"],
                            "overdue": deadlines.is_overdue(r["due_date"], r["state"])} for r in rows]}
 
 

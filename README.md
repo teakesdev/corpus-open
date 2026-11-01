@@ -330,6 +330,8 @@ version.
 
 ```bash
 python3 matter.py deadline list ~/cases/my-case            # open dates already past are marked ⚠ OVERDUE
+python3 matter.py deadline list ~/cases/my-case --owner theirs   # only what the other side must do
+python3 matter.py deadline update ~/cases/my-case d_abc123 --owner theirs --reason "their answer, not ours"
 python3 matter.py deadline update ~/cases/my-case d_abc123 --state superseded \
   --reason "extension granted by text-only order" --source Filings/docket_sheet.pdf@entry-27
 python3 matter.py subcase init ~/cases/my-case Related-Claim --title "Related state-court claim"
@@ -338,7 +340,9 @@ python3 matter.py fact add ~/cases/my-case/Subcases/Related-Claim --text "…" -
 ```
 
 Every deadline change needs a reason and is recorded in `events` with who made
-it. A subcase is its own matter under `Subcases/<slug>/` with a `matter.json`
+it. A deadline's owner says who must act by it: `ours`, `theirs` (the other
+side) or `court`. It is unset unless you give `--owner` to `add` or `update`, and
+`list` prints `owner=` only when it is set. A subcase is its own matter under `Subcases/<slug>/` with a `matter.json`
 pointing at its parent. The parent's `ingest` stops at any folder holding its
 own `.matter/`. A subcase cites the parent's documents in place as
 `parent:<rel_path>`, re-hashed against the parent on every use and never
