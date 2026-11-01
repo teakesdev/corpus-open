@@ -143,12 +143,20 @@ class TestSwe2ComplaintModeReview(Base):
 
     def test_p3_roman_heading_with_rule_stays_a_heading(self):
         # superseded in round 2: a heading keeps its section role (it ends the facts) and its
-        # rule cite is now checked too (Rule 99 is not logged, so it blocks)
+        # rule cite is now checked too (Rule 99 is not logged, so it blocks). "II.", not "I.": after a
+        # one-letter marker a sentence carrying a cite is text (fix/brief-heading-sentences)
         r = self.m.check("STATEMENT OF FACTS\n\nThe arrest happened at home on a holiday.\n\n"
-                         "I. Leave is proper under Rule 99(z).\n\nThe motion should be denied because the claims are plausible.\n")
+                         "II. Leave is proper under Rule 99(z).\n\nThe motion should be denied because the claims are plausible.\n")
         self.assertEqual([f.cite for f in r.findings if f.code == "uncited-fact"],
                          ["The arrest happened at home on a holiday."])
         self.assertIn("authority-not-logged", codes(r, "BLOCK"))
+
+    def test_rule_cite_in_a_roman_line_is_checked(self):
+        # Rule 99 is not logged. Headings are checked units (ty, 2026-10-25), so it blocks whether the
+        # line is a heading ("II.") or, after a one-letter marker that reads as a sentence, text ("I.")
+        for line in ("I. Leave is proper under Rule 99(z).", "II. Leave is proper under Rule 99(z)."):
+            r = self.m.check(f"{line}\n\nText. Doc. 16.")
+            self.assertIn("authority-not-logged", codes(r, "BLOCK"), line)
 
     def test_p3_summary_mentions_listed_quotations(self):
         r = self.m.check('3. The captain said "stand down" to him.', mode="complaint")
