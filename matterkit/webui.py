@@ -1,23 +1,30 @@
 """matter ui: a browser UI over a workspace of matters, for people who don't use a terminal.
 
-A WSGI app, served locally by stdlib wsgiref on 127.0.0.1 only. The same app can later run
-under a production WSGI server behind a TLS proxy (design 2026-10-31 §2) without changes:
-- identity comes from the server (the launch operator now, a signed-in user later), never
-  from a request body;
-- every API route goes through one authorize(identity, case_id, action) policy;
-- allowed Host/Origin values are configuration, loopback by default.
+A WSGI app, served locally by stdlib wsgiref on 127.0.0.1 only. It keeps the seams a later
+private-server phase needs (design 2026-10-31 §2, §8) to host it behind a production WSGI server
+and a TLS proxy:
+- the person behind each request comes from `identify` (the launch operator now; whoever a
+  trusted sign-in front end names later), never from a request body;
+- every API route goes through one policy(identity, case_id, action), and the case list and
+  status show only cases that policy lets the person read;
+- allowed hosts and origins are configuration, loopback by default.
+Sign-in, TLS, real per-case grants and hosting are that phase's work; none of it is here.
 
 Every API call needs the per-launch token in the X-Matter-Token header. Pages set text with
 textContent under a strict CSP. Nothing here sends, files or contacts anyone.
 """
+import hashlib
 import hmac
 import json
 import os
+import posixpath
 import re
 import secrets
 import sqlite3
+import stat
 import sys
 import traceback
+from contextlib import contextmanager
 from dataclasses import dataclass
 from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import parse_qs
@@ -38,6 +45,10 @@ SECURITY_HEADERS = [("Content-Security-Policy", CSP), ("X-Content-Type-Options",
                     ("Cross-Origin-Resource-Policy", "same-origin")]
 MAX_JSON = 1024 * 1024
 MAX_UPLOAD = 200 * 1024 * 1024
+BUSY_TIMEOUT = 5.0  # seconds to wait for a case store another program is writing to
+BUSY = "Another program is writing to this case right now. Wait a moment and try again."
+CHANGED = ("This case's folder was moved, renamed or replaced while Matter Kit was using it, so nothing "
+           "was saved. Reload the page and try again.")
 LAYERS = ("30s", "3min", "15min")
 DRAFT_EXTS = (".md", ".markdown", ".txt")
 UNSUPPORTED_DRAFT_EXTS = (".docx", ".doc", ".pdf", ".rtf", ".odt", ".pages")
@@ -126,19 +137,29 @@ class Request:
 
 
 class App:
-    """The WSGI application. `hosts` are the Host header values accepted (host:port)."""
+    """The WSGI application. `hosts` are the Host header values accepted (host:port); `origins`
+    the Origin values (scheme://host[:port]), by default http:// plus each host. `identify(environ)`
+    names the person behind a request (an Identity, or None to refuse it): by default the launch
+    operator. A deployment passes one that reads only what its trusted sign-in front end sets,
+    never a header a browser can send. The app keeps no per-request state of its own."""
 
-    def __init__(self, workspace, operator, token, hosts=(), policy=allow_local_operator, max_upload=MAX_UPLOAD):
+    def __init__(self, workspace, operator, token, hosts=(), origins=None, policy=allow_local_operator,
+                 identify=None, max_upload=MAX_UPLOAD):
         self.workspace = os.path.abspath(workspace)
-        self.identity = Identity(check_operator(operator))
+        self.operator = Identity(check_operator(operator))
         self.token = token
         self.hosts = set(hosts)
+        self.origins = None if origins is None else set(origins)
         self.policy = policy
+        self.identify = identify or (lambda environ: self.operator)
         self.max_upload = max_upload
         self.routes = [(method, re.compile(pattern), action, fn) for method, pattern, action, fn in ROUTES]
 
     def set_port(self, port):
         self.hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+    def allowed_origins(self):
+        return self.origins if self.origins is not None else {f"http://{h}" for h in self.hosts}
 
     # -- WSGI entry --
     def __call__(self, environ, start_response):
@@ -164,10 +185,16 @@ class App:
         if not hmac.compare_digest(token.encode(), self.token.encode()):
             raise HttpError(403, "missing or wrong token; open the link printed in the terminal")
         origin = req.header("Origin")
-        if origin is not None and origin not in {f"http://{h}" for h in self.hosts}:
+        if origin is not None and origin not in self.allowed_origins():
             raise HttpError(403, "forbidden origin")
         if req.header("Sec-Fetch-Site") == "cross-site":
             raise HttpError(403, "forbidden origin")
+        req.identity = self.identify(req.environ)
+        try:
+            if not isinstance(req.identity, Identity) or check_operator(req.identity.name) != req.identity.name:
+                raise ValueError("no usable identity")
+        except ValueError:
+            raise HttpError(401, "Sign in first.") from None
         path = req.path[len(API):]
         allowed = []
         for method, pattern, action, fn in self.routes:
@@ -178,7 +205,7 @@ class App:
                 allowed.append(method)
                 continue
             case_id = m.groupdict().get("case")
-            if not self.policy(self.identity, case_id, action):
+            if not self.policy(req.identity, case_id, action):
                 raise HttpError(403, "not allowed")
             case = self.case(case_id) if case_id else None
             return _json(200, fn(self, req, case))
@@ -206,9 +233,9 @@ def _json(status, obj):
     return status, [("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store")], body
 
 
-_STATUS = {200: "200 OK", 400: "400 Bad Request", 403: "403 Forbidden", 404: "404 Not Found",
-           405: "405 Method Not Allowed", 409: "409 Conflict", 413: "413 Payload Too Large",
-           415: "415 Unsupported Media Type", 500: "500 Internal Server Error"}
+_STATUS = {200: "200 OK", 400: "400 Bad Request", 401: "401 Unauthorized", 403: "403 Forbidden",
+           404: "404 Not Found", 405: "405 Method Not Allowed", 409: "409 Conflict", 413: "413 Payload Too Large",
+           415: "415 Unsupported Media Type", 500: "500 Internal Server Error", 503: "503 Service Unavailable"}
 
 
 def _public(entry):
@@ -216,23 +243,67 @@ def _public(entry):
     return {k: entry[k] for k in ("id", "rel", "title", "parent_id")}
 
 
-def _read(case):
+def _as_seen(app, req, entry):
+    """_public, as this person may see it: a case under a parent they may not read is shown on
+    its own, without the parent's id or folder name."""
+    out = _public(entry)
+    if entry["parent_id"] and not app.policy(req.identity, entry["parent_id"], "read"):
+        out.update(parent_id=None, rel=posixpath.basename(entry["rel"]))
+    return out
+
+
+def _busy(e):
+    return isinstance(e, sqlite3.OperationalError) and ("locked" in str(e) or "busy" in str(e))
+
+
+@contextmanager
+def _pin(app, case):
+    """The case pinned for this request (cases.pinned). A folder swapped part way is a 409."""
     try:
-        return store.connect_readonly(case["path"])
-    except (FileNotFoundError, sqlite3.Error):
-        raise HttpError(404, "That case's store can't be opened.") from None
+        with cases.pinned(app.workspace, case) as pin:
+            yield pin
+    except cases.CaseChanged:
+        raise HttpError(409, CHANGED) from None
+
+
+@contextmanager
+def _open_store(pin, write=False):
+    """The pinned case's own store, opened between two checks that its path still leads to the
+    pinned folders. Never creates a store. A store another writer holds too long is a 503."""
+    pin.check()
+    try:
+        conn = store.connect_existing(pin.path, timeout=BUSY_TIMEOUT) if write else store.connect_readonly(pin.path)
+    except (FileNotFoundError, sqlite3.Error) as e:
+        raise HttpError(503, BUSY) if _busy(e) else HttpError(404, "That case's store can't be opened.") from None
+    try:
+        pin.check()
+        yield conn
+    except sqlite3.OperationalError as e:
+        if _busy(e):
+            raise HttpError(503, BUSY) from None
+        raise
+    finally:
+        conn.close()
+
+
+@contextmanager
+def _store(app, case, write=False):
+    with _pin(app, case) as pin, _open_store(pin, write) as conn:
+        yield conn, pin
 
 
 # -- route handlers: fn(app, req, case) -> JSON-able --
 
 def h_session(app, req, case):
-    return {"operator": app.identity.name, "workspace": os.path.basename(app.workspace) or app.workspace,
+    return {"operator": req.identity.name, "workspace": os.path.basename(app.workspace) or app.workspace,
             "api": "v0", "folders": list(cases.FOLDERS), "labels": sorted(store.VALID_STATUS),
             "layers": list(LAYERS), "max_upload_bytes": app.max_upload}
 
 
 def h_cases(app, req, case):
-    return {"cases": [_public(c) for c in cases.discover(app.workspace)]}
+    """The cases this person may read, and nothing about the others."""
+    return {"cases": [_as_seen(app, req, c) for c in cases.discover(app.workspace)
+                      if app.policy(req.identity, c["id"], "read")]}
 
 
 def h_case_create(app, req, case):
@@ -244,42 +315,94 @@ def h_case_create(app, req, case):
 
 
 def h_status(app, req, case):
-    conn = _read(case)
-    try:
-        data = pk.status_data(conn, case["path"])
-    finally:
-        conn.close()
-    data.pop("matter_dir", None)
-    return {"case": _public(case), "status": data}
+    with _store(app, case) as (conn, pin):
+        data = pk.status_data(conn, pin.path)
+    for k in ("matter_dir", "parent_line", "children_lines"):  # paths, and other cases' summaries
+        data.pop(k, None)
+    return {"case": _as_seen(app, req, case), "status": data}
 
 
 def h_documents(app, req, case):
-    conn = _read(case)
-    try:
+    with _store(app, case) as (conn, pin):
         rows = conn.execute("SELECT id, rel_path, kind, bytes, sha256, source_url FROM documents"
                             " ORDER BY rel_path COLLATE NOCASE").fetchall()
-    finally:
-        conn.close()
     return {"documents": [dict(r) for r in rows]}
 
 
 def h_verify(app, req, case):
-    conn = _read(case)
-    try:
-        ok, changed, missing, failures = ingest.verify_integrity(conn, case["path"])
-    finally:
-        conn.close()
+    with _store(app, case) as (conn, pin):
+        ok, changed, missing, failures = ingest.verify_integrity(conn, pin.path)
+        pin.check()
     return {"ok": ok, "changed": changed, "missing": missing,
             "failures": [{"kind": k, "rel_path": p} for k, p in failures]}
 
 
 def h_scan(app, req, case):
-    conn = store.connect(case["path"])
-    try:
-        added, skipped, excluded = ingest.ingest_paths(conn, case["path"], [case["path"]])
-    finally:
-        conn.close()
+    with _store(app, case, write=True) as (conn, pin):
+        added, skipped, excluded = ingest.ingest_paths(conn, pin.path, [pin.path])
     return {"added": added, "already_registered": skipped, "excluded": excluded}
+
+
+def _exists(rel):
+    return f"{rel} already exists. Rename your file and try again; Matter Kit never replaces a file in a case."
+
+
+def _receive(req, fd, n):
+    """Write the n-byte body to fd (closing it) and return its sha256."""
+    h, stream, left = hashlib.sha256(), req.environ["wsgi.input"], n
+    with os.fdopen(fd, "wb") as f:
+        while left:
+            chunk = stream.read(min(left, 1024 * 1024))
+            if not chunk:
+                raise HttpError(400, "The upload stopped before the whole file arrived. Try again.")
+            f.write(chunk)
+            h.update(chunk)
+            left -= len(chunk)
+    return h.hexdigest()
+
+
+def _insert_document(conn, rel, digest, st):
+    conn.execute("INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind) VALUES (?,?,?,?,?,?)",
+                 (store.new_id(), digest, rel, st.st_size, st.st_mtime, ingest.classify(rel)))
+
+
+def _publish(pin, dest, incoming, part, staged, rel, digest):
+    """Give the received file its name and its documents row together, under the store's write
+    lock, so a scan, the CLI or MCP never sees one without the other. On any failure the row is
+    rolled back and the name removed, but only while it is still this request's file."""
+    name = rel.rpartition("/")[2]
+    info = {"rel_path": rel, "sha256": digest, "bytes": staged.st_size, "kind": ingest.classify(rel)}
+    with _open_store(pin, write=True) as conn:
+        published = False
+        try:
+            conn.execute("BEGIN IMMEDIATE")  # other writers wait here until this request is done
+            dup = conn.execute("SELECT rel_path FROM documents WHERE sha256=?", (digest,)).fetchone()
+            if dup and dup["rel_path"] == rel:  # the same bytes under the same name: already done
+                conn.rollback()
+                return {**info, "already_registered": True}
+            if dup:
+                raise HttpError(409, f"This file is already in the case as {dup['rel_path']}.")
+            if conn.execute("SELECT 1 FROM documents WHERE rel_path=?", (rel,)).fetchone():
+                raise HttpError(409, _exists(rel))
+            pin.check()
+            try:
+                dest.link_from(incoming, part, name)  # fails if the name exists: never replaces
+            except FileExistsError:
+                raise HttpError(409, _exists(rel)) from None
+            published = True
+            st = dest.lstat(name)
+            if (st.st_dev, st.st_ino) != (staged.st_dev, staged.st_ino):
+                raise cases.CaseChanged(f"{rel} was replaced while it was being saved")
+            _insert_document(conn, rel, digest, st)
+            pin.check()
+            conn.commit()
+            published = False
+        except BaseException:
+            conn.rollback()
+            if published:
+                dest.unlink_if(name, staged)
+            raise
+    return {**info, "already_registered": False}
 
 
 def h_upload(app, req, case):
@@ -293,56 +416,32 @@ def h_upload(app, req, case):
     if n > app.max_upload:
         raise HttpError(413, f"That file is larger than {app.max_upload // (1024 * 1024)} MB. "
                              "Copy it into the case folder yourself, then use 'Look for new files'.")
-    root = case["path"]
-    real_root = os.path.realpath(root)
-    folder_path = os.path.join(root, folder)
-    if not os.path.lexists(folder_path):
-        os.mkdir(folder_path)
-    if os.path.islink(folder_path) or os.path.realpath(folder_path) != os.path.join(real_root, folder):
-        raise HttpError(400, f"The {folder} folder is a link to somewhere else; Matter Kit won't write through it.")
-    target = os.path.join(folder_path, name)
-    rel = f"{folder}/{name}"
-    try:  # O_EXCL: never replace an existing file, and never follow a link planted at the name
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o644)
-    except FileExistsError:
-        raise HttpError(409, f"{rel} already exists. Rename your file and try again; "
-                             "Matter Kit never replaces a file in a case.") from None
-    stream, left = req.environ["wsgi.input"], n
-    try:
-        with os.fdopen(fd, "wb") as f:
-            while left:
-                chunk = stream.read(min(left, 1024 * 1024))
-                if not chunk:
-                    raise HttpError(400, "The upload stopped before the whole file arrived. Try again.")
-                f.write(chunk)
-                left -= len(chunk)
-    except BaseException:
-        os.unlink(target)  # only ever the partial file this request created
-        raise
-    digest = ingest.sha256_file(target)
-    conn = store.connect(root)
-    try:
-        dup = conn.execute("SELECT rel_path FROM documents WHERE sha256=?", (digest,)).fetchone()
-        if dup:
-            os.unlink(target)  # the bytes are already in the case; keep the tree as it was
-            raise HttpError(409, f"This file is already in the case as {dup['rel_path']}.")
-        added, _, excluded = ingest.ingest_paths(conn, root, [target])
-    finally:
-        conn.close()
-    if not added:
-        os.unlink(target)
-        raise HttpError(400, "Matter Kit couldn't register that file, so it wasn't kept.")
-    return {"rel_path": rel, "sha256": digest, "bytes": n, "kind": ingest.classify(rel)}
+    with _pin(app, case) as pin:
+        try:
+            linked = stat.S_ISLNK(pin.dir.lstat(folder).st_mode)
+        except FileNotFoundError:
+            linked = False
+        if linked:
+            raise HttpError(400, f"The {folder} folder is a link to somewhere else; Matter Kit won't write through it.")
+        dest, incoming = pin.sub(folder, create=True), pin.incoming()
+        part = f"upload-{secrets.token_hex(8)}.part"
+        fd = incoming.create(part, 0o600)
+        made = os.fstat(fd)
+        try:
+            digest = _receive(req, fd, n)
+            staged = incoming.lstat(part)  # its size and time as written
+            if (staged.st_dev, staged.st_ino) != (made.st_dev, made.st_ino):
+                raise cases.CaseChanged("the upload's own file was replaced while it arrived")
+            return _publish(pin, dest, incoming, part, staged, f"{folder}/{name}", digest)
+        finally:
+            incoming.unlink_if(part, made)
 
 
 def h_deadlines(app, req, case):
     show_all = req.query.get("all") in ("1", "true")
-    conn = _read(case)
-    try:
+    with _store(app, case) as (conn, pin):
         rows = conn.execute("SELECT * FROM deadlines" + ("" if show_all else " WHERE state='open'")
                             + " ORDER BY due_date").fetchall()
-    finally:
-        conn.close()
     return {"deadlines": [{"id": r["id"], "label": r["label"], "due_date": r["due_date"],
                            "rule_source": r["rule_source"], "confidence": r["confidence"],
                            "verification": r["verification_status"], "state": r["state"],
@@ -350,11 +449,8 @@ def h_deadlines(app, req, case):
 
 
 def h_facts(app, req, case):
-    conn = _read(case)
-    try:
+    with _store(app, case) as (conn, pin):
         return {"facts": facts.list_(conn)}
-    finally:
-        conn.close()
 
 
 def h_fact_add(app, req, case):
@@ -363,27 +459,24 @@ def h_fact_add(app, req, case):
         raise HttpError(400, "A fact needs its text and a label.")
     if not isinstance(body.get("sources") or [], list):
         raise HttpError(400, "sources must be a list")
-    refs = []
+    sources = []
     for s in body.get("sources") or []:
         if not isinstance(s, dict) or not isinstance(s.get("document_id"), str):
             raise HttpError(400, "each source needs a document_id")
         loc = s.get("locator") or ""
         if not isinstance(loc, str) or len(loc) > 200 or "\n" in loc or "\r" in loc:
             raise HttpError(400, "a source's page or location must be one short line")
-        refs.append(s["document_id"] + (f"@{loc.strip()}" if loc.strip() else ""))
-    conn = store.connect(case["path"])
-    try:
+        sources.append({"document_id": s["document_id"], "locator": loc.strip() or None})
+    with _store(app, case, write=True) as (conn, pin):
         known = {r["id"] for r in conn.execute("SELECT id FROM documents")}
-        unknown = [r.partition("@")[0] for r in refs if r.partition("@")[0] not in known]
-        if unknown:  # the picker only offers this case's documents; anything else is refused, not dropped
+        if any(s["document_id"] not in known for s in sources):
+            # the picker only offers this case's documents; anything else is refused, not dropped
             raise HttpError(400, "That source isn't a document registered in this case.")
         try:
-            return {"fact": facts.add(conn, case["path"], body.get("text"), body.get("status") or "",
-                                      refs, by=store.attribution(app.identity.author))}
+            return {"fact": facts.add(conn, pin.path, body.get("text"), body.get("status") or "",
+                                      sources, by=store.attribution(req.identity.author))}
         except (facts.FactError, subcase.SubcaseError) as e:
             raise HttpError(400, str(e)) from None
-    finally:
-        conn.close()
 
 
 def _drafts(root):
@@ -395,7 +488,8 @@ def _drafts(root):
 
 
 def h_drafts(app, req, case):
-    return {"drafts": [{"path": p, "supported": p.lower().endswith(DRAFT_EXTS)} for p in _drafts(case["path"])]}
+    with _pin(app, case) as pin:
+        return {"drafts": [{"path": p, "supported": p.lower().endswith(DRAFT_EXTS)} for p in _drafts(pin.path)]}
 
 
 def h_brief_check(app, req, case):
@@ -404,15 +498,20 @@ def h_brief_check(app, req, case):
     path, mode = body.get("path"), body.get("mode") or "brief"
     if mode not in ("brief", "complaint"):
         raise HttpError(400, "mode must be brief or complaint")
-    if path not in _drafts(case["path"]):  # only names this case's own walk produced; no path joins from input
-        raise HttpError(400, "Pick a draft from this case.")
-    if path.lower().endswith(UNSUPPORTED_DRAFT_EXTS):
-        raise HttpError(400, "Brief check reads .md and .txt drafts only for now. In Word, use "
-                             "File > Save As > Plain Text (.txt), put the copy in the case, and check that.")
-    try:
-        rep = briefcheck.check(case["path"], os.path.join(case["path"], path), mode=mode)
-    except (ValueError, FileNotFoundError) as e:
-        raise HttpError(400, f"Brief check refused: {e}") from None
+    with _pin(app, case) as pin:
+        if not isinstance(path, str) or path not in _drafts(pin.path):  # only names this case's own walk produced
+            raise HttpError(400, "Pick a draft from this case.")
+        if path.lower().endswith(UNSUPPORTED_DRAFT_EXTS):
+            raise HttpError(400, "Brief check reads .md and .txt drafts only for now. In Word, use "
+                                 "File > Save As > Plain Text (.txt), put the copy in the case, and check that.")
+        shown = hashlib.sha256(pin.read(path)).hexdigest()  # read without following a link
+        try:
+            rep = briefcheck.check(pin.path, os.path.join(pin.path, path), mode=mode)
+        except (ValueError, FileNotFoundError) as e:
+            raise HttpError(400, f"Brief check refused: {e}") from None
+        if rep.draft_sha256 != shown:  # the report must describe the file that was picked
+            raise HttpError(409, "The draft changed while it was being checked. Save it, then run the check again.")
+        pin.check()
     return {"exit_code": rep.exit_code, "summary": rep.summary(), "report": rep.render()}
 
 
@@ -420,11 +519,8 @@ def h_packet(app, req, case):
     layer = req.query.get("layer") or "3min"
     if layer not in LAYERS:
         raise HttpError(400, f"layer must be one of {', '.join(LAYERS)}")
-    conn = _read(case)
-    try:
-        return {"layer": layer, "text": pk.packet(conn, case["path"], layer=layer)}
-    finally:
-        conn.close()
+    with _store(app, case) as (conn, pin):
+        return {"layer": layer, "text": pk.packet(conn, pin.path, layer=layer)}
 
 
 CASE = r"/cases/(?P<case>[0-9a-f]{16})"

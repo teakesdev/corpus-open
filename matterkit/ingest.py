@@ -1,6 +1,7 @@
 """Ingest files into the matter store: hash, classify, register. Sources are never modified."""
 import hashlib
 import os
+import sqlite3
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".matter"}
 SKIP_FILES = {".DS_Store"}
@@ -89,6 +90,14 @@ def is_within_matter(path: str, matter_dir: str) -> bool:
     return not _invalid_rel(rel)
 
 
+def _links_out(fp: str, matter_dir: str) -> bool:
+    """True if a link makes fp's bytes live outside matter_dir, or inside a nested matter (whose
+    files belong to its own store). A path with no link resolves inside and is never refused."""
+    real_root = os.path.realpath(matter_dir)
+    real = os.path.realpath(fp)
+    return not is_within_matter(real, real_root) or nested_matter_root(real, real_root) is not None
+
+
 def _invalid_rel(rel_path: str) -> bool:
     """True if rel_path is not a safe matter-relative locator."""
     if not rel_path or os.path.isabs(rel_path):
@@ -146,6 +155,10 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 print(f"  ! outside matter: {fp}")
                 excluded += 1
                 continue
+            if _links_out(fp, abs_matter):
+                print(f"  ! links outside this matter (or into a nested matter): {fp}")
+                excluded += 1
+                continue
             try:
                 rel_path = to_rel_path(fp, abs_matter)
             except ValueError:
@@ -168,12 +181,16 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 continue
             st = os.stat(fp)
             kind = classify(rel_path)
-            conn.execute(
-                "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
-                " VALUES (?,?,?,?,?,?)",
-                (__import__("matterkit.store", fromlist=["new_id"]).new_id(),
-                 digest, rel_path, st.st_size, st.st_mtime, kind),
-            )
+            try:
+                conn.execute(
+                    "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
+                    " VALUES (?,?,?,?,?,?)",
+                    (__import__("matterkit.store", fromlist=["new_id"]).new_id(),
+                     digest, rel_path, st.st_size, st.st_mtime, kind),
+                )
+            except sqlite3.IntegrityError:  # another writer registered it after the lookup above
+                skipped += 1
+                continue
             added += 1
     conn.commit()
     return added, skipped, excluded

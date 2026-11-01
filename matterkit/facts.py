@@ -23,18 +23,26 @@ def normalize_status(s):
 
 
 def add(conn, matter_dir, text, status, sources=(), by="human"):
-    """Register an assertion with its sources. `sources` are 'rel_path@locator' strings, or
-    'parent:rel_path@locator' in a subcase. The caller composes `by` (store.attribution).
+    """Register an assertion with its sources. A source is a 'ref@locator' string (ref is a
+    rel_path, a document id, or 'parent:rel_path' in a subcase) or a typed
+    {"document_id": id, "locator": text} that names one document by its exact id, as the web UI
+    sends. The caller composes `by` (store.attribution).
 
-    Refuses an invalid label (FactError), empty text (FactError) and a parent reference that
-    cannot be cited (subcase.SubcaseError, propagated); parents are re-hashed before anything
-    is written and the insert plus its sources commit together, so a refusal writes nothing.
-    A source that is not a registered document is reported in "unrecognized", not an error."""
+    Refuses an invalid label (FactError), empty text (FactError) and a parent document that
+    cannot be cited (subcase.SubcaseError, propagated), however it is named: a subcase's
+    reference row picked by id is re-hashed against the parent just as a 'parent:' ref is.
+    Parents are re-hashed before anything is written and the insert plus its sources commit
+    together, so a refusal writes nothing. A source that is not a registered document is
+    reported in "unrecognized", not an error."""
     status = normalize_status(status)
     if not isinstance(text, str) or not text.strip():
         raise FactError("fact text is empty — say what the fact is")
     sources = list(sources or ())
-    parents = subcase.resolve_parent_sources(matter_dir, sources)
+    for s in sources:
+        if not (isinstance(s, str) or (isinstance(s, dict) and isinstance(s.get("document_id"), str)
+                                       and isinstance(s.get("locator") or "", str))):
+            raise FactError(f"a source must be 'path@locator' or a document id, not {s!r}")
+    parents = subcase.resolve_parent_sources(matter_dir, sources, conn)
     aid = new_id("a_")
     with conn:
         conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",

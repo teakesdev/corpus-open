@@ -132,6 +132,64 @@ class ServerCase(unittest.TestCase):
             conn.close()
 
 
+HOST = "127.0.0.1:8"
+
+
+def direct_app(ws, **kw):
+    """The app with no server around it, for calls that need an exact interleaving."""
+    return webui.App(ws, OPERATOR, "test-token", hosts={HOST}, **kw)
+
+
+class Body(io.BytesIO):
+    """A request body that runs `on_first` before its first bytes go out, `on_end` once the last
+    byte has been read, and raises `fail` on the first read (after on_first), if given."""
+
+    def __init__(self, data, on_first=None, on_end=None, fail=None):
+        super().__init__(data)
+        self.size, self.on_first, self.on_end, self.fail = len(data), on_first, on_end, fail
+
+    def read(self, n=-1):
+        if self.on_first:
+            fn, self.on_first = self.on_first, None
+            fn()
+        if self.fail:
+            raise self.fail
+        chunk = super().read(n)
+        if self.on_end and self.tell() >= self.size:
+            fn, self.on_end = self.on_end, None
+            fn()
+        return chunk
+
+
+def call(app, method, path, body=None, *, raw=None, stream=None, headers=None, host=HOST):
+    """Call the WSGI app directly, no socket: (status, parsed JSON). `stream` stands in for the
+    body reader of `raw` (see Body), to pause or fail an upload part way."""
+    from wsgiref.util import setup_testing_defaults
+    data = json.dumps(body).encode() if body is not None else (raw or b"")
+    env = {}
+    setup_testing_defaults(env)
+    env.update({"REQUEST_METHOD": method, "PATH_INFO": webui.API + path.partition("?")[0],
+                "QUERY_STRING": path.partition("?")[2], "HTTP_HOST": host, "HTTP_X_MATTER_TOKEN": app.token,
+                "CONTENT_LENGTH": str(len(data)), "wsgi.input": stream or io.BytesIO(data)})
+    if body is not None:
+        env["CONTENT_TYPE"] = "application/json"
+    for k, v in (headers or {}).items():
+        env["HTTP_" + k.upper().replace("-", "_")] = v
+    seen = {}
+    with contextlib.redirect_stderr(io.StringIO()):
+        payload = b"".join(app(env, lambda status, hdrs: seen.setdefault("status", int(status.split()[0]))))
+    return seen["status"], json.loads(payload)
+
+
+def documents(case_dir):
+    """{rel_path: sha256} of a case's registered documents."""
+    conn = store.connect_readonly(case_dir)
+    try:
+        return {r["rel_path"]: r["sha256"] for r in conn.execute("SELECT rel_path, sha256 FROM documents")}
+    finally:
+        conn.close()
+
+
 def route_samples(case_id):
     """One concrete request per API route, for 'every route' tests."""
     out = []
