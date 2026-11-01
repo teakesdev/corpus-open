@@ -284,5 +284,73 @@ class TestTrackedChanges(unittest.TestCase):
         self.assertIn("A.bold", d.text)
 
 
+class TestSilentDropsClosed(unittest.TestCase):
+    """SWE-2's round-1 review (0758b62): content that used to drop without a word."""
+
+    def test_a_symbol_character_is_warned_about_and_not_mapped_to_a_glyph(self):
+        d = read(para("Compl. ", "<w:r><w:sym w:font='Symbol' w:char='F0B6'/></w:r>", " 59 shows it."))
+        self.assertEqual(d.text, "Compl. 59 shows it.")   # no glyph is guessed: in the Symbol font F0B6 is not a paragraph sign
+        self.assertEqual([w[0] for w in d.warnings], ["unread-content"])
+        self.assertIn("sym", d.warnings[0][2])
+
+    def test_tracked_changes_in_styles_numbering_or_settings_warn_and_do_not_refuse(self):
+        style_change = styles_xml([("H", "heading 1", None, "")]).replace(
+            "</w:style>", '<w:pPr><w:pPrChange w:id="1" w:author="Pat"><w:pPr/></w:pPrChange></w:pPr></w:style>')
+        style_ins = styles_xml([("H", "heading 1", None, "")]).replace(
+            "</w:style>", '<w:ins w:id="2" w:author="Pat"/></w:style>')
+        num_change = numbering_xml({0: [lvl(0, "decimal", "%1.")]}, {1: 0}).replace(
+            "</w:lvl>", '<w:numberingChange w:id="3" w:author="Pat" w:original="%1."/></w:lvl>')
+        settings = ('<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                    '<w:rPrChange w:id="4" w:author="Pat"><w:rPr/></w:rPrChange></w:settings>')
+        for name, kw in (("styles pPrChange", {"styles": style_change}), ("styles ins", {"styles": style_ins}),
+                         ("numbering", {"numbering": num_change}), ("settings", {"settings": settings})):
+            with self.subTest(name):
+                d = read(para("Intro."), **kw)
+                self.assertIn("formatting-changes", [w[0] for w in d.warnings])
+                self.assertIn("styles, numbering or settings", " ".join(w[2] for w in d.warnings))
+                self.assertEqual(d.text, "Intro.")
+
+    def test_a_paragraph_holding_only_a_note_reference_still_emits_its_note(self):
+        d = read(para(fnref(1)) + para("Body."), footnotes={1: "Note text Doc. 99."})
+        self.assertEqual(blocks(d), [("fn. 1", "Note text Doc. 99."), ("para. 1", "Body.")])
+        self.assertFalse(any("not referenced" in n for n in d.notes), d.notes)
+
+    def test_a_second_reference_to_a_note_reads_it_once_under_the_first_label(self):
+        d = read(para("A.", fnref(1)) + para("B.", fnref(1)) + para("C.", fnref(2)), footnotes={1: "Once.", 2: "Other."})
+        self.assertEqual([b[0] for b in blocks(d)], ["para. 1", "fn. 1", "para. 2", "para. 3", "fn. 2"])
+        self.assertEqual(d.text.count("Once."), 1)
+        self.assertTrue(any("fn. 1" in n and "more than one place" in n for n in d.notes), d.notes)
+
+    def test_cells_and_rows_wrapped_in_content_controls_are_read(self):
+        sdt = lambda inner: f"<w:sdt><w:sdtPr/><w:sdtContent>{inner}</w:sdtContent></w:sdt>"  # noqa: E731
+        cell_wrapped = f"<w:tbl><w:tblPr/><w:tr>{sdt('<w:tc>' + para('Wrapped cell.') + '</w:tc>')}<w:tc>{para('Plain cell.')}</w:tc></w:tr></w:tbl>"
+        row_wrapped = f"<w:tbl><w:tblPr/><w:tr><w:tc>{para('Row one.')}</w:tc></w:tr>{sdt('<w:tr><w:tc>' + para('Wrapped row.') + '</w:tc></w:tr>')}</w:tbl>"
+        d = read(cell_wrapped + row_wrapped)
+        self.assertEqual(blocks(d), [
+            ("para. 1 (table 1, row 1, cell 1)", "Wrapped cell."), ("para. 2 (table 1, row 1, cell 2)", "Plain cell."),
+            ("para. 3 (table 2, row 1, cell 1)", "Row one."), ("para. 4 (table 2, row 2, cell 1)", "Wrapped row.")])
+        self.assertEqual(d.warnings, [])
+
+    def test_a_table_directly_inside_a_table_or_a_row_is_flagged_not_dropped(self):
+        inner = "<w:tbl><w:tr><w:tc>" + para("Inner Doc. 99.") + "</w:tc></w:tr></w:tbl>"
+        d = read(para("Before.") + f"<w:tbl><w:tr><w:tc>{para('Outer.')}</w:tc>{inner}</w:tr>{inner}</w:tbl>")
+        self.assertEqual([w[0] for w in d.warnings], ["unread-content"])
+        self.assertIn("tbl", d.warnings[0][2])
+        self.assertEqual([b[1] for b in blocks(d)], ["Before.", "Outer."])
+
+    def test_a_list_item_inside_a_footnote_does_not_advance_the_body_list(self):
+        num = numbering_xml({0: [lvl(0, "decimal", "%1.")]}, {1: 0})
+        in_note = '<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Item in a note.</w:t></w:r>'
+        notes = ('<?xml version="1.0"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                 '<w:footnote w:id="1"><w:p>' + in_note + '</w:p></w:footnote></w:footnotes>')
+        d = read(para("Body one.", fnref(1), num=(1, 0)) + para("Body two.", num=(1, 0)), numbering=num,
+                 parts={"word/footnotes.xml": notes})
+        self.assertEqual([b[1] for b in blocks(d)], ["1. Body one.", "1. Item in a note.", "2. Body two."])
+
+    def test_header_and_footer_part_names_match_without_regard_to_case(self):
+        d = read(para("A."), parts={"word/Header1.xml": "<x/>", "word/FOOTER2.XML": "<x/>"})
+        self.assertTrue(any("headers and footers" in n and "not read" in n for n in d.notes), d.notes)
+
+
 if __name__ == "__main__":
     unittest.main()

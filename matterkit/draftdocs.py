@@ -221,8 +221,9 @@ class _Package:
                              f"{MAX_ARCHIVE_UNCOMPRESSED_BYTES}-byte acceptance limit; refused after the directory was parsed, "
                              "which is why this is an acceptance limit and not a guard")
 
-    def has(self, prefix: str) -> list:
-        return [n for n in self.names if re.fullmatch(prefix, n)]
+    def has(self, pattern: str) -> list:
+        """Member names matching `pattern` in full, whatever their case (OPC part names are case-insensitive)."""
+        return [n for n in self.names if re.fullmatch(pattern, n, re.I)]
 
     def part(self, name: str, required: bool = False):
         count = self.names.count(name)
@@ -358,6 +359,7 @@ class _Numbering:
 
     def __init__(self, root, warn):
         self.abstract, self.nums, self.links, self.counters, self.warn = {}, {}, {}, {}, warn
+        self.scope = "body"  # lists inside footnotes and endnotes count apart from the body's
         self.bad_formats = set()
         self.present = root is not None
         if root is None:
@@ -402,7 +404,7 @@ class _Numbering:
                       "marker such as 'II.' may be missing from the text brief check read")
             return None
         # Nums of one abstract list share a count (Word continues the list) unless a num restarts a level.
-        key = ("num", numId) if num["ov"] else ("abs", num["abs"])
+        key = (self.scope, "num", numId) if num["ov"] else (self.scope, "abs", num["abs"])
         ctr = self.counters.setdefault(key, [None] * 9)
         start = lambda j: num["ov"].get(j, levels.get(j, {}).get("start", 1))  # noqa: E731
         ctr[ilvl] = start(ilvl) if ctr[ilvl] is None else ctr[ilvl] + 1
@@ -433,7 +435,7 @@ _INERT = {"pPr", "rPr", "sectPr", "tblPr", "tblPrEx", "tblGrid", "trPr", "tcPr",
           "customXmlDelRangeEnd", "customXmlMoveFromRangeStart", "customXmlMoveFromRangeEnd", "customXmlMoveToRangeStart",
           "customXmlMoveToRangeEnd", "sdtPr", "sdtEndPr"}
 _RUN_INERT = {"rPr", "instrText", "fldChar", "delText", "delInstrText", "footnoteRef", "endnoteRef", "separator",
-              "continuationSeparator", "continuationNotice", "lastRenderedPageBreak", "sym", "annotationRef",
+              "continuationSeparator", "continuationNotice", "lastRenderedPageBreak", "annotationRef",
               "commentReference", "pgNum", "ruby"}
 _CONTAINERS = {"hyperlink", "fldSimple", "smartTag", "customXml", "dir", "bdo"}
 _MAX_TABLE_DEPTH = 24
@@ -474,6 +476,8 @@ def _run(r, out, st):
             st.refs.append(("footnote", c.get(W + "id")))
         elif t == W + "endnoteReference":
             st.refs.append(("endnote", c.get(W + "id")))
+        elif loc == "sym":
+            st.unhandled.add("sym")  # a symbol-font glyph: its code means nothing outside that font, so it is not guessed at
         elif loc in _RUN_INERT or loc == "softHyphen":
             continue
         elif any(_local(e.tag) == "txbxContent" and _has_text(e) for e in c.iter()):
@@ -499,6 +503,21 @@ def _walk(el, out, st):
             st.unhandled.add(loc)
 
 
+def _table_parts(parent, want, st):
+    """The `want` (tr or tc) children of a table or row, looking through content controls that wrap them. A child
+    that is neither that, an inert property element nor a content control is flagged (a table directly inside a
+    table or row, say), never dropped without a word."""
+    for c in parent:
+        if c.tag == W + want:
+            yield c
+        elif c.tag == W + "sdt":
+            content = c.find(W + "sdtContent")
+            if content is not None:
+                yield from _table_parts(content, want, st)
+        elif st is not None and _local(c.tag) not in _INERT and (c.tag == W + "tbl" or _has_text(c)):
+            st.unhandled.add(f"{_local(c.tag)} (directly inside a table or row)")
+
+
 def _paragraphs(container, tables=(), st=None, depth=0):
     """(paragraph element, table path) for every w:p under `container` in reading order, descending into tables
     and block-level content controls. The table path is ((table no., row, cell), ...), outermost first; a table
@@ -513,8 +532,8 @@ def _paragraphs(container, tables=(), st=None, depth=0):
                 if st is not None:
                     st.unhandled.add("tbl (nested too deep)")
                 continue
-            for ri, row in enumerate(c.findall(W + "tr"), 1):
-                for ci, cell in enumerate(row.findall(W + "tc"), 1):
+            for ri, row in enumerate(_table_parts(c, "tr", st), 1):
+                for ci, cell in enumerate(_table_parts(row, "tc", st), 1):
                     yield from _paragraphs(cell, tables + ((n_tables, ri, ci),), st, depth + 1)
         elif c.tag == W + "sdt":
             content = c.find(W + "sdtContent")
@@ -563,7 +582,8 @@ def _read_docx(data: bytes) -> Draft:
     if body is None:
         raise DraftError(f"{MAIN_PART} has no w:body element")
     notes_roots = {k: pkg.part(f"word/{k}s.xml") for k in ("footnote", "endnote")}
-    styles = _Styles(pkg.part("word/styles.xml"))
+    styles_root, numbering_root = pkg.part("word/styles.xml"), pkg.part("word/numbering.xml")
+    styles = _Styles(styles_root)
     settings = pkg.part("word/settings.xml")
     comments = pkg.part("word/comments.xml")
     warnings, seen_warnings = [], set()
@@ -573,7 +593,7 @@ def _read_docx(data: bytes) -> Draft:
             seen_warnings.add((code, subject))
             warnings.append((code, subject, message))
 
-    numbering = _Numbering(pkg.part("word/numbering.xml"), warn)
+    numbering = _Numbering(numbering_root, warn)
 
     # ---- tracked changes: refuse. Nothing is accepted or rejected for the author.
     parts = [r for r in (doc, notes_roots["footnote"], notes_roots["endnote"]) if r is not None]
@@ -596,6 +616,12 @@ def _read_docx(data: bytes) -> Draft:
     if any(_local(el.tag) in _FORMAT_CHANGES for root in parts for el in root.iter()):
         warn("formatting-changes", "tracked formatting", "the draft has tracked formatting changes (not text changes); a "
              "heading style or list number may differ from what you see after accepting them")
+    # Styles, numbering and settings hold no text brief check reads, so a tracked change there is a warning, not a refusal.
+    if any(_local(el.tag) in _FORMAT_CHANGES or _local(el.tag) in _TRACKED
+           for root in (styles_root, numbering_root, settings) if root is not None for el in root.iter()):
+        warn("formatting-changes", "styles, numbering or settings", "the draft has tracked changes in its styles, numbering or "
+             "settings (not in the text); a heading style, list number or footnote setting may differ from what you see after "
+             "accepting them")
 
     # ---- footnote and endnote numbering
     fmt_of = {"footnote": "decimal", "endnote": "lowerRoman"}
@@ -620,11 +646,16 @@ def _read_docx(data: bytes) -> Draft:
     blocks, n_para, n_toc, counts = [], 0, 0, Counter()
     used = {"footnote": set(), "endnote": set()}
     seq = {"footnote": 0, "endnote": 0}
+    labelled, repeated = {}, {}   # (kind, id) -> label of the first reference; label -> extra references
 
     def note_blocks(kind, nid):
+        if (kind, nid) in labelled:   # the same note referenced again: read once, under the first label
+            repeated[labelled[(kind, nid)]] = repeated.get(labelled[(kind, nid)], 0) + 1
+            return
         seq[kind] += 1
         label_no = FORMATS.get(fmt_of[kind], FORMATS["decimal"])(seq[kind])
         label = ("fn. " if kind == "footnote" else "endnote ") + label_no
+        labelled[(kind, nid)] = label
         root = notes_roots[kind]
         el = None
         if root is not None:
@@ -638,6 +669,7 @@ def _read_docx(data: bytes) -> Draft:
         used[kind].add(nid)
         counts[kind] += 1
         nst = _State()
+        numbering.scope = "note"
         for p, _ in _paragraphs(el, st=nst):
             out = []
             _walk(p, out, nst)
@@ -646,6 +678,7 @@ def _read_docx(data: bytes) -> Draft:
             text = normalize("".join(out))
             if text:
                 blocks.append((label, (marker + " " if marker else "") + text, "fn", 0))
+        numbering.scope = "body"
         _absorb(nst)
 
     def _absorb(s):
@@ -662,6 +695,8 @@ def _read_docx(data: bytes) -> Draft:
         text = normalize("".join(out))
         _absorb(pst)
         if not text:
+            for kind, nid in pst.refs:   # a paragraph that is only a note reference still has its note
+                note_blocks(kind, nid)
             continue
         n_para += 1
         sid = _val(ppr, "pStyle")
@@ -687,6 +722,9 @@ def _read_docx(data: bytes) -> Draft:
         orphans = [n for n in root.findall(W + kind) if n.get(W + "type") in (None, "normal") and n.get(W + "id") not in used[kind]]
         if orphans:
             notes.append(f"{_plural(len(orphans), kind)} not referenced from the text was not read")
+    for label, extra in repeated.items():
+        notes.append(f"{label} is referenced from more than one place ({_plural(extra, 'extra reference')}); it was read once, "
+                     "at the first reference")
     if n_toc:
         notes.append(f"{_plural(n_toc, 'table-of-contents or authorities paragraph')} (by style) not checked; they still count in "
                      "'para.' numbers")

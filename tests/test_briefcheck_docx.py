@@ -167,6 +167,11 @@ class TestNothingIsAcceptedSilently(DocxBase):
         self.assertEqual(self.where(r, "draft-comments"), ["document"])
         self.assertEqual(r.exit_code, 0)  # warnings do not change the exit code, but they are printed
 
+    def test_a_symbol_character_is_a_warning_in_the_report(self):
+        r = self.docx_check(docx(para("Compl. ", "<w:r><w:sym w:font='Symbol' w:char='F0B6'/></w:r>", " 59 shows it. See Doc. 16.")))
+        self.assertIn("draft-unread-content", codes(r, "WARN"))
+        self.assertEqual(self.where(r, "draft-unread-content"), ["document"])
+
     def test_an_unresolvable_list_is_a_warning(self):
         r = self.docx_check(docx(para("ARGUMENT", num=(1, 0))))
         self.assertIn("draft-numbering-unresolved", codes(r, "WARN"))

@@ -259,8 +259,11 @@ format than its name says is refused rather than read as garbage.
   versions of the text and brief check will not guess which one you mean; accept
   or reject them in Word, save a copy and check that.
 - Warned, never silent: comments (not part of the filing), hidden text, text
-  boxes, formatting-only tracked changes, a list whose numbers could not be
-  rendered, a reference to a missing note. Said in the report as not read:
+  boxes, symbol-font characters (their code means nothing outside that font, so
+  none is guessed at), formatting-only tracked changes (also in the styles,
+  numbering and settings, which are never refused), a list whose numbers could
+  not be rendered, a reference to a missing note, content in elements brief
+  check does not read (including a table directly inside a table or row). Said in the report as not read:
   headers and footers, table-of-contents and table-of-authorities lines (by
   style), unreferenced notes.
 - Smart quotes, non-breaking spaces and thin spaces around `§` and in
