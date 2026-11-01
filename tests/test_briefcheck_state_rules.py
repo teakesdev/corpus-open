@@ -50,6 +50,31 @@ class TestStateRuleKeys(unittest.TestCase):
         self.assertEqual(rules("N. D. R. Civ. P. 12"), [("rule:ndrcivp12", "N. D. R. Civ. P. 12")])
         self.assertEqual(rules("Ohio  R. Civ. P. 12"), [("rule:ohiorcivp12", "Ohio  R. Civ. P. 12")])
 
+    def test_a_line_break_inside_the_state_rule_still_keys_the_whole_state(self):
+        # SWE-2's review of the port (docs/superpowers/reviews/2026-11-01-port-state-rule-keys-code/).
+        # The state alternation runs under the public line's \\s* separators and the re.S prefix split. A one-word
+        # state ("Tex.") is pinned in test_briefcheck_rule_linebreaks.py; these pin the paths that only a
+        # dotted, two-part or undotted state takes. Each row fails on one regression: "Ohio\nR." if the
+        # undotted separator stops crossing a line break, the indented rows if the dotted separator goes
+        # back to one whitespace character, and all of them if the prefix split loses re.S.
+        for cite, key in [("W. Va.\nR. Civ. P. 12", "rule:wvarcivp12"),
+                          ("N.D.\nR. Civ. P. 12", "rule:ndrcivp12"),
+                          ("Ohio\nR. Civ. P. 12", "rule:ohiorcivp12"),
+                          ("W. Va.\n  R. Civ. P. 12", "rule:wvarcivp12"),
+                          ("N.D. \n R. Civ. P. 12", "rule:ndrcivp12"),
+                          ("Ohio \n R. Civ. P. 12", "rule:ohiorcivp12")]:
+            with self.subTest(cite=cite):
+                self.assertEqual(rules(cite), [(key, cite)])
+
+    def test_extra_spaces_inside_a_two_part_state_and_the_territory_that_moved_still_key(self):
+        # The state patterns in citations.py allow any whitespace inside a two-part abbreviation and
+        # treat "Am. Samoa" as undotted; the rule pattern reads them through citations._STATE_*.
+        for cite, key in [("W.  Va. R. Civ. P. 12", "rule:wvarcivp12"),
+                          ("N.  D. R. Civ. P. 12", "rule:ndrcivp12"),
+                          ("Am. Samoa R. Civ. P. 12", "rule:amsamoarcivp12")]:
+            with self.subTest(cite=cite):
+                self.assertEqual(rules(cite), [(key, cite)])
+
     def test_territories_key_on_the_whole_name(self):
         for st, key in [("P.R.", "rule:prrcivp12"), ("V.I.", "rule:vircivp12"), ("N. Mar. I.", "rule:nmarircivp12")]:
             with self.subTest(territory=st):
