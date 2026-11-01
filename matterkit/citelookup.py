@@ -16,6 +16,7 @@ still good law. A cite it does not find is a lead to check by hand, not proof.
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from . import authority, briefcheck, citations, store
@@ -53,7 +54,14 @@ CANONICAL_REPORTERS["fedappx"] = "F. App'x"  # "Fed. Appx." / "Fed. App'x"
 _OPENER = re.compile(r"^(?:Accordingly|Again|Also|Finally|First|Further|Furthermore|Here|However|Indeed|Likewise|"
                      r"Moreover|Notably|Second|Similarly|Still|Then|Third|Thus|Yet),\s+")
 _REPS = "|".join(re.escape(r) for r in sorted(set(CANONICAL_REPORTERS.values()), key=len, reverse=True))
-_PAYLOAD_LINE = re.compile(rf"\d{{1,4}} (?:{_REPS}) \d{{1,5}}|\d{{4}} WL \d{{3,9}}")
+_PAYLOAD_LINE = re.compile(rf"[0-9]{{1,4}} (?:{_REPS}) [0-9]{{1,5}}|[0-9]{{4}} WL [0-9]{{3,9}}")
+DROPPED_TEXT = ("CourtListener's answer for this line named a different cite, so it was set aside. "
+                "Check the cite by hand or run the lookup again.")
+
+
+def _ascii(digits: str) -> str:
+    """The scanner's \\d also reads other scripts' digits ("١٢٣"); only ASCII digits are sent ("123")."""
+    return "".join(c if c.isascii() else str(unicodedata.decimal(c)) for c in digits)
 
 
 @dataclass
@@ -90,9 +98,9 @@ def draft_cites(text: str) -> list[DraftCite]:
             rep = CANONICAL_REPORTERS.get(briefcheck._rep_key(m["rep"]))
             if rep is None:
                 continue
-            sent, year = f"{m['vol']} {rep} {m['page']}", (m["paren"] or "")[-4:] or None
+            sent, year = f"{_ascii(m['vol'])} {rep} {_ascii(m['page'])}", (m["paren"] or "")[-4:] or None
         elif m := briefcheck.WL_RE.match(text, a):
-            sent, year = f"{m['year']} WL {m['num']}", None
+            sent, year = f"{_ascii(m['year'])} WL {_ascii(m['num'])}", None
         else:
             continue
         name = _OPENER.sub("", briefcheck._case_name(text[:a]))
@@ -350,21 +358,26 @@ def interpret(cites: list[DraftCite], payloads: list[str], batches: list, stoppe
             starts[pos] = line
             pos += len(line) + 1
         got: dict[str, dict] = {}
+        dropped: set[str] = set()
         for item in batches[i] if isinstance(batches[i], list) else []:
             if not isinstance(item, dict):
                 continue
-            echo, normalized = item.get("citation"), item.get("normalized_citations")
-            line = starts.get(item.get("start_index"))
+            echo, normalized, at = item.get("citation"), item.get("normalized_citations"), item.get("start_index")
+            line = starts.get(at) if isinstance(at, int) and not isinstance(at, bool) else None
             if line is None and echo in lines:
                 line = echo
+            if line is None or line in got:
+                continue
             # CourtListener echoes the cite it read. An answer that names a different cite than the
-            # line it points at is malformed: drop it, so that line is NOT LOOKED UP, never misjudged.
+            # line it points at is malformed: it is set aside, so that line is NOT LOOKED UP, never misjudged.
             others = {n for n in (normalized if isinstance(normalized, list) else []) if n in lines} - {line}
-            if line is None or line in got or (isinstance(echo, str) and echo != line) or others:
+            if (isinstance(echo, str) and echo != line) or others:
+                dropped.add(line)
                 continue
             got[line] = item
         for line in lines:
-            out[line] = _judge(by_sent[line], got.get(line))
+            out[line] = (Result(by_sent[line], NOT_LOOKED_UP, note=DROPPED_TEXT) if line in dropped - got.keys()
+                         else _judge(by_sent[line], got.get(line)))
     return [out[c.sent] for c in cites if c.sent in out]
 
 
@@ -382,9 +395,10 @@ def _opinion(k: dict) -> str:
 
 
 class Report:
-    def __init__(self, draft_path, draft_sha256, results, payloads, sent, retrieved_at):
+    def __init__(self, draft_path, draft_sha256, results, payloads, sent, retrieved_at, answered=None):
         self.draft_path, self.draft_sha256 = draft_path, draft_sha256
         self.results, self.payloads, self.sent, self.retrieved_at = results, payloads, sent, retrieved_at
+        self.answered = sent if answered is None else answered  # requests CourtListener answered
         self.recorded: list | None = None  # (cite, action) pairs when --record ran
 
     def count(self, outcome) -> int:
@@ -399,8 +413,10 @@ class Report:
     def summary(self) -> str:
         state = {1: "CHECK BY HAND BEFORE FILING", 2: "NEEDS A HUMAN", 0: "EVERY CASE CITE FOUND"}[self.exit_code]
         counts = ", ".join(f"{self.count(o)} {o.lower()}" for o in (FOUND, *OUTCOMES[:-1]))
-        return (f"{state}: {counts}; {len(self.results)} case cites, "
-                f"{self.sent} request{'s' if self.sent != 1 else ''} sent")
+        unanswered = self.sent - self.answered
+        return (f"{state if self.results else 'NO CASE CITES IN THE DRAFT'}: {counts}; {len(self.results)} case "
+                f"cites, {self.sent} request{'s' if self.sent != 1 else ''} sent"
+                + (f", {unanswered} unanswered" if unanswered else ""))
 
     def render(self) -> str:
         out = [f"# Cite lookup: {_esc(self.draft_path.rsplit('/', 1)[-1])}", "",
@@ -410,7 +426,8 @@ class Report:
                "\"volume reporter page\", one per line. No case names, pins or other draft text."
                if self.sent else "- Nothing was sent to CourtListener.", ""]
         for i, p in enumerate(self.payloads[: self.sent], 1):
-            out.insert(-1, f"- Request {i}: {len(p.split(chr(10)))} cites · sha256 `{sha256(p)}`")
+            out.insert(-1, f"- Request {i}: {len(p.split(chr(10)))} cites · sha256 `{sha256(p)}`"
+                       + (" · no answer, so its cites are NOT LOOKED UP" if i > self.answered else ""))
         out += ["| Lines | Draft cite | Sent | Result | CourtListener | Note |", "|---|---|---|---|---|---|"]
         order = {o: i for i, o in enumerate(OUTCOMES)}
         for r in sorted(self.results, key=lambda r: (order[r.outcome], r.cite.lines[:1])):
@@ -444,7 +461,8 @@ def render_dry_run(draft_path: str, payloads: list[str]) -> str:
 # --------------------------------------------------------------------------
 def record(conn, results: list[Result], by: str) -> list[tuple[str, str]]:
     """Move each FOUND cite's authorities row from unverified to resolved, or add a resolved row.
-    Rows past unverified are left exactly as they are; nothing else is ever written."""
+    Rows past unverified are left exactly as they are; nothing else is ever written. A cite whose write
+    fails is rolled back and reported as "not written"; the others still go on."""
     actions = []
     now = citations.now_iso()
     for r in results:
@@ -479,8 +497,9 @@ def record(conn, results: list[Result], by: str) -> list[tuple[str, str]]:
             ev.setdefault("lookups", []).append(lookup)
             citations.transition_authority(conn, aid, "resolved", checked_via=f"courtlistener:id={k['id']}",
                                            check_evidence=json.dumps(ev, ensure_ascii=False))
-        except Exception:
+        except Exception as e:
             conn.rollback()
-            raise
+            actions.append((sent, f"not written ({type(e).__name__}: {_clean(e)}); nothing changed for this cite"))
+            continue
         actions.append((sent, action))
     return actions

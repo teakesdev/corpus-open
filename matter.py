@@ -479,7 +479,15 @@ def cmd_cite(args):
     recorded separately and never used to define offsets.
     """
     if args.sub == "lookup":
+        if args.status:
+            sys.exit("--status applies to cite list, not cite lookup")
         return cmd_cite_lookup(args)
+    lookup_only = [flag for flag, value in (
+        ("--dry-run", args.dry_run), ("--record", args.record), ("--out", args.out),
+        ("--max-requests", args.max_requests), ("--caller", args.caller), ("--author", args.author),
+        ("--directed-by", args.directed_by)) if value not in (None, False)]
+    if lookup_only:
+        sys.exit(f"{', '.join(lookup_only)} applies to cite lookup, not cite {args.sub}")
     conn = store.connect(args.case_dir)
     from matterkit import citations
     if args.sub == "extract":
@@ -497,10 +505,10 @@ def cmd_cite(args):
             mark = "✓" if r["status"] == "extracted" else "✗ unparsed"
             print(f"  {mark} [{r['char_start']}:{r['char_end']}] {r['raw_fragment']!r}")
     else:
-        q = "SELECT * FROM citation_extractions ORDER BY created_at, char_start"
+        q, params = "SELECT * FROM citation_extractions", ()
         if args.status:
-            q += f" WHERE status='{args.status}'"
-        for r in conn.execute(q):
+            q, params = q + " WHERE status=?", (args.status,)
+        for r in conn.execute(q + " ORDER BY created_at, char_start", params):
             print(f"[{r['status']:17}] {r['raw_fragment']!r} "
                   f"@ {r['char_start']}:{r['char_end']} "
                   f"(text {r['text_sha256'][:12]}, parser {r['parser']})")
@@ -508,8 +516,9 @@ def cmd_cite(args):
 
 def cmd_cite_lookup(args):
     """cite lookup: send a draft's case cites, and nothing else, to CourtListener's citation lookup.
-    Exit 1 = a cite to check by hand (not found, name differs, unknown reporter), 2 = ambiguous or not
-    looked up, 0 = every case cite found. --dry-run prints the exact payload and sends nothing."""
+    Exit 1 = a cite to check by hand (not found, name differs, unknown reporter), 2 = ambiguous, not
+    looked up, or a found cite --record could not write, 0 = every case cite found (or the draft has
+    none). --dry-run prints the exact payload and sends nothing."""
     import hashlib
     from matterkit import citelookup
     from matterkit.citations import now_iso
@@ -517,14 +526,19 @@ def cmd_cite_lookup(args):
         sys.exit("usage: matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md]")
     if args.path.lower().endswith((".docx", ".pdf", ".doc")):
         sys.exit("cite lookup reads Markdown or plain text; use the .md copy of the draft")
+    max_requests = 3 if args.max_requests is None else args.max_requests
     try:
-        by = store.attribution(args.author, args.directed_by)
+        by = store.attribution(args.author or os.environ.get("MATTER_AUTHOR"),
+                               args.directed_by or os.environ.get("MATTER_DIRECTED_BY"))
     except ValueError as e:
         sys.exit(f"invalid attribution: {e}")
-    if args.max_requests < 1:
+    if max_requests < 1:
         sys.exit("--max-requests must be at least 1")
     with open(args.path, "rb") as f:
         raw = f.read()
+    if b"\0" in raw:  # a Word, OpenDocument or other binary file, whatever its name
+        sys.exit("cite lookup reads Markdown or plain text, and this file has binary content; "
+                 "use the .md copy of the draft")
     cites = citelookup.draft_cites(raw.decode("utf-8", "replace"))
     payloads = citelookup.payloads(cites)
     if args.dry_run:
@@ -537,21 +551,27 @@ def cmd_cite_lookup(args):
         from matterkit.adapters.courtlistener_citations import CitationLookupAdapter
         from matterkit.consent import ConsentError
         try:
-            adapter = CitationLookupAdapter(args.case_dir, args.caller)
-            answers, stopped = adapter.lookup(payloads[: args.max_requests])
+            adapter = CitationLookupAdapter(args.case_dir, args.caller or os.environ.get("USER", "human"))
+            answers, stopped = adapter.lookup(payloads[:max_requests])
         except (ConsentError, ValueError) as e:
             sys.exit(f"refused: {e}")
         sent = adapter.sent
-        if stopped is None and len(payloads) > args.max_requests:
-            stopped = f"over --max-requests {args.max_requests}; run again in a minute for the rest"
+        if stopped is None and len(payloads) > max_requests:
+            stopped = f"over --max-requests {max_requests}; run again in a minute for the rest"
     report = citelookup.Report(args.path, hashlib.sha256(raw).hexdigest(),
-                               citelookup.interpret(cites, payloads, answers, stopped), payloads, sent, now_iso())
+                               citelookup.interpret(cites, payloads, answers, stopped), payloads, sent, now_iso(),
+                               answered=len(answers))
+    code = report.exit_code
     if args.record:
         report.recorded = citelookup.record(store.connect(args.case_dir), report.results, by)
+        unwritten = sum(action.startswith("not written") for _, action in report.recorded)
+        if unwritten:
+            print(f"{unwritten} found cite(s) could not be recorded; the report says why", file=sys.stderr)
+            code = code or 2  # a cite to check by hand (1) still comes first
     if stopped:
         print(f"lookup stopped early: {stopped}", file=sys.stderr)
     _write_or_print(report.render(), args.out, report.summary())
-    sys.exit(report.exit_code)
+    sys.exit(code)
 
 
 def _write_or_print(text, out, summary):
@@ -913,10 +933,11 @@ def main():
     p.add_argument("--dry-run", action="store_true", help="lookup: print the exact payload; send nothing")
     p.add_argument("--record", action="store_true",
                    help="lookup: move found cites' authorities rows from unverified to resolved")
-    p.add_argument("--out"); p.add_argument("--max-requests", type=int, default=3)
-    p.add_argument("--caller", default=os.environ.get("USER", "human"))
-    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"))
-    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"))
+    # Lookup-only flags default to None, so cmd_cite can refuse them on extract and list.
+    p.add_argument("--out"); p.add_argument("--max-requests", type=int, help="lookup: default 3")
+    p.add_argument("--caller", help="lookup: grant caller; default $USER")
+    p.add_argument("--author", help="lookup --record: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
+    p.add_argument("--directed-by", help="lookup --record: person who directed an agent; env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_cite)
 
     p = sub.add_parser("stage"); p.add_argument("case_dir"); p.add_argument("authority_id"); p.add_argument("status")

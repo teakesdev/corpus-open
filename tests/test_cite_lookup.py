@@ -119,6 +119,13 @@ class TestPayload(unittest.TestCase):
         sizes = [len(p.split("\n")) for p in citelookup.payloads(cites)]
         self.assertEqual(sizes, [60, 60, 10])
 
+    def test_digits_from_other_scripts_are_sent_as_ascii(self):
+        # SWE-2 round 1, P3: the scanner's \d reads "١٢٣"; the payload and its validator are ASCII only.
+        (c,) = citelookup.draft_cites("Smith v. Jones, ١٢٣ F.4th ٤٥٦ (2020).")
+        self.assertEqual(c.sent, "123 F.4th 456")
+        with self.assertRaises(ValueError):
+            citelookup.validate_payload("١٢٣ F.4th 456")
+
     def test_validator_refuses_anything_but_bare_cites(self):
         citelookup.validate_payload("123 F.4th 456\n2021 WL 1234567")
         for bad in ("", "123 F.4th 456\nSmith v. Jones", "123 F.4th 456 ", "123 F.4th 456\n",
@@ -219,11 +226,23 @@ class TestInterpret(unittest.TestCase):
         for bad in (item(9, "1 F.3d 1"), item(9, "2 F.3d 2", ["1 F.3d 1"]), item(9, "999 F.3d 999")):
             res = citelookup.interpret(cites, p, [[bad]])
             self.assertEqual([r.outcome for r in res], [citelookup.NOT_LOOKED_UP] * 2, bad)
+            # SWE-2 round 2, P3: the line whose answer was set aside says so.
+            self.assertEqual(res[1].note, citelookup.DROPPED_TEXT)
+            self.assertNotEqual(res[0].note, citelookup.DROPPED_TEXT)
         # A dropped answer does not shadow a good one for the same line, and the echo alone still binds.
         for good in ([item(9, "1 F.3d 1"), item(9, "2 F.3d 2")], [item(999, "2 F.3d 2")]):
             res = citelookup.interpret(cites, p, [good])
             self.assertEqual([r.outcome for r in res], [citelookup.NOT_LOOKED_UP, citelookup.FOUND], good)
             self.assertEqual(res[1].cluster["id"], 111)
+
+    def test_a_start_index_that_is_not_a_number_does_not_crash(self):
+        cites = citelookup.draft_cites("Alpha v. Beta, 1 F.3d 1; Gamma v. Delta, 2 F.3d 2.")
+        p = citelookup.payloads(cites)
+        for at in ([9], {"a": 1}, True, "9", None):
+            item = result(p[0], "2 F.3d 2", 200, [cluster(111, "Gamma v. Delta", "1993-01-01", "2 F.3d 2")])
+            item["start_index"] = at
+            res = citelookup.interpret(cites, p, [[item]])  # the echoed cite still places it
+            self.assertEqual([r.outcome for r in res], [citelookup.NOT_LOOKED_UP, citelookup.FOUND], at)
 
     def judge_names(self, draft_name, cl_name):
         cites = citelookup.draft_cites(f"{draft_name}, 9 F.3d 9.")
@@ -302,6 +321,25 @@ class TestReport(unittest.TestCase):
         self.assertIn("Nothing was sent to CourtListener.", text)
         self.assertNotIn("Sent to", text)
 
+    def test_a_request_that_got_no_answer_is_marked(self):
+        # SWE-2 round 1, P3: a request that left but failed is not shown as an answered one.
+        cites = citelookup.draft_cites("Alpha v. Beta, 1 F.3d 1; Gamma v. Delta, 2 F.3d 2.")
+        p = citelookup.payloads(cites)
+        rep = citelookup.Report("draft.md", "0" * 64, citelookup.interpret(cites, p, [], stopped="stopped: HTTP 500"),
+                                p, sent=1, retrieved_at="t", answered=0)
+        self.assertIn("Request 1: 2 cites", rep.render())
+        self.assertIn("no answer, so its cites are NOT LOOKED UP", rep.render())
+        self.assertTrue(rep.summary().endswith("1 request sent, 1 unanswered"))
+        answered = citelookup.Report("draft.md", "0" * 64, [], p, sent=1, retrieved_at="t", answered=1)
+        self.assertNotIn("no answer", answered.render())
+
+    def test_a_draft_without_case_cites_does_not_claim_every_cite_found(self):
+        # SWE-2 round 1, P3: zero cites is not "every case cite found".
+        rep = citelookup.Report("brief.md", "0" * 64, [], [], sent=0, retrieved_at="t")
+        self.assertTrue(rep.summary().startswith("NO CASE CITES IN THE DRAFT"), rep.summary())
+        self.assertNotIn("EVERY CASE CITE FOUND", rep.render())
+        self.assertEqual(rep.exit_code, 0)
+
     def test_dry_run_shows_exact_payload(self):
         p = citelookup.payloads(citelookup.draft_cites(DRAFT))
         text = citelookup.render_dry_run("draft.md", p)
@@ -320,6 +358,23 @@ class TestRecord(Matter):
                      (aid, citation, status, via, evidence))
         conn.commit()
         return aid
+
+    def test_a_failed_write_is_reported_and_the_rest_go_on(self):
+        # SWE-2 round 1, P3: one bad row no longer stops the run before the report.
+        good = self._row("Alpha v. Beta, 1 F.3d 1")
+        bad = self._row("Gamma v. Delta, 2 F.3d 2", evidence='{"lookups": "not a list"}')
+        cites = citelookup.draft_cites("Alpha v. Beta, 1 F.3d 1; Gamma v. Delta, 2 F.3d 2.")
+        p = citelookup.payloads(cites)
+        res = citelookup.interpret(cites, p, [[
+            result(p[0], "1 F.3d 1", 200, [cluster(1, "Alpha v. Beta", "1993-01-01", "1 F.3d 1")]),
+            result(p[0], "2 F.3d 2", 200, [cluster(2, "Gamma v. Delta", "1993-01-01", "2 F.3d 2")])]])
+        conn = store.connect(self.dir)
+        actions = dict(citelookup.record(conn, res, by="human"))
+        self.assertEqual(actions["1 F.3d 1"], f"{good}: unverified -> resolved")
+        self.assertTrue(actions["2 F.3d 2"].startswith("not written (AttributeError"), actions["2 F.3d 2"])
+        rows = {r["id"]: (r["status"], r["check_evidence"]) for r in conn.execute("SELECT * FROM authorities")}
+        self.assertEqual(rows[good][0], "resolved")
+        self.assertEqual(rows[bad], ("unverified", '{"lookups": "not a list"}'))
 
     def _record(self):
         cites = citelookup.draft_cites(DRAFT)
@@ -501,6 +556,17 @@ class TestAdapter(Matter):
         self.assertEqual(len(self.calls), 1)
         self.assertIn("daily budget", stopped)
 
+    def test_an_exhausted_grant_does_not_hide_another(self):
+        # SWE-2 round 1, P3 (consent.authorize): the first matching grant's budget no longer ends the search.
+        from matterkit import search
+        consent.save_grants(self.dir, [grant(daily_budget=1), grant(daily_budget=5)])
+        search.log_egress(self.dir, citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE, "1 F.3d 1")
+        g = consent.authorize(self.dir, citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE, "ty")
+        self.assertEqual(g["daily_budget"], 5)
+        consent.save_grants(self.dir, [grant(daily_budget=1)])
+        with self.assertRaisesRegex(consent.ConsentError, r"daily budget \(1\) exhausted"):
+            consent.authorize(self.dir, citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE, "ty")
+
     def test_non_list_response_stops(self):
         consent.save_grants(self.dir, [grant()])
         batches, stopped = self.adapter(post=lambda *a: {"detail": "nope"}).lookup(["1 F.3d 1"])
@@ -622,12 +688,59 @@ class TestCLI(Matter):
         with open(self.draft, "w") as f:
             f.write(DRAFT)
 
-    def test_dry_run_needs_no_grant_and_sends_nothing(self):
-        with mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
-            code, out, _ = run_cli("cite", "lookup", self.dir, self.draft, "--dry-run")
+    def test_dry_run_needs_no_grant_and_sends_nothing_even_with_one(self):
+        code, out, _ = run_cli("cite", "lookup", self.dir, self.draft, "--dry-run")
         self.assertEqual(code, 0)
         self.assertIn("\n".join(SENT), out)
+        # SWE-2 round 1, P3: the tripwire is live only when a send could happen, so give it a grant and token.
+        consent.save_grants(self.dir, [grant()])
+        with mock.patch.dict(os.environ, {"COURTLISTENER_TOKEN": TOKEN}), \
+                mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")) as post:
+            code, out, _ = run_cli("cite", "lookup", self.dir, self.draft, "--dry-run", "--caller", "ty")
+        self.assertEqual(code, 0)
+        post.assert_not_called()
         self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
+
+    def test_binary_drafts_are_refused_whatever_their_name(self):
+        # SWE-2 round 1, P3: an .odt (a zip) gave zero cites and "every case cite found".
+        odt = os.path.join(self.dir, "Filings", "brief.odt")
+        with open(odt, "wb") as f:
+            f.write(b"PK\x03\x04\x14\x00\x00\x00\x08\x00" + DRAFT.encode())
+        code, _, err = run_cli("cite", "lookup", self.dir, odt, "--dry-run")
+        self.assertNotEqual(code, 0)
+        self.assertIn("binary content", err)
+
+    def test_flags_are_refused_where_they_do_nothing(self):
+        # SWE-2 round 1, P3: "cite extract --record" was accepted and ignored.
+        code, _, err = run_cli("cite", "extract", self.dir, self.draft, "--record")
+        self.assertNotEqual(code, 0)
+        self.assertIn("--record applies to cite lookup, not cite extract", err)
+        code, _, err = run_cli("cite", "lookup", self.dir, self.draft, "--dry-run", "--status", "extracted")
+        self.assertNotEqual(code, 0)
+        self.assertIn("--status applies to cite list", err)
+
+    def test_cite_list_filters_by_status(self):
+        # Found while checking SWE-2's round 1: "cite list --status" built "... ORDER BY ... WHERE ...".
+        self.assertEqual(run_cli("cite", "extract", self.dir, self.draft)[0], 0)
+        code, out, _ = run_cli("cite", "list", self.dir, "--status", "extracted")
+        self.assertEqual(code, 0)
+        self.assertIn("[extracted", out)
+        self.assertNotIn("[extraction-failed", out)
+
+    def test_a_found_cite_that_cannot_be_recorded_exits_2(self):
+        with open(self.draft, "w") as f:
+            f.write("Smith v. Jones, 123 F.4th 456 (5th Cir. 2024).\n")
+        conn = store.connect(self.dir)
+        conn.execute("INSERT INTO authorities (id,citation,status,check_evidence) VALUES (?,?,?,?)",
+                     ("auth_bad", "Smith v. Jones, 123 F.4th 456", "unverified", '{"lookups": 1}'))
+        conn.commit()
+        consent.save_grants(self.dir, [grant()])
+        with mock.patch.dict(os.environ, {"COURTLISTENER_TOKEN": TOKEN}), \
+                mock.patch.object(clc, "post_form", side_effect=lambda u, f, t: recorded_one(f["text"])):
+            code, out, err = run_cli("cite", "lookup", self.dir, self.draft, "--record", "--caller", "ty")
+        self.assertEqual(code, 2)
+        self.assertIn("could not be recorded", err)
+        self.assertIn("not written (AttributeError", out)
 
     def test_refused_without_grant(self):
         with mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):

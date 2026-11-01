@@ -253,10 +253,12 @@ python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --re
   `--max-requests` (default 3) a run and the grant's daily budget (default 10).
   A throttled run stops and does not retry.
 - **Results:** FOUND (with the opinion's name, date and CourtListener link),
-  NAME DIFFERS (an opinion exists at that cite but shares no word with the
-  draft's case name), NOT FOUND, UNKNOWN REPORTER, AMBIGUOUS and NOT LOOKED UP.
-  Exit 1 means a cite to check by hand, 2 one a person must resolve, 0 every
-  cite found.
+  NAME DIFFERS (an opinion exists at that cite but its name shares no
+  distinctive word with the draft's; generic words such as "Board", "Bank" or
+  "Doe" count only when a whole party matches), NOT FOUND, UNKNOWN REPORTER,
+  AMBIGUOUS and NOT LOOKED UP. Exit 1 means a cite to check by hand, 2 one a
+  person must resolve (or a found cite `--record` could not write), 0 every
+  cite found or none in the draft.
 - **Not found is a lead, not proof:** CourtListener lacks some reporters and
   many slip, unpublished, Westlaw-only and older state opinions. Found means an
   opinion sits at that volume, reporter and page. It does not mean the case
