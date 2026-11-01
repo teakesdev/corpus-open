@@ -48,6 +48,9 @@ _NUM = r"\d+(?:\.\d+)?"
 _SUB = r"(?:\s*\([A-Za-z0-9]{1,5}\))*"
 PAGE_NO = re.compile(r"(?:[Pp]age\s+)?[-–]?\s*(?P<n>\d{1,4}|[ivxlc]{1,7})\s*[-–]?(?:\s+of\s+\d{1,4})?")
 MARKER = re.compile(r"\((?P<tok>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\)(?=\s|$)")
+# --markers dotted: an outline's "A." "1." "a." "i." at a line's start, or a parenthesized marker under them
+DOTTED = re.compile(r"(?:(?P<dot>[0-9]{1,2}|[A-Z]|[a-z]|[ivx]{2,4})\.|\((?P<par>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\))(?=\s|$)")
+MARKER_STYLES = ("paren", "dotted")
 # an anchor the builder added: the tag and then a label; source text shaped like a tag alone stays text
 ANCHOR_LINE = re.compile(r'<a id="(?P<id>[^"]+)"></a>(?=\*\*\[)')
 ADDED = re.compile(r'^<a id="[^"]+"></a>\*\*\[[^\]\n]*\]\*\* ?')
@@ -217,12 +220,42 @@ def _level(tok, lv, ind, indent, nxt):
     return max(cands), [k for k in cands if k != max(cands)]
 
 
+OUTLINE_START = {"digit": "1", "upper": "A", "lower": "a", "roman": "i"}
+
+
+def _outline_next(kind, tok):
+    return str(int(tok) + 1) if kind == "digit" else ROMAN_NEXT.get(tok) if kind == "roman" else _next_alpha(tok)
+
+
+def _outline(tok, wrap, stack):
+    """(depth, style) for a marker in an outline (--markers dotted), or None when it continues no
+    open list and starts no new one. `stack` holds the open lists, outermost first, as
+    ((wrap, kind), last token). A marker continues the deepest open list of its style whose next
+    token it is; otherwise it opens a list one level deeper if it is that list's first token and no
+    open list has its style. Indentation is not used: outlines are often indented unevenly."""
+    if tok.isdigit():
+        kinds = ["digit"]
+    elif tok.isupper():
+        kinds = ["upper"] if len(tok) == 1 else []
+    else:
+        kinds = (["lower"] if len(tok) == 1 else []) + (["roman"] if tok in ROMAN_NEXT else [])
+    for d in range(len(stack) - 1, -1, -1):
+        (w, k), last = stack[d]
+        if w == wrap and k in kinds and tok == _outline_next(k, last):
+            return d, (w, k)
+    for k in kinds:
+        if tok == OUTLINE_START[k] and all(style != (wrap, k) for style, _ in stack):
+            return len(stack), (wrap, k)
+    return None
+
+
 def _label(num, parts):
     return num + "".join(f"({p})" for p in parts)
 
 
 def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, start_at: str | None = None,
-               stop_at: str | None = None, heading_re: str | None = None) -> Built:
+               stop_at: str | None = None, heading_re: str | None = None, marker_style: str = "paren",
+               unit: str = "Rule") -> Built:
     """Markdown body for the rules in `text` (layout text; pages separated by form feeds).
 
     Kept: every line from the first line that begins with `start_at` up to (not including) the
@@ -231,9 +264,18 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
     and blank lines. A heading is a line matching `heading_re` whose rule number is higher than
     the last heading's, so a cross-reference to an earlier rule is not one. Raises RulesError if
     the words do not survive or two anchors collide; nothing is returned in that case.
+
+    `marker_style` is "paren" for "(a)(1)(A)(i)" rules, or "dotted" for an outline numbered "A.", "1.",
+    "a.", "i." (parenthesized markers may sit under them); see _outline. `unit` names a heading
+    in the Markdown ("## Rule 7." or "## Section 4.").
     """
     if not cite_prefix or not cite_prefix.strip():
         raise RulesError("cite_prefix is required, e.g. 'L.U.Civ.R.'")
+    if marker_style not in MARKER_STYLES:
+        raise RulesError(f"marker style must be one of: {', '.join(MARKER_STYLES)} (got {marker_style!r})")
+    if not re.fullmatch(r"[A-Z][A-Za-z]{0,19}", unit or ""):
+        raise RulesError(f"unit must be one capitalized word such as Rule or Section (got {unit!r})")
+    outline = marker_style == "dotted"
     ap = anchor_prefix or default_anchor_prefix(cite_prefix)
     if not _ANCHOR_PREFIX.fullmatch(ap):
         raise RulesError(f"anchor prefix must be lowercase letters and digits, not {ap!r}")
@@ -268,7 +310,12 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
                              "anchors and cites need digits such as 7 or 83.1. Nothing was written.")
         if m and (last is None or _num_key(m["num"]) > last):
             heads[i], last = m, _num_key(m["num"])
-    markers = {i: m["tok"] for i in region if i not in heads and (m := MARKER.match(_norm(lines[i][1])))}
+    if outline:
+        found = {i: m for i in region if i not in heads and (m := DOTTED.match(_norm(lines[i][1])))}
+        markers = {i: m["dot"] or m["par"] for i, m in found.items()}
+        wraps = {i: "." if m["dot"] else "()" for i, m in found.items()}
+    else:
+        markers = {i: m["tok"] for i in region if i not in heads and (m := MARKER.match(_norm(lines[i][1])))}
     upcoming, nxt = {}, None  # the next marker in the same rule, for "(i)": letter or roman
     for i in reversed(region):
         if i in heads:
@@ -284,23 +331,39 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
         src += line.split()
         if i in heads:
             num = heads[i]["num"]
-            cur = {"num": num, "lv": [None] * 5, "ind": [None] * 5, "at": [None] * 5}  # at: (label, line)
+            cur = {"num": num, "lv": [None] * 5, "ind": [None] * 5, "at": [None] * 5,  # at: (label, line)
+                   "stack": []}  # the open outline lists, for --markers dotted
             rule_nums.append(num)
             aid = f"{ap}-{num}"
-            title = _title(heads[i].groupdict().get("title") or "") or f"Rule {num}"
-            body += ["", f"## Rule {num}. {title}", f'<a id="{aid}"></a>**[{cite_prefix} {num}]** {line}']
+            title = _title(heads[i].groupdict().get("title") or "") or f"{unit} {num}"
+            body += ["", f"## {unit} {num}. {title}", f'<a id="{aid}"></a>**[{cite_prefix} {num}]** {line}']
             anchors.append(aid)
             continue
         tok = markers.get(i)
         if tok is None or cur is None:
             body.append(line)
             continue
+        if outline:
+            step = _outline(tok, wraps[i], cur["stack"])
+            if step is None:
+                shown = f"{tok}." if wraps[i] == "." else f"({tok})"
+                notes.append(f"{unit} {cur['num']}: {shown} on page {pno} is out of sequence, so it is kept as "
+                             f"text, not a subsection: {line[:70]!r}")
+                body += ["", line]
+                continue
+            depth, style = step
+            cur["stack"] = cur["stack"][:depth] + [(style, tok)]
+            parts = [t for _, t in cur["stack"]]
+            aid = "-".join([f"{ap}-{cur['num']}"] + parts)
+            body += ["", f'<a id="{aid}"></a>**[{_label(cur["num"], parts)}]** {line}']
+            anchors.append(aid)
+            continue
         lv, ind, at, indent = cur["lv"], cur["ind"], cur["at"], _indent(raw)
         k, alts = _level(tok, lv, ind, indent, upcoming.get(i))
         if k is None:
             # a repeat of the current item means an earlier line, often a wrapped cross-reference, took its anchor
             took = next((at[j] for j in range(5) if lv[j] == tok and at[j]), None)
-            notes.append(f"Rule {cur['num']}: ({tok}) on page {pno} is out of sequence, so it is kept as text, "
+            notes.append(f"{unit} {cur['num']}: ({tok}) on page {pno} is out of sequence, so it is kept as text, "
                          f"not a subsection: {line[:70]!r}" +
                          (f". {took[0]} is already anchored at the earlier line {took[1][:70]!r}; if that line is a "
                           "wrapped cross-reference, the anchor is on the wrong line" if took else ""))
@@ -316,7 +379,7 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
         body += ["", f'<a id="{aid}"></a>**[{_label(cur["num"], parts)}]** {line}']
         anchors.append(aid)
         if others:
-            notes.append(f"Rule {cur['num']}: ({tok}) on page {pno} could be {_label(cur['num'], parts)} or "
+            notes.append(f"{unit} {cur['num']}: ({tok}) on page {pno} could be {_label(cur['num'], parts)} or "
                          f"{' or '.join(others)}; indentation does not settle it, so the build guessed "
                          f"{_label(cur['num'], parts)}. Check it against the source.")
 
@@ -421,7 +484,7 @@ def build_pack(source_path: str, out_dir: str, *, pack_id: str, version: str, ti
                court: str | None = None, anchor_prefix: str | None = None, current_as_of: str | None = None,
                source_url: str | None = None, start_at: str | None = None, stop_at: str | None = None,
                heading_re: str | None = None, review_after_days: int = REVIEW_AFTER_DAYS,
-               use_pdftotext: bool = True) -> dict:
+               use_pdftotext: bool = True, marker_style: str = "paren", unit: str = "Rule") -> dict:
     """Build a pack folder (manifest.json + rules.md) from a .txt or .pdf. Returns the manifest."""
     if not _ID.fullmatch(pack_id or ""):
         raise RulesError(f"pack id must be lowercase letters, digits, '.' or '-' (got {pack_id!r})")
@@ -436,7 +499,7 @@ def build_pack(source_path: str, out_dir: str, *, pack_id: str, version: str, ti
     if os.path.isdir(out_dir) and os.listdir(out_dir):
         raise RulesError(f"{out_dir} already holds files; build into a new folder")
     text, extractor = _source_text(source_path, use_pdftotext)
-    built = build_text(text, cite_prefix, anchor_prefix, start_at, stop_at, heading_re)
+    built = build_text(text, cite_prefix, anchor_prefix, start_at, stop_at, heading_re, marker_style, unit)
     m = {"format": FORMAT, "id": pack_id, "version": version, "title": title.strip(), "court": court,
          "cite_prefix": cite_prefix, "anchor_prefix": anchor_prefix or default_anchor_prefix(cite_prefix),
          "current_as_of": current_as_of, "review_after_days": review_after_days,
@@ -446,6 +509,8 @@ def build_pack(source_path: str, out_dir: str, *, pack_id: str, version: str, ti
          "built_at": store.now_iso(), "builder": BUILDER, "words": built.words,
          "dropped": [{"page": p, "text": t} for p, t in built.dropped], "rules": len(built.rules),
          "anchors": len(built.anchors), "rules_md_sha256": None, "notes": built.notes, "warnings": built.warnings}
+    if (marker_style, unit) != ("paren", "Rule"):  # a default build's manifest keeps its earlier shape
+        m["region"].update(markers=marker_style, unit=unit)
     md = (_header(m) + "\n".join(built.body).lstrip("\n") + "\n").encode("utf-8")
     m["rules_md_sha256"] = hashlib.sha256(md).hexdigest()
     os.makedirs(out_dir, exist_ok=True)

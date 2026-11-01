@@ -280,6 +280,15 @@ that seems to have lost letters, or a page number with no sequence to check it
 against is listed in `warnings`, because the word check cannot see any of them.
 A pack is derived text, not the official copy.
 
+Rules numbered `(a)(1)(A)(i)` build as above. For a document numbered as an
+outline (`Section 4.`, then `A.`, `1.`, `a.` or `i.`), pass `--markers dotted`
+with a `--heading-regex` for its sections and `--unit Section`, so the Markdown
+reads `## Section 4.` and `§ 4(A)(5)` is `#<prefix>-4-A-5`. In that mode a marker
+starts a list only with its first item (`A.`, `1.`, `a.`, `i.`) or continues an
+open list in sequence, whatever its indentation; parenthesized markers may sit
+under the outline. Anything else, such as a wrapped line beginning `R. CIV. P.`,
+stays text and is listed in `notes`.
+
 `rules attach` copies the pack to `Research/Rules/<id>_<version>/`, registers
 both files so `verify` covers them, and records it in `.matter/rules.json` and
 `events`. One pack per cite prefix and per anchor prefix; a new version needs

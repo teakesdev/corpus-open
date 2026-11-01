@@ -115,3 +115,13 @@ Using the pack on a real matter showed that `rules stale` could only ever say ST
 - **Status:** `checked_staleness` applies the latest check for the attached version, dated on or before the reading date. `none` gives CHECKED until the earlier of `next_review` and the check date plus `review_after_days`; after that the pack is STALE and the message names the last check. `amended` is STALE even inside the window. UNKNOWN (no date, or a date after today) is never cleared by a check. `list`, `show`, `stale` and brief check's header use it; `stale` exits 0 for ok and CHECKED.
 - **Refused, writing nothing:** a date after today or before the pack's current-as-of date; `--next-review` not after `--on`, or given with `amended`; an unattached or unusable pack; a source that is unregistered, missing, or changed since registration. The same check recorded twice changes nothing.
 - **Writes:** like `attach`, the event and `rules.json` are written in one transaction. The event's date is the check date.
+
+## 10. Follow-up (2026-11-01): outline-numbered sources
+
+Some court documents a matter relies on, such as a district's electronic-filing procedures, number their parts as an outline: `Section 4.`, then `A.`, `1.`, `a.`, with parenthesized lists under those. The paren-only marker grammar of § 7 cannot read them. Part of the same follow-up ty approved on 2026-10-31. Built on branch `feat/rules-outline`, not reviewed.
+
+- **`rules build --markers dotted --unit Section`.** The default stays `paren` and `Rule`. A rebuild of the real local-rules trial with the new code gave a byte-identical body, and a default build's manifest has no new keys. A dotted build records `markers` and `unit` under `region`.
+- **Levels** (`_outline`): a marker continues the deepest open list of its style (`.` or `()`, and digit, capital, lowercase or roman) whose next item it is. Otherwise it opens a list one level deeper, but only with that list's first item and only if no open list has its style. Indentation is ignored, because these documents are indented unevenly. Everything else stays text and gets a note. No level is guessed, so dotted builds give no "could be" notes.
+- **Anchors** use the same grammar: `Admin. P. 4(A)(5)` is `<prefix>-4-A-5`. The word check and the page-number rules are unchanged.
+- **Real-text trial** (private, outside the repo): a 29-page procedures PDF gave 11 sections and 87 anchors, with words identical to the source. There were 2 notes (a wrapped `R. CRIM. P.` line and a wrapped `(b)`, both rightly kept as text) and one table-page warning.
+

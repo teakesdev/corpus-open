@@ -377,7 +377,7 @@ def cmd_rules(args):
                                  anchor_prefix=args.anchor_prefix, current_as_of=args.current_as_of,
                                  source_url=args.source_url, start_at=args.start_at, stop_at=args.stop_at,
                                  heading_re=args.heading_regex, review_after_days=args.review_after_days,
-                                 use_pdftotext=not args.no_pdftotext)
+                                 use_pdftotext=not args.no_pdftotext, marker_style=args.markers, unit=args.unit)
             print(f"built {m['id']}@{m['version']} in {args.out_dir}: {m['rules']} rules, {m['anchors']} anchors; "
                   f"{m['words']['body']} words identical to the source text")
             for kind, items in (("note", m["notes"]), ("⚠", m["warnings"])):
@@ -733,6 +733,9 @@ def main():
     c.add_argument("--stop-at", help="exact text of the first line not to keep (e.g. the forms section)")
     c.add_argument("--heading-regex", help="rule heading pattern with a (?P<num>...) group")
     c.add_argument("--review-after-days", type=int, default=365)
+    c.add_argument("--markers", choices=("paren", "dotted"), default="paren",
+                   help='subsection markers: "(a)(1)(A)" (paren) or an outline numbered "A.", "1.", "a." (dotted)')
+    c.add_argument("--unit", default="Rule", help="word for a heading in the Markdown, e.g. Section (default: Rule)")
     c.add_argument("--no-pdftotext", action="store_true")
     c = commands.add_parser("attach", help="Copy a pack into the matter, register it and record it")
     c.add_argument("case_dir"); c.add_argument("pack_dir")
