@@ -117,12 +117,30 @@ function inline(s) {
   }
   return out;
 }
+// A row starts with a pipe. "\|" is a literal pipe inside a cell (brief-check escapes them); any other pipe ends the cell.
+function tableCells(row) {
+  const s = row.trim(), cells = [];
+  let cur = "", open = false;  // open: there is text after the last separator
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "\\" && s[i + 1] === "|") { cur += "|"; i++; open = true; }
+    else if (s[i] === "|") { cells.push(cur.trim()); cur = ""; open = false; }
+    else { cur += s[i]; open = true; }
+  }
+  if (open) cells.push(cur.trim());
+  return cells.slice(1);  // the piece before the leading pipe is empty
+}
 function mdTable(rows) {
-  const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  const head = tableCells(rows[0]);
+  const n = Math.max(head.length, 1);
+  // every row is exactly as wide as the header: short rows get empty cells, and extra pieces fold back into the last cell
+  const fit = (cs) => cs.length > n ? [...cs.slice(0, n - 1), cs.slice(n - 1).join(" | ")] : [...cs, ...Array(n - cs.length).fill("")];
   const body = rows.slice(1).filter((r) => !/^\s*\|?[\s:|-]+\|?\s*$/.test(r));  // drop the |---| rule
+  // the report joins several items in one cell with <br>; that exact token becomes a line break, nothing else is read as markup
+  const cell = (tag, c) => el(tag, tag === "th" ? { scope: "col" } : {},
+    c.split("<br>").map((part, i) => [i ? el("br") : null, inline(part)]));
   return el("div", { class: "wrap" }, el("table", {},
-    el("thead", {}, el("tr", {}, cells(rows[0]).map((c) => el("th", { scope: "col" }, inline(c))))),
-    el("tbody", {}, body.map((r) => el("tr", {}, cells(r).map((c) => el("td", {}, inline(c))))))));
+    el("thead", {}, el("tr", {}, fit(head).map((c) => cell("th", c)))),
+    el("tbody", {}, body.map((r) => el("tr", {}, fit(tableCells(r)).map((c) => cell("td", c)))))));
 }
 
 function renderMarkdown(text) {
@@ -222,7 +240,12 @@ function renderNewCase(box, open) {
 }
 
 // --- main area ---
+// Every render bumps this. A request that outlives its view asks its view's `alive()` before it touches the page,
+// so a late answer can't rebuild a form for a different case.
+let viewGen = 0;
 async function render() {
+  const mine = ++viewGen;
+  const alive = () => mine === viewGen;
   renderSidebar();
   const main = clear($("main"));
   if (!state.caseId) return renderHome(main);
@@ -245,7 +268,7 @@ async function render() {
   const views = { overview: viewOverview, documents: viewDocuments, facts: viewFacts, amend: viewAmend,
                   deadlines: viewDeadlines, brief: viewBrief, packet: viewPacket };
   try {
-    await views[state.tab](panel, c);
+    await views[state.tab](panel, c, alive);
   } catch (ex) {
     panel.append(el("p", { class: "error", role: "alert", text: ex.message }));
   }
@@ -351,13 +374,13 @@ async function viewDocuments(panel, c) {
     picker, results);
   const send = async (files) => {
     for (const f of files) {
-      const line = el("li", { text: `Adding ${f.name}…` });
+      const line = el("li", { text: `Adding ${f.name} to ${c.title}…` });
       results.append(line);
       try {
         const r = await api("PUT", `/cases/${c.id}/files?folder=${encodeURIComponent(folder.value)}&name=${encodeURIComponent(f.name)}`, undefined, f);
         line.className = "done";
-        line.textContent = `Added ${r.rel_path}`;
-      } catch (ex) { line.className = "error"; line.textContent = `${f.name}: ${ex.message}`; }
+        line.textContent = `Added ${r.rel_path} to ${c.title}.`;
+      } catch (ex) { line.className = "error"; line.textContent = `${f.name} was not added to ${c.title}: ${ex.message}`; }
     }
     renderDocTable(table, (await api("GET", `/cases/${c.id}/documents`)).documents);
   };
@@ -376,7 +399,7 @@ async function viewDocuments(panel, c) {
         try {
           const r = await api("POST", `/cases/${c.id}/scan`, {});
           scanOut.className = "done";
-          scanOut.textContent = r.added ? `Added ${plural(r.added, "file", "files")} found in the case folder.` : "No new files found.";
+          scanOut.textContent = r.added ? `Added ${plural(r.added, "file", "files")} found in ${c.title}'s folder.` : `No new files found in ${c.title}'s folder.`;
           renderDocTable(table, (await api("GET", `/cases/${c.id}/documents`)).documents);
         } catch (ex) { scanOut.className = "error"; scanOut.textContent = ex.message; }
         e.target.disabled = false;
@@ -396,9 +419,9 @@ function renderDocTable(box, documents) {
 }
 
 // --- facts ---
-async function viewFacts(panel, c) {
+async function viewFacts(panel, c, alive) {
   const [{ facts }, { documents }] = await Promise.all([api("GET", `/cases/${c.id}/facts`), api("GET", `/cases/${c.id}/documents`)]);
-  panel.append(el("section", {}, el("h2", { text: "Add a fact" }), factForm(c, documents)));
+  panel.append(el("section", {}, el("h2", { text: "Add a fact" }), factForm(c, documents, alive)));
   const list = el("ul", { class: "facts" });
   const filters = [["all", "All"], ["nosource", "No source yet"], ...LABELS.map(([k, name]) => [k, name])];
   const bar = el("div", { class: "segmented", role: "group", "aria-label": "Show" });
@@ -425,7 +448,7 @@ function factItem(f) {
     el("p", { class: "fact-meta", text: `Added by ${who(f.created_by)}` }));
 }
 
-function factForm(c, documents) {
+function factForm(c, documents, alive) {
   const err = el("p", { class: "error", role: "alert" });
   const text = el("textarea", { id: "fact-text", required: true });
   const sources = el("div");
@@ -438,19 +461,26 @@ function factForm(c, documents) {
     sources.append(row);
   };
   if (documents.length) addSource();
+  const submit = el("button", { class: "btn", type: "submit", text: "Add fact" });
   const form = el("form", { class: "form-panel",
     onsubmit: async (e) => {
       e.preventDefault();
+      if (submit.disabled) return;  // a second Enter or click while the first request is still out
       err.textContent = "";
       const status = form.querySelector("input[name=label]:checked");
       if (!status) { err.textContent = "Pick how sure this fact is."; return; }
       const picked = [...sources.querySelectorAll(".source-row")].map((r) => ({
         document_id: r.querySelector("select").value, locator: r.querySelector("input").value.trim() })).filter((s) => s.document_id);
+      submit.disabled = true;
       try {
         const { fact } = await api("POST", `/cases/${c.id}/facts`, { text: text.value, status: status.value, sources: picked });
-        toast(fact.unsupported ? "Fact added. It has no source yet." : "Fact added.");
-        render();
-      } catch (ex) { err.textContent = ex.message; }
+        toast(`Fact added to ${c.title}.${fact.unsupported ? " It has no source yet." : ""}`);
+        if (alive()) render();  // only if this form is still the one on screen; otherwise it would wipe whatever the user moved on to
+      } catch (ex) {
+        if (alive()) err.textContent = ex.message;
+        else toast(`Couldn't add the fact to ${c.title}: ${ex.message}`);  // this form is gone, so its error line can't be seen
+      }
+      submit.disabled = false;
     } },
   el("div", { class: "field" }, el("label", { for: "fact-text", text: "What happened, or what is true?" }), text,
     el("p", { class: "hint", text: "One fact at a time, in plain words. Include the date and who, if you know them." })),
@@ -459,7 +489,7 @@ function factForm(c, documents) {
   el("fieldset", {}, el("legend", { text: "Where does it come from?" }),
     documents.length ? sources : el("p", { class: "hint", text: "Add documents to this case first; then you can point to them here." }),
     documents.length ? el("button", { class: "btn quiet", type: "button", text: "Add another source", onclick: addSource }) : null),
-  err, el("button", { class: "btn", type: "submit", text: "Add fact" }));
+  err, submit);
   return form;
 }
 
@@ -660,32 +690,50 @@ async function viewBrief(panel, c) {
 // --- counsel packet ---
 async function viewPacket(panel, c) {
   const out = el("div");
-  const bar = el("div", { class: "segmented", role: "group", "aria-label": "Packet length" });
-  let text = "";
-  const load = async () => {
-    clear(bar).append(...state.session.layers.map((l) => el("button", { type: "button", "aria-pressed": String(state.layer === l), text: LAYER_NAMES[l] || l,
-      onclick: () => { state.layer = l; load(); } })));
-    clear(out).append(el("p", { class: "muted", text: "Building…" }));
-    try {
-      text = (await api("GET", `/cases/${c.id}/packet?layer=${encodeURIComponent(state.layer)}`)).text;
-      clear(out).append(renderMarkdown(text));
-    } catch (ex) { clear(out).append(el("p", { class: "error", role: "alert", text: ex.message })); }
-  };
+  const layers = state.session.layers;
+  // `loaded` is the packet on screen: its layer and its text together. It is null while one is building or after a
+  // failure, so Copy and Save can never export text that isn't what the reader is looking at.
+  let loaded = null;
+  let latest = 0;  // loads can finish out of order; only the newest request may touch the page
   const save = () => {
-    const a = el("a", { href: URL.createObjectURL(new Blob([text + "\n"], { type: "text/markdown" })), download: `counsel-packet-${state.layer}.md` });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    if (!loaded) return;
+    const url = URL.createObjectURL(new Blob([loaded.text + "\n"], { type: "text/markdown" }));
+    el("a", { href: url, download: `counsel-packet-${loaded.layer}.md` }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const copy = async () => {
-    try { await navigator.clipboard.writeText(text); toast("Packet copied."); } catch { toast("Copying isn't allowed here. Use Save instead."); }
+    if (!loaded) return;
+    try { await navigator.clipboard.writeText(loaded.text); toast("Packet copied."); } catch { toast("Copying isn't allowed here. Use Save instead."); }
+  };
+  const copyBtn = el("button", { class: "btn quiet", type: "button", text: "Copy text", disabled: true, onclick: copy });
+  const saveBtn = el("button", { class: "btn quiet", type: "button", text: "Save as a file", disabled: true, onclick: save });
+  // built once, so keyboard focus stays on the button that was pressed
+  const buttons = layers.map((l) => el("button", { type: "button", text: LAYER_NAMES[l] || l, onclick: () => load(l) }));
+  const bar = el("div", { class: "segmented", role: "group", "aria-label": "Packet length" }, buttons);
+  const load = async (layer) => {
+    const mine = ++latest;
+    state.layer = layer;
+    loaded = null;
+    copyBtn.disabled = saveBtn.disabled = true;
+    buttons.forEach((b, i) => b.setAttribute("aria-pressed", String(layers[i] === layer)));
+    clear(out).append(el("p", { class: "muted", text: "Building…" }));
+    try {
+      const { text } = await api("GET", `/cases/${c.id}/packet?layer=${encodeURIComponent(layer)}`);
+      if (mine !== latest) return;
+      const body = renderMarkdown(text);
+      loaded = { layer, text };
+      clear(out).append(body);
+      copyBtn.disabled = saveBtn.disabled = false;
+    } catch (ex) {
+      if (mine === latest) clear(out).append(el("p", { class: "error", role: "alert", text: ex.message }));
+    }
   };
   panel.append(el("section", {}, el("h2", { text: "Counsel packet" }),
     el("p", { class: "lede", text: "A summary a lawyer can read quickly. Every claim keeps its label, and anything without a source says so." }),
     el("div", { class: "row" }, bar),
-    el("div", { class: "row" }, el("button", { class: "btn quiet", type: "button", text: "Copy text", onclick: copy }),
-      el("button", { class: "btn quiet", type: "button", text: "Save as a file", onclick: save })),
+    el("div", { class: "row" }, copyBtn, saveBtn),
     out));
-  await load();
+  await load(state.layer);
 }
 
 // --- start ---

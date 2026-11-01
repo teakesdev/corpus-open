@@ -174,8 +174,12 @@ class RecordingPolicy(ServerCase):
         self.api("GET", f"/cases/{cid}/facts")
         self.api("POST", f"/cases/{cid}/facts", {"text": "x", "status": "UNKNOWN"})
         self.api("GET", "/cases")
-        self.assertEqual(RecordingPolicy.seen, [(OPERATOR, cid, "read"), (OPERATOR, cid, "write"),
-                                                (OPERATOR, None, "read")])
+        self.assertEqual(RecordingPolicy.seen[:3], [(OPERATOR, cid, "read"), (OPERATOR, cid, "write"),
+                                                    (OPERATOR, None, "read")])
+        # then the case list asks about each case, so it can leave out the ones this person can't read
+        rest = RecordingPolicy.seen[3:]
+        self.assertEqual({c for _, c, _ in rest}, set(self.ids.values()))
+        self.assertTrue(all(n == OPERATOR and a == "read" for n, _, a in rest))
 
 
 class TestAuthorIsTheServers(ServerCase):

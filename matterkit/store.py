@@ -173,6 +173,17 @@ def connect(matter_dir: str) -> sqlite3.Connection:
     return conn
 
 
+def connect_existing(matter_dir: str, timeout: float = 5.0) -> sqlite3.Connection:
+    """`connect` for a store that must already exist: never creates one. The web UI writes only
+    to stores inside cases it has checked, so a missing store is an error, not a new matter."""
+    from urllib.parse import quote
+    conn = sqlite3.connect(f"file:{quote(os.path.abspath(db_path(matter_dir)))}?mode=rw", uri=True, timeout=timeout)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA)
+    _migrate(conn)
+    return conn
+
+
 def connect_readonly(matter_dir: str) -> sqlite3.Connection:
     """Open an existing store without creating, migrating or writing anything.
 

@@ -5,6 +5,7 @@
   --ink: #18202e;
   --ink-2: #4e5868;
   --rule: #d5d9df;
+  --control-edge: #78839a;  /* field and toggle edges: 3:1 on paper and surface (WCAG 1.4.11) */
   --action: #2341a0;
   --action-ink: #ffffff;
   --alarm: #a8231b;
@@ -24,6 +25,7 @@
     --ink: #e7eaf0;
     --ink-2: #a3acba;
     --rule: #2f3644;
+    --control-edge: #64718a;
     --action: #9db2ff;
     --action-ink: #0d1220;
     --alarm: #ff8f85;
@@ -113,7 +115,7 @@ h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: .75rem; }
 label { font-weight: 600; display: block; margin-bottom: .3rem; }
 input[type="text"], select, textarea {
   width: 100%; max-width: var(--measure); padding: .55rem .65rem;
-  border: 1px solid var(--rule); border-radius: 4px; background: var(--surface);
+  border: 1px solid var(--control-edge); border-radius: 4px; background: var(--surface);
 }
 textarea { min-height: 6rem; font-family: var(--record); font-size: 1.05rem; line-height: 1.55; resize: vertical; }
 .field { margin-bottom: 1.1rem; }
@@ -177,7 +179,7 @@ textarea.short { min-height: 3.5rem; }
 
 /* --- documents --- */
 .drop {
-  border: 2px dashed var(--rule); border-radius: 6px; padding: 1.5rem; max-width: calc(var(--measure) + 3rem);
+  border: 2px dashed var(--control-edge); border-radius: 6px; padding: 1.5rem; max-width: calc(var(--measure) + 3rem);
   background: var(--surface); margin-bottom: 1rem;
 }
 .drop.over { border-color: var(--action); }
@@ -203,7 +205,7 @@ tr.overdue td:first-child { color: var(--alarm); font-weight: 600; }
 .verdict[data-exit="0"] { border-left-color: var(--ok); }
 .segmented { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: 1.25rem; max-width: 100%; }
 .segmented button {
-  border: 1px solid var(--rule); border-radius: 4px; background: var(--surface);
+  border: 1px solid var(--control-edge); border-radius: 4px; background: var(--surface);
   padding: .4rem .8rem; cursor: pointer; white-space: nowrap;
 }
 .segmented button[aria-pressed="true"] { background: var(--ink); color: var(--paper); font-weight: 600; }

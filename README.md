@@ -73,9 +73,12 @@ now. Word and PDF drafts need a `.txt` copy before brief check can read them.
 Your name is recorded as the author of everything you add (`human:Your Name`).
 The page can't choose a different author. The link the command prints carries a
 one-time key: other websites open in the same browser can't use the kit, and the
-server answers only to `127.0.0.1` and `localhost`. The UI is a WSGI app with one
-`authorize()` check on every route, so it can later run on a private server
-behind TLS, shared with a lawyer. That deployment isn't built yet: see
+server answers only to `127.0.0.1` and `localhost`. The UI is a WSGI app built
+with the seams a private server shared with a lawyer would need: the server, not
+the page, says who is acting on each request; one policy check runs on every
+route and also decides which cases a person sees at all; and the allowed
+addresses are settings. That server still needs sign-in, TLS and real per-case
+access rules, and none of that is built yet: see
 [the design](docs/superpowers/specs/2026-10-31-local-frontend-design.md).
 
 ## Capturing a web page

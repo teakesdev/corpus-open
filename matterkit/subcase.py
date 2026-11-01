@@ -164,24 +164,47 @@ class ParentView:
         return None if ingest.sha256_file(path) == recorded_sha == row["sha256"] else "CHANGED"
 
 
-def resolve_parent_sources(case_dir, sources):
-    """{raw ref: ParentDoc} for every `parent:<rel_path>[@loc]` in sources, each re-hashed against
-    the parent now. Raises SubcaseError for the first that cannot be cited; read-only."""
+def source_parts(s):
+    """(key, ref, locator, by_id) for one fact source: a 'ref@locator' string (ref is a rel_path,
+    a document id or 'parent:<rel_path>'), or a typed {"document_id", "locator"} that names one
+    document by its exact id. `key` indexes resolve_parent_sources' result."""
+    if isinstance(s, dict):
+        return ("id", s["document_id"]), s["document_id"], s.get("locator") or None, True
+    ref, _, loc = s.partition("@")
+    return ref, ref, loc or None, False
+
+
+def _local_row(conn, ref, by_id):
+    if by_id:
+        return conn.execute("SELECT id, rel_path FROM documents WHERE id=?", (ref,)).fetchone()
+    return conn.execute("SELECT id, rel_path FROM documents WHERE rel_path=? OR id=?", (ref, ref)).fetchone()
+
+
+def resolve_parent_sources(case_dir, sources, conn=None):
+    """{key: ParentDoc} for every source that cites a parent document, each re-hashed against the
+    parent now: a `parent:<rel_path>[@loc]` string and, given `conn`, a source that names this
+    subcase's own `parent:` reference row by id or rel_path (typed or not). Raises SubcaseError
+    for the first that cannot be cited; read-only. Keys come from source_parts."""
     refs = []
     for s in sources or []:
-        ref = s.partition("@")[0]
-        if ref.startswith(PARENT_PREFIX) and ref not in refs:
-            refs.append(ref)
+        key, ref, _, by_id = source_parts(s)
+        if not by_id and ref.startswith(PARENT_PREFIX):
+            local = ref
+        else:
+            row = _local_row(conn, ref, by_id) if conn is not None else None
+            local = row["rel_path"] if row is not None and row["rel_path"].startswith(PARENT_PREFIX) else None
+        if local and key not in [k for k, _ in refs]:
+            refs.append((key, local))
     if not refs:
         return {}
     view = ParentView(case_dir)
     try:
         out = {}
-        for ref in refs:
+        for key, local in refs:
             try:
-                out[ref] = view.document(ref[len(PARENT_PREFIX):])
+                out[key] = view.document(local[len(PARENT_PREFIX):])
             except SubcaseError as e:
-                raise SubcaseError(f"{ref}: {e}", e.kind) from None
+                raise SubcaseError(f"{local}: {e}", e.kind) from None
         return out
     finally:
         view.close()
@@ -210,23 +233,23 @@ def register_parent_ref(conn, pdoc):
 
 
 def attach_sources(conn, aid, sources, parents):
-    """Attach `rel_path@locator` sources to assertion `aid`. `parents` is resolve_parent_sources'
+    """Attach sources (see source_parts) to assertion `aid`. `parents` is resolve_parent_sources'
     result, so parent refs were re-hashed before anything was written. Returns (unrecognized
     refs, notes). Does not commit; a SubcaseError here means roll back."""
     unrecognized, notes = [], []
     for s in sources or []:
-        ref, _, loc = s.partition("@")
-        if ref in parents:
-            doc_id, note = register_parent_ref(conn, parents[ref])
+        key, ref, loc, by_id = source_parts(s)
+        if key in parents:
+            doc_id, note = register_parent_ref(conn, parents[key])
             if note:
                 notes.append(note)
         else:
-            row = conn.execute("SELECT id FROM documents WHERE rel_path=? OR id=?", (ref, ref)).fetchone()
+            row = _local_row(conn, ref, by_id)
             if not row:
                 unrecognized.append(ref)
                 continue
             doc_id = row["id"]
-        conn.execute("INSERT OR IGNORE INTO assertion_sources VALUES (?,?,?)", (aid, doc_id, loc or None))
+        conn.execute("INSERT OR IGNORE INTO assertion_sources VALUES (?,?,?)", (aid, doc_id, loc))
     return unrecognized, notes
 
 
