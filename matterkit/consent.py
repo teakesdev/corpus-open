@@ -131,8 +131,8 @@ def authorize(matter_dir: str, provider: str, endpoint: str, payload_type: str,
                 continue
         budget = g.get("daily_budget")
         if isinstance(budget, int) and _today_usage(matter_dir, provider) >= budget:
-            raise ConsentError(
-                f"daily budget ({budget}) exhausted for provider {provider!r}")
+            refusals.append(f"daily budget ({budget}) exhausted for provider {provider!r}")
+            continue  # another human grant for this provider may still allow it
         return g
     detail = "; ".join(dict.fromkeys(refusals)) if refusals else "no matching grant"
     raise ConsentError(

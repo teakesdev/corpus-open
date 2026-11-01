@@ -16,6 +16,7 @@ still good law. A cite it does not find is a lead to check by hand, not proof.
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from . import authority, briefcheck, citations, store
@@ -53,7 +54,14 @@ CANONICAL_REPORTERS["fedappx"] = "F. App'x"  # "Fed. Appx." / "Fed. App'x"
 _OPENER = re.compile(r"^(?:Accordingly|Again|Also|Finally|First|Further|Furthermore|Here|However|Indeed|Likewise|"
                      r"Moreover|Notably|Second|Similarly|Still|Then|Third|Thus|Yet),\s+")
 _REPS = "|".join(re.escape(r) for r in sorted(set(CANONICAL_REPORTERS.values()), key=len, reverse=True))
-_PAYLOAD_LINE = re.compile(rf"\d{{1,4}} (?:{_REPS}) \d{{1,5}}|\d{{4}} WL \d{{3,9}}")
+_PAYLOAD_LINE = re.compile(rf"[0-9]{{1,4}} (?:{_REPS}) [0-9]{{1,5}}|[0-9]{{4}} WL [0-9]{{3,9}}")
+DROPPED_TEXT = ("CourtListener's answer for this line named a different cite, so it was set aside. "
+                "Check the cite by hand or run the lookup again.")
+
+
+def _ascii(digits: str) -> str:
+    """The scanner's \\d also reads other scripts' digits ("١٢٣"); only ASCII digits are sent ("123")."""
+    return "".join(c if c.isascii() else str(unicodedata.decimal(c)) for c in digits)
 
 
 @dataclass
@@ -90,9 +98,9 @@ def draft_cites(text: str) -> list[DraftCite]:
             rep = CANONICAL_REPORTERS.get(briefcheck._rep_key(m["rep"]))
             if rep is None:
                 continue
-            sent, year = f"{m['vol']} {rep} {m['page']}", (m["paren"] or "")[-4:] or None
+            sent, year = f"{_ascii(m['vol'])} {rep} {_ascii(m['page'])}", (m["paren"] or "")[-4:] or None
         elif m := briefcheck.WL_RE.match(text, a):
-            sent, year = f"{m['year']} WL {m['num']}", None
+            sent, year = f"{_ascii(m['year'])} WL {_ascii(m['num'])}", None
         else:
             continue
         name = _OPENER.sub("", briefcheck._case_name(text[:a]))
@@ -144,37 +152,159 @@ def sha256(text: str) -> str:
 # --------------------------------------------------------------------------
 _STOP = {"the", "and", "inc", "corp", "corporation", "company", "llc", "ltd", "llp", "city", "county", "state",
          "states", "united", "america", "dept", "department", "people", "commonwealth", "matter", "estate",
-         "parte", "for", "rel"}
+         "parte", "for", "rel", "limited", "incorporated", "plc", "pllc", "lllp", "gmbh", "iii", "esq"}
+
+# Bluebook abbreviations (T6, and T10's states), folded as _fold folds them ("Nat'l" -> "natl"), each mapped to
+# the start of the word or words it shortens. Only these match by prefix, so "Educ." is "Education" while
+# "Roger" is not "Rogers" and a stray "Marsh." is not "Marshall".
+_ABBREV = {
+    "acad": "academ", "admin": "administ", "admr": "administrat", "advert": "advertis", "agric": "agricult",
+    "assn": "associat", "assoc": "associat", "assocs": "associat", "atl": "atlantic", "auth": "authorit",
+    "auto": "automo", "bankr": "bankrupt", "bd": "board", "bhd": "brotherhood", "bldg": "building",
+    "bros": "brother", "broad": "broadcast", "bus": "business", "cas": "casualt", "cent": "central",
+    "chem": "chemical", "cmty": "communit", "coll": "college", "comm": "comm", "commcn": "communication",
+    "commn": "commission", "commr": "commissioner", "comp": "compensat", "consol": "consolidat",
+    "constr": "construct", "contl": "continental", "coop": "cooperat", "corr": "correction", "ctr": "center",
+    "def": "defen", "dev": "develop", "dir": "director", "dist": "district", "distrib": "distribut",
+    "div": "division", "econ": "econom", "educ": "educat", "elec": "electr", "engg": "engineer",
+    "engr": "engineer", "ent": "entertain", "enter": "enterprise", "envt": "environment",
+    "envtl": "environment", "equip": "equipment", "exch": "exchange", "exec": "executive", "fed": "federal",
+    "fedn": "federation", "fid": "fidelit", "fin": "financ", "gen": "general", "govt": "government",
+    "grp": "group", "guar": "guarant", "hosp": "hospital", "hous": "housing", "indem": "indemnit",
+    "indep": "independen", "indus": "industr", "info": "inform", "ins": "insur", "inst": "institut",
+    "intl": "international", "inv": "invest", "invs": "invest", "lab": "labor", "liab": "liabilit",
+    "litig": "litigat", "mach": "machin", "maint": "maintenance", "mech": "mechanic", "med": "medic",
+    "meml": "memorial", "merch": "merchan", "metro": "metropolitan", "mfg": "manufactur",
+    "mfr": "manufactur", "mfrs": "manufactur", "mgmt": "management", "mkt": "market", "mktg": "market",
+    "mortg": "mortgage", "mun": "municipal", "mut": "mutual", "natl": "national", "org": "organi",
+    "pac": "pacific", "pers": "person", "pharm": "pharmac", "pship": "partnership", "prob": "probation",
+    "prod": "product", "prods": "product", "profl": "professional", "prop": "propert", "prot": "protect",
+    "pub": "public", "publg": "publishing", "publn": "publication", "rd": "road", "ref": "refin",
+    "regl": "regional", "rehab": "rehabilitat", "res": "resource", "ret": "retire", "ry": "railway",
+    "sav": "saving", "sch": "school", "sci": "scien", "sec": "secur", "secy": "secretar", "serv": "servic",
+    "servs": "servic", "soc": "social", "socy": "societ", "sur": "suret", "sys": "system",
+    "tech": "technolog", "tel": "tele", "telecomm": "telecommunicat", "temp": "temporar",
+    "tpk": "turnpike", "transcon": "transcontinental", "transp": "transport", "twp": "township",
+    "unif": "uniform", "univ": "universit", "util": "utilit", "vill": "village",
+    "ala": "alabama", "ariz": "arizona", "ark": "arkansas", "cal": "californ", "colo": "colorado",
+    "conn": "connecticut", "del": "delaware", "fla": "florida", "haw": "hawaii", "ill": "illinois",
+    "ind": "indiana", "kan": "kansas", "mass": "massachusetts", "mich": "michigan", "minn": "minnesota",
+    "miss": "mississippi", "mont": "montana", "neb": "nebraska", "nev": "nevada", "okla": "oklahoma",
+    "tenn": "tennessee", "tex": "texas", "wash": "washington", "wis": "wisconsin", "wyo": "wyoming",
+}
+# Words that name an institution, a place or a stand-in party rather than a particular party. Shared alone
+# they do not show two names are the same case: "First Nat'l Bank v. Doe" is not "Bank of Am. v. Roe".
+_GENERIC = frozenset("""
+    agency airlines alabama alaska american appeals arizona arkansas assurance atlantic attorney authority bancorp
+    bank banks board borough brothers bureau california capital carolina casualty center central chemical church
+    coast college colorado columbia commerce commission commissioner commissioners committee communications
+    community compensation connecticut construction consumer contractors corrections correctional council dakota
+    delaware development director district division doe does east eastern economic education educational electric
+    employees energy enterprises environmental exchange express farms federal finance financial fire first florida
+    foods foundation freight fund gas general georgia governor group gulf hampshire hawaii health holdings home
+    homes hospital housing human idaho illinois independent indiana industries industry institute insurance
+    internal international iowa island jane jersey john kansas kentucky labor laboratories laboratory life light
+    loan local louisiana maine management manufacturers manufacturing market markets maryland massachusetts mayor
+    medical metropolitan mexico michigan minnesota mississippi missouri montana mortgage motor motors municipal
+    mutual national nebraska nevada new north northeast northern northwest office officer officers ohio oil
+    oklahoma oregon pacific parish partners partnership pennsylvania pension pharmaceutical pharmaceuticals plan
+    police power products properties property protection public railroad railway realty regents regional
+    relations resources retirement review revenue rhode roe sales savings school schools secretary securities
+    security service services sheriff shipping social society south southeast southern southwest steamship
+    stores superintendent supervisors supply surety system systems tax technologies technology telegraph
+    telephone tennessee texas town township trade transit transportation trust trustees unemployment unified
+    union university utah utilities utility vermont village virginia warden washington water west western
+    wisconsin workers wyoming york
+""".split()) | frozenset("""
+    advisers advisors aerospace affairs air aircraft airport airways allied apartments apparel approximately
+    army assets assorted automobile automotive aviation behalf beneficiaries beverage beverages brands
+    broadcasting cable cement certain child children citizens claimant claimants class clerk clothing coal
+    commercial computer computers concrete conservator consultants consulting contents court courts creditor
+    creditors currency customs dairy data debtor debtors defendant defendants detainee detainees detention
+    digital dollars drilling drug drugs election elections electronics enforcement equities equity executor
+    executrix exploration exports farm fiber films food friend funds furniture gaming global glass grain
+    guardian healthcare heirs highway homeland hotel hotels immigration imports individually inmate inmates
+    instruments investment investments investors iron items jail judge judges land lease leasing legislature
+    lending lines liquidator logistics lumber machinery marine maritime marketing materials media member
+    members metal metals mills minerals mines mining minor minors nation navy network networks news one
+    others owners packaging paper parcel parents petitioner petitioners petroleum pipeline plaintiff
+    plaintiffs plastics port postal premises printing prison prisoner prisoners prisons radio real receiver
+    recycling rental representative representatives republic residence residents resorts respondent
+    respondents restaurant restaurants retail scientific senate shareholders similarly situated software
+    solutions sports staffing standard steel stockholders successor successors taxpayers television tenants
+    textile textiles three timber title tobacco tools trading travel treasury tribal tribe truck trucking
+    trustee two universal unknown various vehicle vehicles venture ventures vessel veterans voters waste
+    wholesale wireless worldwide
+""".split())  # trades, roles and in-rem words, which many unrelated parties share (SWE-2 round 3)
+_LONG_STEMS = tuple(s for s in set(_ABBREV.values()) if len(s) >= 7)  # "associat" covers "associates"
+_CONNECT = {"of", "and", "the", "for", "in", "on", "at", "to", "a", "an"}
+_SUFFIX = {"inc", "corp", "co", "corporation", "company", "llc", "ltd", "llp", "limited", "incorporated", "plc",
+           "pllc", "lp", "lllp", "gmbh"}
 
 
 def _fold(name: str) -> str:
     return re.sub(r"['’]", "", name.lower())
 
 
-def _words(name: str) -> set:
-    return {w for w in re.findall(r"[a-z0-9]+", _fold(name)) if len(w) >= 3 and w not in _STOP}
+def _tokens(name: str) -> dict:
+    """A name's significant words, each with how it may match: "abbr" for a Bluebook abbreviation (kept as
+    the start of the word it shortens, and matched by prefix), "acro" for an acronym ("EPA"), "word" for
+    any other word, which matches whole only."""
+    out = {}
+    for raw in re.findall(r"[A-Za-z0-9'’]+", name):
+        w = _fold(raw)
+        if w in _ABBREV:
+            out[_ABBREV[w]] = "abbr"
+        elif len(w) >= 3 and w not in _STOP:
+            out.setdefault(w, "acro" if re.fullmatch(r"[A-Z]{3,6}", raw) else "word")
+    return out
 
 
-def _cut(name: str) -> set:
-    """Words the name cuts short with a period ("Educ.", "Mfrs.")."""
-    return set(re.findall(r"([a-z0-9]+)\.", _fold(name)))
+def _parties(name: str) -> list[str]:
+    return re.split(r"\s+vs?\.?\s+", name)
+
+
+def _initials(party: str) -> set:
+    """"Environmental Protection Agency" -> "epa"; also without a corporate suffix ("IBM" for "... Corp.")."""
+    words = [w for w in re.findall(r"[a-z0-9]+", _fold(party)) if w not in _CONNECT]
+    return {"".join(w[0] for w in ws) for ws in (words, [w for w in words if w not in _SUFFIX]) if len(ws) >= 2}
+
+
+def _generic(word: str) -> bool:
+    return word in _GENERIC or word.startswith(_LONG_STEMS)
+
+
+def _covers(mine: dict, party: str) -> bool:
+    """Every significant word of a draft party matches a word of `party`, one of CourtListener's parties."""
+    theirs, initials = _tokens(party), _initials(party)
+    return bool(mine) and all(
+        w in theirs or kind == "acro" and w in initials
+        or kind == "abbr" and any(t.startswith(w) for t in theirs)
+        or any(k == "abbr" and w.startswith(t) for t, k in theirs.items())
+        for w, kind in mine.items())
 
 
 def _same_case(draft_name: str, names: list) -> bool:
-    """True when the draft's name shares a significant word with one of CourtListener's names
-    ("Twombly" / "Bell Atlantic Corp. v. Twombly"), or has none to compare. A word cut short with a
-    period matches the word it begins ("Educ." / "Education"); any other word must match whole, so
-    "Roger" is not "Rogers"."""
-    mine, my_cut = _words(draft_name), _cut(draft_name)
+    """True when the draft's name and one of CourtListener's names look like the same case, or the draft's
+    name has no significant word to compare. One shared distinctive word is enough ("Twombly" / "Bell
+    Atlantic Corp. v. Twombly"), and it must match whole, so "Roger" is not "Rogers". Generic words
+    (an institution, a place, a stand-in party such as "Doe", an agency's acronym that CourtListener spells
+    out) count only when the draft's name has nothing else, and then each of its parties must match a
+    whole party: "Roe v. Bd. of Educ." is "Roe v. Board of Education of Topeka", but "First Nat'l Bank v.
+    Doe" is not "Bank of Am. v. Roe"."""
+    mine = _tokens(draft_name)
     if not mine:
         return True
+    parties = [t for t in map(_tokens, _parties(draft_name)) if t]
     for name in names:
-        theirs, their_cut = _words(name), _cut(name)
-        for a in mine:
-            for b in theirs:
-                if a == b or (len(a) >= 4 and a in my_cut and b.startswith(a)) \
-                        or (len(b) >= 4 and b in their_cut and a.startswith(b)):
-                    return True
+        initials = set().union(*map(_initials, _parties(name)))
+        distinct = {w for w, kind in mine.items()
+                    if kind == "word" and not _generic(w) or kind == "acro" and w not in initials}
+        if distinct:
+            if distinct & _tokens(name).keys():
+                return True
+        elif all(any(_covers(p, q) for q in _parties(name)) for p in parties):
+            return True
     return False
 
 
@@ -249,21 +379,26 @@ def interpret(cites: list[DraftCite], payloads: list[str], batches: list, stoppe
             starts[pos] = line
             pos += len(line) + 1
         got: dict[str, dict] = {}
+        dropped: set[str] = set()
         for item in batches[i] if isinstance(batches[i], list) else []:
             if not isinstance(item, dict):
                 continue
-            echo, normalized = item.get("citation"), item.get("normalized_citations")
-            line = starts.get(item.get("start_index"))
+            echo, normalized, at = item.get("citation"), item.get("normalized_citations"), item.get("start_index")
+            line = starts.get(at) if isinstance(at, int) and not isinstance(at, bool) else None
             if line is None and echo in lines:
                 line = echo
+            if line is None or line in got:
+                continue
             # CourtListener echoes the cite it read. An answer that names a different cite than the
-            # line it points at is malformed: drop it, so that line is NOT LOOKED UP, never misjudged.
+            # line it points at is malformed: it is set aside, so that line is NOT LOOKED UP, never misjudged.
             others = {n for n in (normalized if isinstance(normalized, list) else []) if n in lines} - {line}
-            if line is None or line in got or (isinstance(echo, str) and echo != line) or others:
+            if (isinstance(echo, str) and echo != line) or others:
+                dropped.add(line)
                 continue
             got[line] = item
         for line in lines:
-            out[line] = _judge(by_sent[line], got.get(line))
+            out[line] = (Result(by_sent[line], NOT_LOOKED_UP, note=DROPPED_TEXT) if line in dropped - got.keys()
+                         else _judge(by_sent[line], got.get(line)))
     return [out[c.sent] for c in cites if c.sent in out]
 
 
@@ -281,9 +416,10 @@ def _opinion(k: dict) -> str:
 
 
 class Report:
-    def __init__(self, draft_path, draft_sha256, results, payloads, sent, retrieved_at):
+    def __init__(self, draft_path, draft_sha256, results, payloads, sent, retrieved_at, answered=None):
         self.draft_path, self.draft_sha256 = draft_path, draft_sha256
         self.results, self.payloads, self.sent, self.retrieved_at = results, payloads, sent, retrieved_at
+        self.answered = sent if answered is None else answered  # requests CourtListener answered
         self.recorded: list | None = None  # (cite, action) pairs when --record ran
 
     def count(self, outcome) -> int:
@@ -298,8 +434,10 @@ class Report:
     def summary(self) -> str:
         state = {1: "CHECK BY HAND BEFORE FILING", 2: "NEEDS A HUMAN", 0: "EVERY CASE CITE FOUND"}[self.exit_code]
         counts = ", ".join(f"{self.count(o)} {o.lower()}" for o in (FOUND, *OUTCOMES[:-1]))
-        return (f"{state}: {counts}; {len(self.results)} case cites, "
-                f"{self.sent} request{'s' if self.sent != 1 else ''} sent")
+        unanswered = self.sent - self.answered
+        return (f"{state if self.results else 'NO CASE CITES IN THE DRAFT'}: {counts}; {len(self.results)} case "
+                f"cites, {self.sent} request{'s' if self.sent != 1 else ''} sent"
+                + (f", {unanswered} unanswered" if unanswered else ""))
 
     def render(self) -> str:
         out = [f"# Cite lookup: {_esc(self.draft_path.rsplit('/', 1)[-1])}", "",
@@ -309,7 +447,8 @@ class Report:
                "\"volume reporter page\", one per line. No case names, pins or other draft text."
                if self.sent else "- Nothing was sent to CourtListener.", ""]
         for i, p in enumerate(self.payloads[: self.sent], 1):
-            out.insert(-1, f"- Request {i}: {len(p.split(chr(10)))} cites · sha256 `{sha256(p)}`")
+            out.insert(-1, f"- Request {i}: {len(p.split(chr(10)))} cites · sha256 `{sha256(p)}`"
+                       + (" · no answer, so its cites are NOT LOOKED UP" if i > self.answered else ""))
         out += ["| Lines | Draft cite | Sent | Result | CourtListener | Note |", "|---|---|---|---|---|---|"]
         order = {o: i for i, o in enumerate(OUTCOMES)}
         for r in sorted(self.results, key=lambda r: (order[r.outcome], r.cite.lines[:1])):
@@ -343,7 +482,9 @@ def render_dry_run(draft_path: str, payloads: list[str]) -> str:
 # --------------------------------------------------------------------------
 def record(conn, results: list[Result], by: str) -> list[tuple[str, str]]:
     """Move each FOUND cite's authorities row from unverified to resolved, or add a resolved row.
-    Rows past unverified are left exactly as they are; nothing else is ever written."""
+    Rows past unverified are left exactly as they are; nothing else is ever written. A cite whose write
+    fails is rolled back and reported as "not written", as is one several store rows answer to; the others
+    still go on."""
     actions = []
     now = citations.now_iso()
     for r in results:
@@ -353,7 +494,7 @@ def record(conn, results: list[Result], by: str) -> list[tuple[str, str]]:
         try:
             row = authority.find(conn, sent)
         except authority.AuthorityError:
-            actions.append((sent, "several store rows answer to this cite; nothing written"))
+            actions.append((sent, "not written: several store rows answer to this cite; resolve them by hand"))
             continue
         if row is not None and row["status"] != "unverified":
             actions.append((sent, f"{row['id']}: already {row['status']}; nothing written"))
@@ -378,8 +519,9 @@ def record(conn, results: list[Result], by: str) -> list[tuple[str, str]]:
             ev.setdefault("lookups", []).append(lookup)
             citations.transition_authority(conn, aid, "resolved", checked_via=f"courtlistener:id={k['id']}",
                                            check_evidence=json.dumps(ev, ensure_ascii=False))
-        except Exception:
+        except Exception as e:
             conn.rollback()
-            raise
+            actions.append((sent, f"not written ({type(e).__name__}: {_clean(e)}); nothing changed for this cite"))
+            continue
         actions.append((sent, action))
     return actions
