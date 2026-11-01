@@ -179,10 +179,16 @@ Stages: `unverified` → `resolved` → (`research-pending`) → `source-checked
 source, or evidence-free "checked," is refused. These tokens mean *a defined
 source was checked*, never *this is correct law*.
 
-Adapters (network search) ship in later releases and require an explicit
-grant in `.matter/consent.json` — issued by a human (`kind: "human"`),
-naming its authorized callers; agent-authored grants are inert proposals.
-R1 ships zero adapters and the kit makes no network calls.
+**What reaches the network.** Three commands, and only when you run them:
+`capture` sends one GET to the URL you name; `search` sends your query to
+CourtListener's search API; `cite lookup` sends a draft's case cites, and
+nothing else, to CourtListener's citation-lookup API. `search` and
+`cite lookup` each need their own grant in `.matter/consent.json`, issued by a
+person at the terminal (`consent activate`, `kind: "human"`) and naming its
+authorized callers; agent-authored grants are inert proposals. Each request is
+logged hash-only to `.matter/egress.jsonl`. All outbound code lives in
+`matterkit/adapters/`; everything else, including `brief check`, `verify`, the
+browser UI and the MCP server, makes no outbound calls.
 See `rfcs/0001-provider-neutral-search-adapters.md`.
 
 ## Checking a brief before it is filed
@@ -223,6 +229,44 @@ unpunctuated ("1. Background") or a title ending in a period or colon
 at 3" are paragraphs. Inside a fact section, a numbered title at the same level
 ("2. Plaintiff Was Arrested.") is a subheading; one naming a non-fact section
 ("2. Argument.") ends it.
+
+## Checking that cited cases exist
+
+`brief check` can only show that a cite is tied to a row in the store. It
+cannot tell that "Smith v. Jones, 123 F.4th 456" names no real case.
+`cite lookup` asks CourtListener. It is opt-in, and `brief check` stays offline.
+
+```bash
+python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --dry-run  # shows exactly what would be sent
+python3 matter.py consent activate ~/cases/my-case --scope cite-lookup                 # a person types ACTIVATE at the terminal
+export COURTLISTENER_TOKEN=…                                                          # your CourtListener API token
+python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --out RESPONSE_v1_LOOKUP.md
+python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --record   # found cites -> resolved
+```
+
+- **What is sent:** each full case cite in the draft (reporter and WL cites),
+  rebuilt as `volume reporter page`, one per line. Case names, pins,
+  parentheticals and every other word of the draft stay on your machine, and
+  a check refuses the request if any line is not a bare cite. Short forms,
+  `Id.`, statutes and rules are not sent.
+- **Limits:** up to 60 cites a request, at least 61 seconds apart, at most
+  `--max-requests` (default 3) a run and the grant's daily budget (default 10).
+  A throttled run stops and does not retry.
+- **Results:** FOUND (with the opinion's name, date and CourtListener link),
+  NAME DIFFERS (an opinion exists at that cite but shares no word with the
+  draft's case name), NOT FOUND, UNKNOWN REPORTER, AMBIGUOUS and NOT LOOKED UP.
+  Exit 1 means a cite to check by hand, 2 one a person must resolve, 0 every
+  cite found.
+- **Not found is a lead, not proof:** CourtListener lacks some reporters and
+  many slip, unpublished, Westlaw-only and older state opinions. Found means an
+  opinion sits at that volume, reporter and page. It does not mean the case
+  says what the draft says, that it is still good law, or that a pin is right.
+- **`--record`** moves a found cite's authority from `unverified` to
+  `resolved`, with `checked_via` `courtlistener:id=…` and the lookup (cluster,
+  link, `retrieved_at`) in its evidence, or adds a `resolved` row. Rows already
+  past `unverified` are left alone, and nothing is ever marked
+  `source-checked`. The next `brief check` then shows the cite as located but
+  not source-checked instead of blocking it.
 
 ## Changes for the next amended pleading
 

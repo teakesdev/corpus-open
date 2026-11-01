@@ -94,3 +94,10 @@ Out of scope: an MCP tool; statutes, rules and short forms; checking pins or quo
 4. README: replace "R1 ships zero adapters and the kit makes no network calls" with the commands that do reach the network, and add a cite lookup section. RFC 0001 §6: one line pointing here.
 
 Gate: `python3 -m unittest discover -s tests`
+
+## 8. As built (2026-11-01, after ty's approval)
+
+Departures from the approved text:
+- **Rows past `unverified` are not changed at all.** The design said they would get the lookup record. They don't, because their evidence belongs to a person's source check, and adding a record to legacy free-text evidence would mean rewriting it as JSON. `--record` reports "already <status>; nothing written".
+- **The end-to-end test uses a narrower socket harness.** `tests/netblock_sitecustomize` replaces `socket.socket`, which also stops `import ssl`, so urllib cannot load under it. The test writes its own harness that denies name lookups and connections, and checks first that the harness loaded.
+- **Sentence openers are dropped from the local case name.** Brief check's name walk keeps a leading "Again," or "However,"; the lookup drops it. The name is local only.
