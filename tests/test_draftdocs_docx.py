@@ -10,8 +10,8 @@ KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
 
 from matterkit import draftdocs  # noqa: E402
-from draft_builders import (comments_xml, docx, enref, fnref, lvl, numbering_xml, para, run, styles_xml,  # noqa: E402
-                            table)
+from draft_builders import (NS, comments_xml, docx, enref, fnref, lvl, numbering_xml, para, run,  # noqa: E402
+                            styles_xml, table)
 
 HEADINGS = styles_xml([("Heading1", "heading 1", None, ""), ("Heading2", "heading 2", None, ""),
                        ("Heading3", "heading 3", None, "")])
@@ -397,6 +397,101 @@ class TestRoundTwoFollowups(unittest.TestCase):
         d = read(one("First.") + sdt(one("Second.") + one("Third.")) + one("Fourth."))
         self.assertEqual([b[0] for b in blocks(d)], ["para. 1 (table 1, row 1, cell 1)", "para. 2 (table 2, row 1, cell 1)",
                                                       "para. 3 (table 3, row 1, cell 1)", "para. 4 (table 4, row 1, cell 1)"])
+
+
+class TestNumberingMayDiffer(unittest.TestCase):
+    """List settings the reader does not reproduce (round 1 P3-5, P3-6, P3-7) are warned at the first paragraph they
+    touch, never silent. The numbers are still rendered the plain way until a Word-made sample shows what Word prints."""
+
+    REPLACED = '<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>'
+
+    def may_differ(self, d):
+        return [w for w in d.warnings if w[0] == "numbering-may-differ"]
+
+    def list_style(self, linked_levels=""):
+        """A list style 'Brief List' (num 1 -> abstract 0) and a list that takes its numbers from it (num 2 -> abstract 1)."""
+        styles = (f'<?xml version="1.0"?><w:styles {NS}><w:style w:type="numbering" w:styleId="BriefList">'
+                  '<w:name w:val="Brief List"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style></w:styles>')
+        num = numbering_xml({0: ['<w:styleLink w:val="BriefList"/>', lvl(0, "upperRoman", "%1.")],
+                             1: ['<w:numStyleLink w:val="BriefList"/>' + linked_levels]}, {1: 0, 2: 1})
+        return num, styles
+
+    def test_a_sub_level_that_never_restarts_is_warned_once_at_its_first_paragraph(self):
+        num = numbering_xml({0: [lvl(0, "upperRoman", "%1."), lvl(1, "decimal", "%2.", restart=0)]}, {1: 0})
+        d = read(para("FACTS", num=(1, 0)) + para("First fact.", num=(1, 1)) + para("ARGUMENT", num=(1, 0)) +
+                 para("Second fact.", num=(1, 1)), numbering=num)
+        w = self.may_differ(d)
+        self.assertEqual([x[1] for x in w], ["para. 2 (numbered 1.)"], d.warnings)
+        self.assertIn("from para. 2 (numbered 1.) on", w[0][2])
+        self.assertIn("Restart list after", w[0][2])
+        self.assertIn("'para. N' count is not affected", w[0][2])
+        self.assertEqual(blocks(d)[3][1], "1. Second fact.")   # rendered the plain way, not guessed at
+
+    def test_a_level_that_shows_a_never_restarting_level_in_its_number_is_warned(self):
+        num = numbering_xml({0: [lvl(0, "decimal", "%1."), lvl(1, "decimal", "%2.", restart=0),
+                                 lvl(2, "decimal", "%2.%3")]}, {1: 0})
+        d = read(para("One", num=(1, 0)) + para("Deep", num=(1, 2)), numbering=num)
+        self.assertEqual([x[1] for x in self.may_differ(d)], ["para. 2 (numbered 1.1)"])
+
+    def test_restart_settings_that_change_nothing_stay_quiet(self):
+        two = lambda restart: numbering_xml({0: [lvl(0, "upperRoman", "%1."), lvl(1, "decimal", "%2.", restart=restart),  # noqa: E731
+                                                 lvl(2, "lowerLetter", "%3.")]}, {1: 0})
+        cases = (("the default value", two(1), para("I", num=(1, 0)) + para("a", num=(1, 1))),
+                 ("on a level no paragraph uses", two(0), para("I", num=(1, 0)) + para("II", num=(1, 0))),
+                 ("on a level another level's number does not show", two(0), para("I", num=(1, 0)) + para("x", num=(1, 2))),
+                 ("on the top level", numbering_xml({0: [lvl(0, "decimal", "%1.", restart=0)]}, {1: 0}),
+                  para("a", num=(1, 0))))
+        for tag, num, body in cases:
+            with self.subTest(tag):
+                self.assertEqual(self.may_differ(read(body, numbering=num)), [])
+
+    def test_a_level_one_list_replaces_is_warned_even_when_the_original_level_is_a_bullet(self):
+        num = numbering_xml({0: [lvl(0, "bullet", "•")]}, {1: 0, 2: (0, {0: self.REPLACED})})
+        d = read(para("Bulleted.", num=(1, 0)) + para("Numbered in Word.", num=(2, 0)), numbering=num)
+        w = self.may_differ(d)
+        self.assertEqual([x[1] for x in w], ["para. 2"])
+        self.assertIn("for this list only", w[0][2])
+        self.assertEqual(blocks(d)[1][1], "Numbered in Word.")
+
+    def test_an_ordinary_restart_stays_quiet(self):
+        num = numbering_xml({0: [lvl(0, "decimal", "%1.")]}, {1: 0, 2: (0, {0: 1})})
+        d = read(para("a", num=(1, 0)) + para("b", num=(2, 0)), numbering=num)
+        self.assertEqual(d.warnings, [])
+
+    def test_a_list_that_takes_its_numbers_from_a_list_style_names_the_style(self):
+        num, styles = self.list_style()
+        d = read(para("ARGUMENT", num=(2, 0)), numbering=num, styles=styles)
+        self.assertEqual(d.text, "ARGUMENT")
+        w = [x for x in d.warnings if x[0] == "numbering-unresolved"]
+        self.assertEqual(len(w), 1, d.warnings)
+        self.assertIn("list style 'Brief List'", w[0][2])
+        self.assertNotIn("does not define", w[0][2])
+        num, styles = self.list_style(linked_levels=lvl(0, "decimal", "%1."))   # levels of its own as well: Word uses the style's
+        d = read(para("ARGUMENT", num=(2, 0)), numbering=num, styles=styles)
+        w = self.may_differ(d)
+        self.assertEqual([x[1] for x in w], ["para. 1 (numbered 1.)"])
+        self.assertIn("list style 'Brief List'", w[0][2])
+
+    def test_a_style_tied_to_a_list_level_that_carries_no_number_itself_is_warned(self):
+        num = numbering_xml({0: [lvl(0, "upperRoman", "%1.", pstyle="Heading1")]}, {1: 0})
+        d = read(para("ARGUMENT", style="Heading1") + para("Body."), numbering=num, styles=HEADINGS)
+        w = self.may_differ(d)
+        self.assertEqual([x[1] for x in w], ["para. 1"])
+        self.assertIn("'heading 1'", w[0][2])
+        styles = styles_xml([("Heading1", "heading 1", None, '<w:numPr><w:numId w:val="1"/></w:numPr>')])
+        d = read(para("ARGUMENT", style="Heading1"), numbering=num, styles=styles)   # the usual Word shape: quiet
+        self.assertEqual((d.text, d.warnings), ("I. ARGUMENT", []))
+
+    def test_a_list_in_a_footnote_is_warned_at_the_footnote(self):
+        num = numbering_xml({0: [lvl(0, "decimal", "%1."), lvl(1, "lowerLetter", "%2.", restart=0)]}, {1: 0})
+        item = '<w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Sub.</w:t></w:r>'
+        d = read(para("Body.", fnref(1)), numbering=num, footnotes={1: ["Note.", item]})
+        self.assertEqual([x[1] for x in self.may_differ(d)], ["fn. 1"])
+
+    def test_a_flag_raised_by_an_empty_last_paragraph_is_still_reported(self):
+        num = numbering_xml({0: [lvl(0, "decimal", "%1."), lvl(1, "lowerLetter", "%2.", restart=0)]}, {1: 0})
+        d = read(para("Text.") + para(num=(1, 1)), numbering=num)
+        self.assertEqual([x[1] for x in self.may_differ(d)], ["document"])
 
 
 if __name__ == "__main__":

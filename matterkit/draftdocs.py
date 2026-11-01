@@ -3,8 +3,9 @@ every line, so the checks written for .md and .txt drafts run on it unchanged.
 
   .docx   body paragraphs, footnotes and endnotes (each placed right after the paragraph that cites it), with
           auto-numbered headings and lists rendered ("II." "A." "1.") from word/numbering.xml. Tracked changes are
-          REFUSED (brief check will not guess which version you mean); comments, hidden text, text boxes and
-          formatting-only tracked changes are WARNINGS; headers and footers are listed as not read.
+          REFUSED (brief check will not guess which version you mean); comments, hidden text, text boxes,
+          formatting-only tracked changes and list settings not reproduced are WARNINGS; headers and footers are
+          listed as not read.
   .pdf    `pdftotext -layout`, run transiently on stdin and never stored: page numbers and running headers/footers
           dropped, paragraphs rebuilt, every line located as page:line.
 
@@ -357,10 +358,14 @@ FORMATS = {"decimal": lambda n: str(n), "decimalZero": lambda n: f"{n:02d}",
 class _Numbering:
     """Renders the marker Word prints for an auto-numbered paragraph ("II." "A." "(a)" "1.1") from numbering.xml."""
 
-    def __init__(self, root, warn):
+    def __init__(self, root, warn, styles=None):
         self.abstract, self.nums, self.links, self.counters, self.warn = {}, {}, {}, {}, warn
+        self.styles = styles
         self.scope = "body"  # "footnote" and "endnote" while reading a note: its lists count apart from the body's
         self.bad_formats = set()
+        self.style_link = {}    # abstract list -> the list style it takes its numbers from (w:numStyleLink), not followed
+        self.flags, self.flagged = [], set()   # (kind, why) for lists whose numbers may differ from Word's; see take()
+        self.linked_styles = set()   # styles a list level names (w:lvl/w:pStyle)
         self.present = root is not None
         if root is None:
             return
@@ -369,19 +374,42 @@ class _Numbering:
             levels = {}
             for lv in a.findall(W + "lvl"):
                 i = int(lv.get(W + "ilvl", "0"))
+                restart = _val(lv, "lvlRestart")
                 levels[i] = {"fmt": _val(lv, "numFmt") or "decimal", "text": _val(lv, "lvlText") or "",
-                             "start": int(_val(lv, "start") or 1), "legal": lv.find(W + "isLgl") is not None}
+                             "start": int(_val(lv, "start") or 1), "legal": lv.find(W + "isLgl") is not None,
+                             # restarts other than after the level above it (0 = never); not reproduced, only warned
+                             "odd_restart": i > 0 and restart is not None and restart.isdigit() and int(restart) < i}
                 if _val(lv, "pStyle"):
                     self.links[(aid, _val(lv, "pStyle"))] = i
             self.abstract[aid] = levels
+            if _val(a, "numStyleLink"):
+                self.style_link[aid] = _val(a, "numStyleLink")
         for n in root.findall(W + "num"):
             ov = {int(o.get(W + "ilvl", "0")): int(_val(o, "startOverride"))
                   for o in n.findall(W + "lvlOverride") if _val(o, "startOverride") is not None}
-            self.nums[n.get(W + "numId")] = {"abs": _val(n, "abstractNumId"), "ov": ov}
+            # a level redefined for this list only (w:lvl inside w:lvlOverride): not applied, only warned
+            replaced = {int(o.get(W + "ilvl", "0")) for o in n.findall(W + "lvlOverride") if o.find(W + "lvl") is not None}
+            self.nums[n.get(W + "numId")] = {"abs": _val(n, "abstractNumId"), "ov": ov, "replaced": replaced}
+        self.linked_styles = {s for _, s in self.links}
 
     def level_for_style(self, numId, style_id):
         num = self.nums.get(numId)
         return self.links.get((num["abs"], style_id)) if num else None
+
+    def style_name(self, sid):
+        d = self.styles.s.get(sid) if self.styles else None
+        return (d["name"] if d else "") or sid
+
+    def flag(self, key, kind, why):
+        """Note, once per list and reason, that the next paragraph's list number may not be what Word prints."""
+        if (key, why) not in self.flagged:
+            self.flagged.add((key, why))
+            self.flags.append((kind, why))
+
+    def take(self):
+        """The flags raised since the last call, for the caller to warn about at the paragraph it can name."""
+        out, self.flags = self.flags, []
+        return out
 
     def _fmt(self, n, fmt):
         f = FORMATS.get(fmt)
@@ -396,13 +424,28 @@ class _Numbering:
             return None
         num = self.nums.get(numId)
         levels = self.abstract.get(num["abs"]) if num else None
+        link = self.style_link.get(num["abs"]) if num else None
         if not levels or ilvl not in levels:
             self.warn("numbering-unresolved", f"list {numId}",
+                      f"a paragraph is in a list that takes its numbers from the list style '{self.style_name(link)}', which "
+                      "brief check does not follow; its number was not rendered, so a heading marker such as 'II.' may be "
+                      "missing from the text brief check read" if link else
                       "a paragraph is in a numbered list that numbering.xml does not define; its number was not rendered, so "
                       "a heading marker such as 'II.' may be missing from the text brief check read" if self.present else
                       "the draft has numbered lists but no numbering part; their numbers were not rendered, so a heading "
                       "marker such as 'II.' may be missing from the text brief check read")
             return None
+        # Settings rendered the plain way, not reproduced: flag them for a warning at this paragraph (P3-5, P3-6, P3-7).
+        shown = {ilvl} | {int(j) - 1 for j in re.findall(r"%([1-9])", levels[ilvl]["text"])}   # levels this number shows
+        if link:
+            self.flag(("abs", num["abs"]), "list", f"the list takes its numbers from the list style '{self.style_name(link)}', "
+                      "which brief check does not follow")
+        if shown & num["replaced"]:
+            self.flag(("num", numId), "list", "the list redefines a level's numbering for this list only, which brief check "
+                      "does not apply")
+        if any(levels.get(j, {}).get("odd_restart") for j in shown):
+            self.flag(("abs", num["abs"]), "list", "the list changes when a sub-level starts counting again (Word's 'Restart "
+                      "list after' setting), which brief check does not reproduce")
         # Nums of one abstract list share a count (Word continues the list) unless a num restarts a level.
         key = (self.scope, "num", numId) if num["ov"] else (self.scope, "abs", num["abs"])
         ctr = self.counters.setdefault(key, [None] * 9)
@@ -597,7 +640,16 @@ def _read_docx(data: bytes) -> Draft:
             seen_warnings.add((code, subject))
             warnings.append((code, subject, message))
 
-    numbering = _Numbering(numbering_root, warn)
+    numbering = _Numbering(numbering_root, warn, styles)
+
+    def warn_numbering(at, subject=None):
+        """Warn about list numbers that may differ from Word's, at the first paragraph they touch (see _Numbering.flag)."""
+        for kind, why in numbering.take():
+            message = (f"{at} may have a list number in Word that brief check did not render: {why}. The 'para. N' count "
+                       "is not affected" if kind == "style" else
+                       f"list numbers from {at} on may not match what Word shows: {why}. The 'para. N' count is not "
+                       "affected; only the list number at the start of the line and after 'numbered' may be off")
+            warnings.append(("numbering-may-differ", subject or at, message))
 
     # ---- tracked changes: refuse. Nothing is accepted or rejected for the author.
     parts = [r for r in (doc, notes_roots["footnote"], notes_roots["endnote"]) if r is not None]
@@ -684,6 +736,7 @@ def _read_docx(data: bytes) -> Draft:
             text = normalize("".join(out))
             if text:
                 blocks.append((label, (marker + " " if marker else "") + text, "fn", 0))
+                warn_numbering(label)
         numbering.scope = "body"
         _absorb(nst)
 
@@ -715,12 +768,14 @@ def _read_docx(data: bytes) -> Draft:
         label = f"para. {n_para}" + (f" ({', '.join(detail)})" if detail else "")
         blocks.append((label, (marker + " " if marker else "") + text, "body",
                        styles.heading_level(sid, _val(ppr, "outlineLvl"))))
+        warn_numbering(label)   # flags from an empty or table-of-contents paragraph wait for the next one with a label
         counts["paragraph"] += 1
         for kind, nid in pst.refs:
             note_blocks(kind, nid)
 
     if not blocks:
         raise DraftError("this Word draft has no text to check (no body paragraphs with words in them)")
+    warn_numbering("the end of the document", subject="document")
 
     # ---- what was not read, said out loud
     notes = []
@@ -786,6 +841,9 @@ def _paragraph_marker(ppr, numbering, styles):
     if num_id is None:
         via = styles.numbering(sid)
         if via is None:
+            if sid in numbering.linked_styles:   # a list level names this style, but the style carries no number
+                numbering.flag(("style", sid), "style", f"its style '{numbering.style_name(sid)}' is tied to a numbered "
+                               "list but carries no number itself")
             return None
         num_id, style_ilvl, link_style = via
         ilvl = ilvl if ilvl is not None else style_ilvl

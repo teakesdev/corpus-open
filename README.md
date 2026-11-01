@@ -322,7 +322,11 @@ format than its name says is refused rather than read as garbage.
   boxes, symbol-font characters (their code means nothing outside that font, so
   none is guessed at), formatting-only tracked changes (also in the styles,
   numbering and settings, which are never refused), a list whose numbers could
-  not be rendered, a reference to a missing note, content in elements brief
+  not be rendered, a list whose numbers may not match Word's (a sub-level set
+  not to restart the usual way, a level redefined for one list, a list that
+  takes its numbers from a list style, or a style tied to a list but carrying
+  no number; the warning names the first paragraph affected, and `para. N`
+  stays right), a reference to a missing note, content in elements brief
   check does not read (including a table directly inside a table or row). Said in the report as not read:
   headers and footers, table-of-contents and table-of-authorities lines (by
   style), unreferenced notes.

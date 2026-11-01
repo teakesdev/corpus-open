@@ -176,6 +176,13 @@ class TestNothingIsAcceptedSilently(DocxBase):
         r = self.docx_check(docx(para("ARGUMENT", num=(1, 0))))
         self.assertIn("draft-numbering-unresolved", codes(r, "WARN"))
 
+    def test_a_list_whose_numbers_may_differ_from_word_is_a_warning_that_names_the_paragraph(self):
+        num = numbering_xml({0: [lvl(0, "upperRoman", "%1."), lvl(1, "decimal", "%2.", restart=0)]}, {1: 0})
+        r = self.docx_check(docx(para("FACTS", num=(1, 0)) + para(FACTS, num=(1, 1)), numbering=num))
+        self.assertIn("draft-numbering-may-differ", codes(r, "WARN"))
+        self.assertIn("para. 2 (numbered 1.)", r.render())
+        self.assertEqual(self.where(r, "draft-numbering-may-differ"), ["document"])
+
 
 class TestDispatch(DocxBase):
     def write(self, name, data):
