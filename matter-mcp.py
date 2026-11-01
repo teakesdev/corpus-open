@@ -52,6 +52,21 @@ TOOLS = [
                                     "sources": {"type": "array", "items": {"type": "string"}},
                                     "created_by": {"type": "string"},
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+    {"name": "matter.trigger_list", "description": "List deadlines that wait on an event and have no date yet (waiting only unless all=true): label, the event, days, rule, owner, state, and for a fired trigger its date, service and the deadline it made. owner limits the list to one owner. Read-only.",
+     "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"},
+                                                      "owner": {"enum": ["ours", "theirs", "court"]}}}},
+    {"name": "matter.trigger_fire", "description": "The event a waiting trigger was waiting on happened on `on` (YYYY-MM-DD, not after today), served as `service`. Counts the days under Fed. R. Civ. P. 6(a)(1) (exclude the trigger day, count every day, roll past a Saturday, Sunday or legal holiday) and 6(d) (3 more days only for mail, clerk or consented-other service, then roll again), and inserts one deadline, working-estimate/unverified, with every counting step in its event. Requires a reason and registered, unchanged source documents. Refuses a year whose state holidays are not recorded as complete, a fired or withdrawn trigger, and a future date; changes nothing when it refuses. dry_run=true returns the count and writes nothing (no reason or sources needed). The date is computed, not checked: a person verifies it.",
+     "inputSchema": {"type": "object", "required": ["trigger_id", "on", "service"],
+                     "properties": {"trigger_id": {"type": "string"},
+                                    "on": {"type": "string", "description": "YYYY-MM-DD the event happened"},
+                                    "service": {"enum": ["mail", "clerk", "consented-other", "email", "ecf", "hand",
+                                                         "none"],
+                                                "description": "how the paper was served; none: the period runs from the event itself"},
+                                    "reason": {"type": "string"},
+                                    "sources": {"type": "array", "items": {"type": "string"}},
+                                    "dry_run": {"type": "boolean"},
+                                    "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
     {"name": "matter.packet_render", "description": "Render the counsel packet markdown at a given layer (30s | 3min | 15min). Read-only; returns text.",
      "inputSchema": {"type": "object", "properties": {"layer": {"type": "string"}}}},
     {"name": "matter.cite_extract", "description": "Local citation extraction (RFC 0001 §2.2/§2.3): stdlib parser, zero network, no adapter imports reachable; needs no consent grant. Records rows with character offsets keyed to the parsed text's sha256; unparsed section fragments are first-class extraction-failed rows, never dropped.",
@@ -172,6 +187,21 @@ def call(name: str, args: dict):
                   verification=args.get("verification"), confidence=args.get("confidence"),
                   due=args.get("due"), sources=args.get("sources") or [], owner=args.get("owner"))
         return f"deadline {args['deadline_id']} updated by {by}; events row recorded"
+    if name == "matter.trigger_list":
+        from matterkit import triggers
+        rows = triggers.select(conn, include_closed=bool(args.get("all")), owner=args.get("owner"))
+        return json.dumps([dict(r) for r in rows], indent=1)
+    if name == "matter.trigger_fire":
+        from matterkit import triggers
+        by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
+        sources = args.get("sources") or []
+        if not isinstance(sources, list):
+            raise ValueError("sources must be a list of 'rel_path@locator' strings")
+        did, due, steps = triggers.fire(conn, MATTER_DIR, args.get("trigger_id"), args.get("on"), args.get("service"),
+                                        sources, args.get("reason"), by, dry_run=bool(args.get("dry_run")))
+        head = (f"dry run: the last day would be {due.isoformat()}; nothing was written" if did is None else
+                f"deadline {did} registered: {due.isoformat()} (working-estimate/unverified: computed, not checked)")
+        return head + "\n" + "\n".join(f"- {s}" for s in steps)
     if name == "matter.packet_render":
         return pk.packet(conn, MATTER_DIR, layer=args.get("layer", "3min"))
     if name == "matter.hold_render":

@@ -2,12 +2,12 @@
 
 **Date:** 2026-11-01 · **Author:** agent:claude-opus-5-5, directed by ty · **Tier:** Large because it adds a store table and a date-counting contract that people will rely on for court deadlines, where a wrong date is costly.
 
-**Status:** draft. ty approved writing it on 2026-10-31 ("start working on all of these changes"), as G5 of the rules-pack follow-ups. The intent below comes from that list and has not been confirmed in detail. No reviewer seat has seen it, and nothing is built.
+**Status:** draft. ty approved writing it on 2026-10-31 ("start working on all of these changes"), as G5 of the rules-pack follow-ups. The intent below comes from that list and has not been confirmed in detail. No reviewer seat has seen it. Built on 2026-11-01 on branch `feat/deadline-triggers` after ty said "ok continue"; §7 records where the build departs from this draft.
 
 ## 1. Problem and intent
 
 Many deadlines start only when something else happens:
-- an amended complaint is filed within 7 days after leave is granted (L.U.Civ.R. 7(b)(2));
+- an amended complaint is filed within 7 days from entry of the order granting leave (L.U.Civ.R. 15);
 - an answer to an amended pleading is due 14 days after it is served (Fed. R. Civ. P. 15(a)(3));
 - a reply is due 7 days after the response is served (L.U.Civ.R. 7(b)(4)).
 
@@ -72,3 +72,24 @@ Until the trigger happens there is no date, and `deadlines.due_date` is `NOT NUL
    - add the district's state holidays to `holidays.json`, with their source.
 
 Gate: `python3 -m unittest discover -s tests -v`
+
+## 7. Revision 2 (2026-11-01): as built
+
+ty's "ok continue" (2026-11-01) started the build from §6. No reviewer seat has seen the draft or the code. The build departs from the draft in these places:
+
+| Draft | As built, and why |
+|---|---|
+| `deadline trigger add\|fire\|list\|withdraw` | Top-level `trigger add\|fire\|list\|withdraw`. The `deadline` command takes one positional subcommand followed by the case folder, and nesting a second level would change the order of its arguments. |
+| State holidays and closures in `.matter/holidays.json` | Two store tables, written by commands. `holidays` holds `day`, `name`, `kind` (`state`, `declared` or `closure`) and its sources. `holiday_years` records that a year's state holidays are complete, with the list they came from. Each command refuses an unregistered or changed source and writes its `events` row in the same transaction. A count refuses any year not in `holiday_years`, which is how "a year that no list covers is refused" is decided. |
+| One `events` row on fire | Two rows in one transaction. The first is the `deadline … added` row, with the same shape as `deadline add`. The second is `trigger … fired`, with the date, service, reason, sources and every counting step. |
+| Sources checked as `deadline update` checks them | Stricter. `fire`, `holiday add` and `holiday year` also re-hash each local source and refuse one that is missing or changed since it was registered. The check moved into `deadlines.resolve_sources`, and `deadline update` keeps its old behaviour (`rehash=False`). |
+| (not in draft) | `fire --dry-run` shows the count and writes nothing. |
+| (not in draft) | `fire` refuses an `--on` date after today. |
+| (not in draft) | Observed days. When a weekday observed for a weekend holiday (5 U.S.C. § 6103(b)) decides the date, the steps also give the date if only the statutory day counts. 6(a)(6)(A) names the § 6103 days without saying whether the observed day counts. |
+| (not in draft) | Declared days (6(a)(6)(B)) are recorded the same way as state holidays (`--kind declared`), not looked up. |
+
+Corrected: §1's first example cited L.U.Civ.R. 7(b)(2) for filing an amended pleading after leave is granted; the rule is L.U.Civ.R. 15 (7 days from entry of the order).
+
+Unchanged from the draft: the `deadline_triggers` columns, `days > 0` (backward counts are refused), `working-estimate/unverified` rows, no built-in state list, no computed hour (the steps state 6(a)(4)), and the MCP tools `matter.trigger_list` and `matter.trigger_fire`.
+
+Revision 2 has not been reviewed.

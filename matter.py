@@ -30,6 +30,18 @@ Usage:
                               [--verification verified-official|secondary-source|unverified]
                               [--confidence hard|working-estimate] [--source rel@loc]...
                               [--author agent:MODEL [--directed-by PERSON]]   # appends an events row
+  matter.py trigger add <dir> --label L --waits-on TEXT --days N [--rule R] [--owner ours|theirs|court]
+                              [--author agent:MODEL [--directed-by PERSON]]   # a deadline with no date yet
+  matter.py trigger fire <dir> <trigger_id> --on YYYY-MM-DD
+                              --service mail|clerk|consented-other|email|ecf|hand|none
+                              --source rel@loc... --reason TEXT [--dry-run] [--author ...]
+                              # counts the days (Fed. R. Civ. P. 6(a), 6(d)) into a working-estimate deadline
+  matter.py trigger list <dir> [--all] [--owner ours|theirs|court]
+  matter.py trigger withdraw <dir> <trigger_id> --reason TEXT [--author ...]
+  matter.py holiday add <dir> --on YYYY-MM-DD --name NAME --kind state|declared|closure --source rel@loc...
+  matter.py holiday year <dir> --year YYYY --jurisdiction NAME --source rel@loc...
+                              # every state holiday of that year is recorded; a count refuses other years
+  matter.py holiday list <dir> --year YYYY
   matter.py subcase init <parent_dir> <slug> --title TITLE [--author agent:MODEL [--directed-by PERSON]]
                               # own matter at <parent>/Subcases/<slug>/; ingest/verify treat it as a boundary
   matter.py authority add <dir> "<citation>" [--via HOW]
@@ -193,6 +205,12 @@ def cmd_deadline(args):
             sys.exit(f"refused: {e}")
         for r in rows:
             print(dl.list_line(r, show_state=args.all))
+        from matterkit import triggers
+        waiting = triggers.select(conn, owner=args.owner)
+        if waiting:
+            print("waiting on (no date until the event happens; matter.py trigger fire):")
+            for r in waiting:
+                print("  " + triggers.list_line(r))
         return
     try:
         by = store.attribution(args.author, args.directed_by)
@@ -221,6 +239,69 @@ def cmd_deadline(args):
                       sources=args.source, owner=args.owner)
             print(f"deadline {args.deadline_id} updated by {by}; events row recorded")
     except dl.DeadlineError as e:
+        sys.exit(f"refused: {e}")
+
+
+def cmd_trigger(args):
+    from matterkit import triggers
+    conn = store.connect(args.case_dir)
+    if args.sub == "list":
+        for r in triggers.select(conn, include_closed=args.all, owner=args.owner):
+            print(triggers.list_line(r))
+        return
+    try:
+        by = store.attribution(args.author, args.directed_by)
+    except ValueError as e:
+        sys.exit(f"invalid attribution: {e}")
+    try:
+        if args.sub == "add":
+            rule, note = args.rule, None
+            if rule:  # stored with its pack, version and anchor when an attached pack has it, as deadline add does
+                from matterkit import rules
+                try:
+                    rule, note = rules.rule_source(args.case_dir, rule)
+                except rules.RulesError as e:
+                    sys.exit(f"refused: {e}")
+            tid = triggers.add(conn, args.label, args.waits_on, args.days, by, rule=rule, owner=args.owner)
+            print(f"trigger {tid} waiting: {args.label} — {args.days} days after {args.waits_on}"
+                  + (f"\n  ↳ {note}" if note else ""))
+            return
+        if not args.trigger_id:
+            sys.exit(f"trigger {args.sub} requires <trigger_id>")
+        if args.sub == "withdraw":
+            print(triggers.withdraw(conn, args.trigger_id, args.reason, by))
+            return
+        did, due, steps = triggers.fire(conn, args.case_dir, args.trigger_id, args.on, args.service, args.source,
+                                        args.reason, by, dry_run=args.dry_run)
+        for step in steps:
+            print(f"  {step}")
+        if did is None:
+            print(f"dry run: the last day would be {due.isoformat()}; nothing was written")
+        else:
+            print(f"deadline {did} registered: {due.isoformat()} (working-estimate/unverified: computed, not "
+                  "checked; check the count, then deadline update --verification)")
+    except triggers.TriggerError as e:
+        sys.exit(f"refused: {e}")
+
+
+def cmd_holiday(args):
+    from matterkit import triggers
+    conn = store.connect(args.case_dir)
+    try:
+        if args.sub == "list":
+            if args.year is None:
+                sys.exit("holiday list requires --year")
+            print("\n".join(triggers.holiday_lines(conn, args.year)))
+            return
+        try:
+            by = store.attribution(args.author, args.directed_by)
+        except ValueError as e:
+            sys.exit(f"invalid attribution: {e}")
+        if args.sub == "add":
+            print(triggers.holiday_add(conn, args.case_dir, args.on, args.name, args.kind, args.source, by))
+        else:
+            print(triggers.holiday_year(conn, args.case_dir, args.year, args.jurisdiction, args.source, by))
+    except triggers.TriggerError as e:
         sys.exit(f"refused: {e}")
 
 
@@ -784,6 +865,38 @@ def main():
     p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
                    help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_deadline)
+
+    p = sub.add_parser("trigger"); p.add_argument("sub", choices=["add", "fire", "list", "withdraw"])
+    p.add_argument("case_dir"); p.add_argument("trigger_id", nargs="?", help="fire/withdraw: the trigger")
+    p.add_argument("--label"); p.add_argument("--waits-on", dest="waits_on", help="add: the event it waits on")
+    p.add_argument("--days", type=int, help="add: days after the event (Fed. R. Civ. P. 6(a)(1))")
+    p.add_argument("--rule"); p.add_argument("--owner", choices=["ours", "theirs", "court"])
+    p.add_argument("--on", help="fire: the date the event happened, YYYY-MM-DD")
+    p.add_argument("--service", choices=["mail", "clerk", "consented-other", "email", "ecf", "hand", "none"],
+                   help="fire: how the paper was served (6(d) adds 3 days for mail, clerk, consented-other); "
+                        "none: the period runs from the event itself")
+    p.add_argument("--source", action="append", default=[], help="fire: rel_path@locator of a registered document")
+    p.add_argument("--reason", help="fire/withdraw: why (required)")
+    p.add_argument("--dry-run", action="store_true", help="fire: show the count and write nothing")
+    p.add_argument("--all", action="store_true", help="list: include fired and withdrawn triggers")
+    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
+                   help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
+    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
+                   help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
+    p.set_defaults(fn=cmd_trigger)
+
+    p = sub.add_parser("holiday"); p.add_argument("sub", choices=["add", "year", "list"]); p.add_argument("case_dir")
+    p.add_argument("--on", help="add: the day, YYYY-MM-DD"); p.add_argument("--name")
+    p.add_argument("--kind", choices=["state", "declared", "closure"],
+                   help="add: state holiday (6(a)(6)(C)), declared by the President or Congress (6(a)(6)(B)), "
+                        "or clerk's office inaccessible (6(a)(3))")
+    p.add_argument("--year", type=int); p.add_argument("--jurisdiction", help="year: whose state holidays")
+    p.add_argument("--source", action="append", default=[], help="rel_path@locator of a registered document")
+    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
+                   help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
+    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
+                   help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
+    p.set_defaults(fn=cmd_holiday)
 
     p = sub.add_parser("subcase"); p.add_argument("sub", choices=["init"])
     p.add_argument("parent_dir"); p.add_argument("slug")

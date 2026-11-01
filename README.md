@@ -155,7 +155,8 @@ outreach.
 
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.amend_add` · `matter.amend_list` ·
-`matter.deadline_list` · `matter.packet_render` · `matter.cite_extract` ·
+`matter.deadline_list` · `matter.trigger_list` · `matter.trigger_fire` ·
+`matter.packet_render` · `matter.cite_extract` ·
 `matter.ingest_path` · `matter.verify` · `matter.hold_render` ·
 `matter.correspondence_list`.
 `matter.ingest_path` refuses paths that escape `MATTER_DIR`. `matter.verify`
@@ -338,6 +339,12 @@ python3 matter.py deadline list ~/cases/my-case --owner theirs   # only what the
 python3 matter.py deadline update ~/cases/my-case d_abc123 --owner theirs --reason "their answer, not ours"
 python3 matter.py deadline update ~/cases/my-case d_abc123 --state superseded \
   --reason "extension granted by text-only order" --source Filings/docket_sheet.pdf@entry-27
+python3 matter.py holiday year ~/cases/my-case --year 2026 --jurisdiction "Example State" \
+  --source Research/state-holidays-2026.pdf@p.1      # after adding each state holiday with holiday add
+python3 matter.py trigger add ~/cases/my-case --label "Reply brief" --days 7 \
+  --waits-on "the response to the motion is served" --rule "L.U.Civ.R. 7(b)(4)" --owner ours
+python3 matter.py trigger fire ~/cases/my-case t_abc123 --on 2026-11-02 --service ecf \
+  --source Filings/response.pdf@p.1 --reason "response filed and served through ECF"
 python3 matter.py subcase init ~/cases/my-case Related-Claim --title "Related state-court claim"
 python3 matter.py fact add ~/cases/my-case/Subcases/Related-Claim --text "…" --status documented-fact \
   --source parent:Media/article.html@para3
@@ -346,7 +353,29 @@ python3 matter.py fact add ~/cases/my-case/Subcases/Related-Claim --text "…" -
 Every deadline change needs a reason and is recorded in `events` with who made
 it. A deadline's owner says who must act by it: `ours`, `theirs` (the other
 side) or `court`. It is unset unless you give `--owner` to `add` or `update`, and
-`list` prints `owner=` only when it is set. A subcase is its own matter under `Subcases/<slug>/` with a `matter.json`
+`list` prints `owner=` only when it is set.
+
+A trigger is a deadline that waits on an event, such as "7 days after the
+response is served". It has no date until `trigger fire` records when the event
+happened and how the paper was served. Fire then counts the days under Fed. R.
+Civ. P. 6(a)(1): it skips the trigger day, counts every day, and runs past a
+Saturday, Sunday or legal holiday. Under 6(d) it adds 3 days only for service by
+mail, by leaving the paper with the clerk, or by other consented means, then
+rolls again. It inserts one ordinary deadline, `working-estimate/unverified`,
+and records every counting step in `events`, so check the count before you
+mark it verified. `--dry-run` shows the count and writes nothing.
+
+Legal holidays are the federal holidays of 5 U.S.C. § 6103, computed with the
+weekday observed for one on a weekend, plus the days you record with a source:
+state holidays, days the President or Congress declares, and days the clerk's
+office was inaccessible (6(a)(3)). Record each state holiday that is not
+already a federal one with `holiday add`, then say the year is complete with
+`holiday year`; a count refuses any year without that record. Backward counts
+("7 days before the hearing") and the hour a day ends (6(a)(4)) are not
+computed.
+`deadline list` shows waiting triggers after the dated rows.
+
+A subcase is its own matter under `Subcases/<slug>/` with a `matter.json`
 pointing at its parent. The parent's `ingest` stops at any folder holding its
 own `.matter/`. A subcase cites the parent's documents in place as
 `parent:<rel_path>`, re-hashed against the parent on every use and never

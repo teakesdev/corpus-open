@@ -135,6 +135,36 @@ CREATE TABLE IF NOT EXISTS amendment_item_history (
   recorded_by TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS deadline_triggers (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  waits_on TEXT NOT NULL,
+  days INTEGER NOT NULL CHECK (days > 0),
+  rule_source TEXT,
+  owner TEXT,
+  state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting','fired','withdrawn')),
+  fired_on TEXT,
+  service TEXT,
+  deadline_id TEXT REFERENCES deadlines(id),
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS holidays (
+  day TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('state','declared','closure')),
+  sources TEXT NOT NULL,
+  recorded_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (day, kind)
+);
+CREATE TABLE IF NOT EXISTS holiday_years (
+  year INTEGER PRIMARY KEY,
+  jurisdiction TEXT NOT NULL,
+  sources TEXT NOT NULL,
+  recorded_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 VALID_STATUS = {"DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"}

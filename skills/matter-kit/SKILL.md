@@ -75,7 +75,16 @@ after every capture: `verify` from a foreign cwd; MISSING/CHANGED is a blocker.
 matter fact add <dir> --text "Property records show plaintiff owns both parcels" --status DOCUMENTED-FACT --source "Evidence/EVIDENCE_INVENTORY.md@Tier 1 #6"
 matter fact list <dir> [--status ALLEGATION]     # unsupported rows render **[UNSUPPORTED]**
 matter deadline add <dir> --label "Rule 4(m) service deadline" --due 2026-10-14 --rule "Fed. R. Civ. P. 4(m)" --confidence hard --verification secondary-source
+matter trigger add <dir> --label "Reply brief" --days 7 --waits-on "the response is served" --rule "L.U.Civ.R. 7(b)(4)" --owner ours
+matter trigger fire <dir> <t_id> --on 2026-11-02 --service ecf --source Filings/response.pdf@p.1 --reason "response served" [--dry-run]
 ```
+
+A deadline that starts when something happens is a trigger, not a hand-counted
+row. When the event happens, `trigger fire` counts the days (Fed. R. Civ. P.
+6(a)(1) and 6(d)) and adds a `working-estimate/unverified` deadline with every
+step in its event. Show the user the steps and have a person check the date
+before anyone marks it verified. Firing needs the year's state holidays recorded
+(`holiday add`, then `holiday year`) from a registered source.
 
 An assertion with no recognized source renders `[UNSUPPORTED]` everywhere. That
 is deliberate: unsupported leaps should be visible to the user, the agent, and
@@ -143,7 +152,8 @@ Outreach drafts may be prepared, but nothing in matter-kit ever sends — humans
 ```
 
 Tools: `matter.status`, `matter.fact_add`, `matter.fact_list`,
-`matter.deadline_list`, `matter.packet_render`, `matter.cite_extract`,
+`matter.deadline_list`, `matter.trigger_list`, `matter.trigger_fire`,
+`matter.packet_render`, `matter.cite_extract`,
 `matter.ingest_path`, `matter.verify`, `matter.hold_render`,
 `matter.correspondence_list`. `hold_render` takes a `notice_id` and returns the
 filtered packet without approving or sending it. `ingest_path` refuses path escape.

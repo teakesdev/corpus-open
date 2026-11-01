@@ -6,9 +6,11 @@ add/update appends one `events` row (the deadlines table has no created_by) in
 the same transaction as the change, so the trail and the row cannot disagree.
 """
 import json
+import os
 import re
 from datetime import date
 
+from . import ingest
 from .ingest import PARENT_PREFIX
 from .store import new_id
 
@@ -109,24 +111,7 @@ def update(conn, case_dir, deadline_id, reason, by, state=None, verification=Non
         raise DeadlineError(f"no change — deadline {deadline_id} already has those values")
 
     from . import subcase  # lazy: subcase imports this module
-    try:  # in a subcase, parent: sources are re-hashed against the parent before anything is written
-        parents = subcase.resolve_parent_sources(case_dir, sources)
-    except subcase.SubcaseError as e:
-        raise DeadlineError(str(e)) from None
-    refs, unregistered = [], []
-    for src in sources:
-        ref, _, loc = src.partition("@")
-        if ref in parents:
-            refs.append(PARENT_PREFIX + parents[ref].rel_path + (f"@{loc}" if loc else ""))
-            continue
-        doc = conn.execute("SELECT rel_path FROM documents WHERE rel_path=? OR id=?", (ref, ref)).fetchone()
-        if doc is None:
-            unregistered.append(ref)
-        else:
-            refs.append(doc["rel_path"] + (f"@{loc}" if loc else ""))
-    if unregistered:
-        raise DeadlineError(f"source(s) not registered in this matter: {unregistered}")
-
+    refs, parents = resolve_sources(conn, case_dir, sources)
     text = (f"deadline {deadline_id} {row['label']!r}: "
             + "; ".join(f"{f} {'unset' if o is None else o}→{n}" for f, _, o, n in changes) + f"; reason: {reason}")
     with conn:
@@ -136,6 +121,40 @@ def update(conn, case_dir, deadline_id, reason, by, state=None, verification=Non
                      [n for _, _, _, n in changes] + [deadline_id])
         _event(conn, text, by, refs)
     return text
+
+
+def resolve_sources(conn, case_dir, sources, rehash=False):
+    """(event refs, {ref: parent document}) for `rel_path@locator` sources, or DeadlineError.
+
+    Each must name a document registered in this matter, or in a subcase a `parent:<rel_path>`
+    document the parent registers (re-hashed against the parent; the caller registers those refs
+    in its own transaction with subcase.register_parent_ref). With `rehash`, a registered file
+    that is missing or whose bytes changed since registration is refused too."""
+    from . import subcase  # lazy: subcase imports this module
+    try:  # in a subcase, parent: sources are re-hashed against the parent before anything is written
+        parents = subcase.resolve_parent_sources(case_dir, sources)
+    except subcase.SubcaseError as e:
+        raise DeadlineError(str(e)) from None
+    refs, unregistered, changed = [], [], []
+    for src in sources:
+        ref, _, loc = src.partition("@")
+        if ref in parents:
+            refs.append(PARENT_PREFIX + parents[ref].rel_path + (f"@{loc}" if loc else ""))
+            continue
+        doc = conn.execute("SELECT rel_path, sha256 FROM documents WHERE rel_path=? OR id=?", (ref, ref)).fetchone()
+        if doc is None:
+            unregistered.append(ref)
+            continue
+        if rehash:
+            path = ingest.resolve_document_path(os.path.abspath(case_dir), doc["rel_path"])
+            if not path or not os.path.isfile(path) or ingest.sha256_file(path) != doc["sha256"]:
+                changed.append(doc["rel_path"])
+        refs.append(doc["rel_path"] + (f"@{loc}" if loc else ""))
+    if unregistered:
+        raise DeadlineError(f"source(s) not registered in this matter: {unregistered}")
+    if changed:
+        raise DeadlineError(f"source(s) missing or changed since they were registered: {changed}; run verify")
+    return refs, parents
 
 
 def _event(conn, text, by, sources):
