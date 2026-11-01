@@ -322,6 +322,21 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
             nxt = None
         elif i in markers:
             upcoming[i], nxt = nxt, markers[i]
+    order = [i for i in region if i in heads or i in markers]
+    pos = {i: n for n, i in enumerate(order)}
+
+    def later_twin(i, tok, want):
+        """The later line, in the same rule and list, where `tok` sits at the list's indentation `want`,
+        before any other item of that list; None if the list ends first."""
+        for j in order[pos[i] + 1:]:
+            if j in heads:
+                return None
+            at = _indent(lines[j][1])
+            if at < want:
+                return None
+            if at == want:
+                return j if markers[j] == tok else None
+        return None
 
     body, src, notes, anchors, rule_nums = [], [], [], [], []
     cur = None
@@ -367,6 +382,16 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
                          f"not a subsection: {line[:70]!r}" +
                          (f". {took[0]} is already anchored at the earlier line {took[1][:70]!r}; if that line is a "
                           "wrapped cross-reference, the anchor is on the wrong line" if took else ""))
+            body += ["", line]
+            continue
+        # a wrapped cross-reference ("Rule 26(b)(1) and / (2) if needed") can start with the list's next
+        # marker; when it is indented unlike the list and the same marker follows at the list's own
+        # indentation, the later line is the item
+        twin = later_twin(i, tok, ind[k]) if not alts and ind[k] is not None and indent != ind[k] else None
+        if twin is not None:
+            notes.append(f"{unit} {cur['num']}: ({tok}) on page {pno} is indented unlike the list it would "
+                         f"continue, and ({tok}) appears again at that list's indentation on page "
+                         f"{lines[twin][0]}, so this line is kept as text: {line[:70]!r}")
             body += ["", line]
             continue
         others = [_label(cur["num"], [p for p in lv[:j] if p is not None] + [tok]) for j in alts]

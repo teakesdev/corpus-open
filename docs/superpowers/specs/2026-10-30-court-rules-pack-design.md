@@ -125,3 +125,11 @@ Some court documents a matter relies on, such as a district's electronic-filing 
 - **Anchors** use the same grammar: `Admin. P. 4(A)(5)` is `<prefix>-4-A-5`. The word check and the page-number rules are unchanged.
 - **Real-text trial** (private, outside the repo): a 29-page procedures PDF gave 11 sections and 87 anchors, with words identical to the source. There were 2 notes (a wrapped `R. CRIM. P.` line and a wrapped `(b)`, both rightly kept as text) and one table-page warning.
 
+## 11. Follow-up (2026-11-01): a wrapped marker indented unlike its list
+
+Building the Federal Rules of Civil Procedure (142 pages) gave a wrong anchor. A cross-reference wrapped as `... Rule 26(b)(1) and` / `(2) if needed to fairly examine ...` put a line starting `(2)` in the 30(d) list, between the real `(1)` and `(2)`. It continued the list in sequence, so it took 30(d)(2), and the real `(2) Sanction.` was kept as text. A note said so, but the anchor was still wrong. Built on branch `fix/rules-indent-twin`, not reviewed.
+
+- **Rule** (paren mode only): a marker that continues a list in sequence, but is indented unlike that list's last item, stays text when the next marker at the list's own indentation, before the list ends or the rule ends, is the same marker. It gets a note naming both pages.
+- **Unchanged:** uneven indentation alone anchors as before. A marker whose level was guessed is not tested, and dotted builds are not affected.
+- **Real-text trials** (private, outside the repo): the local rules (416 anchors) and the procedures (87) rebuild with the same body and the same notes. The FRCP built with 98 rules and 1,628 anchors and 0 warnings, and 30(d)(2) is now `(2) Sanction.`.
+- **Known gap:** a line that chains two markers (`(A)(i) deliver ...`) is not read as markers, so FRCP 4(i)(1)(A)–(C) stay unanchored text with notes.

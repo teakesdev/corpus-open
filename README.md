@@ -275,7 +275,10 @@ keeps everything between `--start-at` and `--stop-at`. The manifest's `dropped`
 lists each page number it left out. A level it had to guess, or a marker out of
 sequence, is listed in the manifest's `notes`; when a marker repeats one that is
 already anchored, the note names the earlier line, which may be a wrapped
-cross-reference holding the anchor. A page that looks like two columns, a word
+cross-reference holding the anchor. A line that starts with a list's next marker
+but is indented unlike that list stays text when the same marker follows at the
+list's own indentation (a wrapped `Rule 26(b)(1) and` / `(2) if needed`), and is
+listed in `notes`. A page that looks like two columns, a word
 that seems to have lost letters, or a page number with no sequence to check it
 against is listed in `warnings`, because the word check cannot see any of them.
 A pack is derived text, not the official copy.

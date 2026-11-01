@@ -214,6 +214,33 @@ class TestAnchors(unittest.TestCase):
         self.assertIn("7(b) is already anchored", note)
         self.assertIn("of this rule when filing", note)
 
+    def test_a_wrapped_marker_indented_unlike_its_list_yields_to_the_real_item(self):
+        # "Rule 26(b)(1) and\n(2) if needed" wraps a cross-reference onto a line that starts "(2)"; the real
+        # (2) comes later at the list's own indentation, so the wrapped line must not take the anchor
+        text = page("Rule 30.     DEPOSITIONS",
+                    " (a)   DURATION; SANCTION.",
+                    "     (1)   Duration. Time is allowed consistent with Rule 26(b)(1) and",
+                    "   (2) if needed to examine the deponent fairly.",
+                    "     (2)   Sanction. The court may impose a sanction.",
+                    "     (3)   Motion to Terminate.",
+                    " (b)   REVIEW.")
+        built = rules.build_text(text, cite_prefix="Fed. R. Civ. P.", anchor_prefix="frcp")
+        self.assertIn('<a id="frcp-30-a-2"></a>**[30(a)(2)]** (2) Sanction. The court may impose a sanction.',
+                      built.body)
+        self.assertIn("(2) if needed to examine the deponent fairly.", built.body)
+        self.assertEqual(built.anchors, ["frcp-30", "frcp-30-a", "frcp-30-a-1", "frcp-30-a-2", "frcp-30-a-3",
+                                         "frcp-30-b"])
+        self.assertTrue(any("indented unlike" in n and "if needed" in n for n in built.notes), built.notes)
+
+    def test_an_item_indented_differently_with_no_later_twin_is_still_anchored(self):
+        # uneven indentation alone changes nothing: only a later item with the same marker at the list's
+        # indentation shows that this line is a wrapped cross-reference
+        text = page("Rule 30.     DEPOSITIONS", " (a)   DURATION.", "     (1)   Duration.",
+                    "   (2)   Sanction.", " (b)   REVIEW.")
+        built = rules.build_text(text, cite_prefix="Fed. R. Civ. P.", anchor_prefix="frcp")
+        self.assertIn("frcp-30-a-2", built.anchors)
+        self.assertEqual(built.notes, [])
+
     def test_heading_number_that_is_not_digits_is_refused(self):
         with self.assertRaises(rules.RulesError) as cm:
             rules.build_text(page("ARTICLE IV   MOTIONS", "(a)   Form."), cite_prefix="L.U.Civ.R.",
