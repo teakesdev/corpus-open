@@ -225,19 +225,40 @@ class TestInterpret(unittest.TestCase):
             self.assertEqual([r.outcome for r in res], [citelookup.NOT_LOOKED_UP, citelookup.FOUND], good)
             self.assertEqual(res[1].cluster["id"], 111)
 
-    def test_only_a_word_cut_short_with_a_period_matches_by_prefix(self):
-        # SWE-2 round 1, P2-2: "Roger" is not "Rogers"; "Educ." is still "Education".
+    def judge_names(self, draft_name, cl_name):
+        cites = citelookup.draft_cites(f"{draft_name}, 9 F.3d 9.")
+        p = citelookup.payloads(cites)
+        (r,) = citelookup.interpret(cites, p, [[result(p[0], "9 F.3d 9", 200,
+                                                       [cluster(5, cl_name, "1993-01-01", "9 F.3d 9")])]])
+        return r.outcome
+
+    def test_only_a_known_abbreviation_matches_by_prefix(self):
+        # SWE-2 round 1, P2-2, and round 2: "Roger" is not "Rogers", nor a stray "Marsh." "Marshall";
+        # "Educ." is still "Education", in either name, and "Nat'l Ass'n" is "National Association".
         for draft_name, cl_name, outcome in (
                 ("Roger v. Lee", "Rogers v. Kent", citelookup.NAME_DIFFERS),
                 ("Marsh v. Lee", "Marshall v. Kent", citelookup.NAME_DIFFERS),
                 ("Hill v. Lee", "Hills v. Kent", citelookup.NAME_DIFFERS),
-                ("Bd. of Educ. v. Kappa", "Board of Education v. Lambda", citelookup.FOUND),
-                ("Board of Education v. Kappa", "Bd. of Educ. v. Lambda", citelookup.FOUND)):
-            cites = citelookup.draft_cites(f"{draft_name}, 9 F.3d 9.")
-            p = citelookup.payloads(cites)
-            (r,) = citelookup.interpret(cites, p, [[result(p[0], "9 F.3d 9", 200,
-                                                           [cluster(5, cl_name, "1993-01-01", "9 F.3d 9")])]])
-            self.assertEqual(r.outcome, outcome, (draft_name, cl_name))
+                ("Alpha v. Marsh.", "Rogers v. Marshall", citelookup.NAME_DIFFERS),
+                ("Bd. of Educ. v. Univ. of Cal.", "Board of Education v. University of California", citelookup.FOUND),
+                ("Board of Education v. University of California", "Bd. of Educ. v. Univ. of Cal.", citelookup.FOUND),
+                ("Nat'l Ass'n of Mfrs. v. Kappa", "National Association of Manufacturers v. Kappa", citelookup.FOUND)):
+            self.assertEqual(self.judge_names(draft_name, cl_name), outcome, (draft_name, cl_name))
+
+    def test_generic_words_alone_do_not_make_the_same_case(self):
+        for draft_name, cl_name, outcome in (
+                ("First Nat'l Bank v. Doe", "Bank of Am. v. Roe", citelookup.NAME_DIFFERS),
+                ("Doe v. School Dist.", "Roe v. School Board", citelookup.NAME_DIFFERS),
+                ("Doe v. Bd. of Educ.", "Doe v. Board of Regents", citelookup.NAME_DIFFERS),
+                ("Bd. of Educ. v. Kappa", "Board of Education v. Lambda", citelookup.NAME_DIFFERS),
+                ("Texas v. Smith", "Texas v. Johnson", citelookup.NAME_DIFFERS),
+                ("EPA v. Smith", "Environmental Protection Agency v. Jones", citelookup.NAME_DIFFERS),
+                ("Natl. Assn. of Mfrs. v. EPA",
+                 "National Association of Manufacturers v. Environmental Protection Agency", citelookup.FOUND),
+                ("Doe v. Roe", "Doe v. Roe", citelookup.FOUND),
+                ("Monell v. Dep't of Soc. Servs.",
+                 "Monell v. Department of Social Services of City of New York", citelookup.FOUND)):
+            self.assertEqual(self.judge_names(draft_name, cl_name), outcome, (draft_name, cl_name))
 
 
 def recorded_one(payload):

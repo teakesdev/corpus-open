@@ -146,35 +146,136 @@ _STOP = {"the", "and", "inc", "corp", "corporation", "company", "llc", "ltd", "l
          "states", "united", "america", "dept", "department", "people", "commonwealth", "matter", "estate",
          "parte", "for", "rel"}
 
+# Bluebook abbreviations (T6, and T10's states), folded as _fold folds them ("Nat'l" -> "natl"), each mapped to
+# the start of the word or words it shortens. Only these match by prefix, so "Educ." is "Education" while
+# "Roger" is not "Rogers" and a stray "Marsh." is not "Marshall".
+_ABBREV = {
+    "acad": "academ", "admin": "administ", "admr": "administrat", "advert": "advertis", "agric": "agricult",
+    "assn": "associat", "assoc": "associat", "assocs": "associat", "atl": "atlantic", "auth": "authorit",
+    "auto": "automo", "bankr": "bankrupt", "bd": "board", "bhd": "brotherhood", "bldg": "building",
+    "bros": "brother", "broad": "broadcast", "bus": "business", "cas": "casualt", "cent": "central",
+    "chem": "chemical", "cmty": "communit", "coll": "college", "comm": "comm", "commcn": "communication",
+    "commn": "commission", "commr": "commissioner", "comp": "compensat", "consol": "consolidat",
+    "constr": "construct", "contl": "continental", "coop": "cooperat", "corr": "correction", "ctr": "center",
+    "def": "defen", "dev": "develop", "dir": "director", "dist": "district", "distrib": "distribut",
+    "div": "division", "econ": "econom", "educ": "educat", "elec": "electr", "engg": "engineer",
+    "engr": "engineer", "ent": "entertain", "enter": "enterprise", "envt": "environment",
+    "envtl": "environment", "equip": "equipment", "exch": "exchange", "exec": "executive", "fed": "federal",
+    "fedn": "federation", "fid": "fidelit", "fin": "financ", "gen": "general", "govt": "government",
+    "grp": "group", "guar": "guarant", "hosp": "hospital", "hous": "housing", "indem": "indemnit",
+    "indep": "independen", "indus": "industr", "info": "inform", "ins": "insur", "inst": "institut",
+    "intl": "international", "inv": "invest", "invs": "invest", "lab": "labor", "liab": "liabilit",
+    "litig": "litigat", "mach": "machin", "maint": "maintenance", "mech": "mechanic", "med": "medic",
+    "meml": "memorial", "merch": "merchan", "metro": "metropolitan", "mfg": "manufactur",
+    "mfr": "manufactur", "mfrs": "manufactur", "mgmt": "management", "mkt": "market", "mktg": "market",
+    "mortg": "mortgage", "mun": "municipal", "mut": "mutual", "natl": "national", "org": "organi",
+    "pac": "pacific", "pers": "person", "pharm": "pharmac", "pship": "partnership", "prob": "probation",
+    "prod": "product", "prods": "product", "profl": "professional", "prop": "propert", "prot": "protect",
+    "pub": "public", "publg": "publishing", "publn": "publication", "rd": "road", "ref": "refin",
+    "regl": "regional", "rehab": "rehabilitat", "res": "resource", "ret": "retire", "ry": "railway",
+    "sav": "saving", "sch": "school", "sci": "scien", "sec": "secur", "secy": "secretar", "serv": "servic",
+    "servs": "servic", "soc": "social", "socy": "societ", "sur": "suret", "sys": "system",
+    "tech": "technolog", "tel": "tele", "telecomm": "telecommunicat", "temp": "temporar",
+    "tpk": "turnpike", "transcon": "transcontinental", "transp": "transport", "twp": "township",
+    "unif": "uniform", "univ": "universit", "util": "utilit", "vill": "village",
+    "ala": "alabama", "ariz": "arizona", "ark": "arkansas", "cal": "californ", "colo": "colorado",
+    "conn": "connecticut", "del": "delaware", "fla": "florida", "haw": "hawaii", "ill": "illinois",
+    "ind": "indiana", "kan": "kansas", "mass": "massachusetts", "mich": "michigan", "minn": "minnesota",
+    "miss": "mississippi", "mont": "montana", "neb": "nebraska", "nev": "nevada", "okla": "oklahoma",
+    "tenn": "tennessee", "tex": "texas", "wash": "washington", "wis": "wisconsin", "wyo": "wyoming",
+}
+# Words that name an institution, a place or a stand-in party rather than a particular party. Shared alone
+# they do not show two names are the same case: "First Nat'l Bank v. Doe" is not "Bank of Am. v. Roe".
+_GENERIC = frozenset("""
+    agency airlines alabama alaska american appeals arizona arkansas assurance atlantic attorney authority bancorp
+    bank banks board borough brothers bureau california capital carolina casualty center central chemical church
+    coast college colorado columbia commerce commission commissioner commissioners committee communications
+    community compensation connecticut construction consumer contractors corrections correctional council dakota
+    delaware development director district division doe does east eastern economic education educational electric
+    employees energy enterprises environmental exchange express farms federal finance financial fire first florida
+    foods foundation freight fund gas general georgia governor group gulf hampshire hawaii health holdings home
+    homes hospital housing human idaho illinois independent indiana industries industry institute insurance
+    internal international iowa island jane jersey john kansas kentucky labor laboratories laboratory life light
+    loan local louisiana maine management manufacturers manufacturing market markets maryland massachusetts mayor
+    medical metropolitan mexico michigan minnesota mississippi missouri montana mortgage motor motors municipal
+    mutual national nebraska nevada new north northeast northern northwest office officer officers ohio oil
+    oklahoma oregon pacific parish partners partnership pennsylvania pension pharmaceutical pharmaceuticals plan
+    police power products properties property protection public railroad railway realty regents regional
+    relations resources retirement review revenue rhode roe sales savings school schools secretary securities
+    security service services sheriff shipping social society south southeast southern southwest steamship
+    stores superintendent supervisors supply surety system systems tax technologies technology telegraph
+    telephone tennessee texas town township trade transit transportation trust trustees unemployment unified
+    union university utah utilities utility vermont village virginia warden washington water west western
+    wisconsin workers wyoming york
+""".split())
+_LONG_STEMS = tuple(s for s in set(_ABBREV.values()) if len(s) >= 7)  # "associat" covers "associates"
+_CONNECT = {"of", "and", "the", "for", "in", "on", "at", "to", "a", "an"}
+_SUFFIX = {"inc", "corp", "co", "corporation", "company", "llc", "ltd", "llp"}
+
 
 def _fold(name: str) -> str:
     return re.sub(r"['’]", "", name.lower())
 
 
-def _words(name: str) -> set:
-    return {w for w in re.findall(r"[a-z0-9]+", _fold(name)) if len(w) >= 3 and w not in _STOP}
+def _tokens(name: str) -> dict:
+    """A name's significant words, each with how it may match: "abbr" for a Bluebook abbreviation (kept as
+    the start of the word it shortens, and matched by prefix), "acro" for an acronym ("EPA"), "word" for
+    any other word, which matches whole only."""
+    out = {}
+    for raw in re.findall(r"[A-Za-z0-9'’]+", name):
+        w = _fold(raw)
+        if w in _ABBREV:
+            out[_ABBREV[w]] = "abbr"
+        elif len(w) >= 3 and w not in _STOP:
+            out.setdefault(w, "acro" if re.fullmatch(r"[A-Z]{3,6}", raw) else "word")
+    return out
 
 
-def _cut(name: str) -> set:
-    """Words the name cuts short with a period ("Educ.", "Mfrs.")."""
-    return set(re.findall(r"([a-z0-9]+)\.", _fold(name)))
+def _parties(name: str) -> list[str]:
+    return re.split(r"\s+vs?\.?\s+", name)
+
+
+def _initials(party: str) -> set:
+    """"Environmental Protection Agency" -> "epa"; also without a corporate suffix ("IBM" for "... Corp.")."""
+    words = [w for w in re.findall(r"[a-z0-9]+", _fold(party)) if w not in _CONNECT]
+    return {"".join(w[0] for w in ws) for ws in (words, [w for w in words if w not in _SUFFIX]) if len(ws) >= 2}
+
+
+def _generic(word: str) -> bool:
+    return word in _GENERIC or word.startswith(_LONG_STEMS)
+
+
+def _covers(mine: dict, party: str) -> bool:
+    """Every significant word of a draft party matches a word of `party`, one of CourtListener's parties."""
+    theirs, initials = _tokens(party), _initials(party)
+    return bool(mine) and all(
+        w in theirs or kind == "acro" and w in initials
+        or kind == "abbr" and any(t.startswith(w) for t in theirs)
+        or any(k == "abbr" and w.startswith(t) for t, k in theirs.items())
+        for w, kind in mine.items())
 
 
 def _same_case(draft_name: str, names: list) -> bool:
-    """True when the draft's name shares a significant word with one of CourtListener's names
-    ("Twombly" / "Bell Atlantic Corp. v. Twombly"), or has none to compare. A word cut short with a
-    period matches the word it begins ("Educ." / "Education"); any other word must match whole, so
-    "Roger" is not "Rogers"."""
-    mine, my_cut = _words(draft_name), _cut(draft_name)
+    """True when the draft's name and one of CourtListener's names look like the same case, or the draft's
+    name has no significant word to compare. One shared distinctive word is enough ("Twombly" / "Bell
+    Atlantic Corp. v. Twombly"), and it must match whole, so "Roger" is not "Rogers". Generic words
+    (an institution, a place, a stand-in party such as "Doe", an agency's acronym that CourtListener spells
+    out) count only when the draft's name has nothing else, and then each of its parties must match a
+    whole party: "Roe v. Bd. of Educ." is "Roe v. Board of Education of Topeka", but "First Nat'l Bank v.
+    Doe" is not "Bank of Am. v. Roe"."""
+    mine = _tokens(draft_name)
     if not mine:
         return True
+    parties = [t for t in map(_tokens, _parties(draft_name)) if t]
     for name in names:
-        theirs, their_cut = _words(name), _cut(name)
-        for a in mine:
-            for b in theirs:
-                if a == b or (len(a) >= 4 and a in my_cut and b.startswith(a)) \
-                        or (len(b) >= 4 and b in their_cut and a.startswith(b)):
-                    return True
+        initials = set().union(*map(_initials, _parties(name)))
+        distinct = {w for w, kind in mine.items()
+                    if kind == "word" and not _generic(w) or kind == "acro" and w not in initials}
+        if distinct:
+            if distinct & _tokens(name).keys():
+                return True
+        elif all(any(_covers(p, q) for q in _parties(name)) for p in parties):
+            return True
     return False
 
 
