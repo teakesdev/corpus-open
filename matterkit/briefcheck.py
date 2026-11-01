@@ -585,6 +585,29 @@ def _blank(text: str, pattern: re.Pattern) -> str:
     return pattern.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
+TITLE_MINOR = {"a", "an", "the", "and", "or", "nor", "but", "of", "to", "in", "on", "at", "by", "for", "from",
+               "with", "as", "into", "upon", "v", "vs", "re", "ex", "rel", "et", "al", "de", "la", "per", "sub",
+               "nom", "en", "banc"}  # compared after trailing ".?!:" is stripped
+HONORIFICS = {"Mr.", "Mrs.", "Ms.", "Dr.", "Hon.", "Prof.", "Sgt.", "Lt.", "Capt.", "Det.", "Gov.", "Sen."}
+
+
+def _titled(rest: str, short: bool) -> bool:
+    """After a one-letter marker, rest reads as a heading title, not a sentence that opens with an initial."""
+    words = [w.strip("\"“”‘’()[]") for w in rest.split()]
+    first = words[0]
+    if first.endswith(".") and first not in HONORIFICS and (len(words) > 1 or len(first) <= 4 or "." in first[:-1]):
+        return False  # "J. R. Smith …", "W. Va. Code …", and a lone fragment ("W. Va.", "A. Doc."); "A. Background." passes
+    if len(words) <= 7 and FACT_HEADING.search(rest):  # "A. Factual background.", "A. Background Doc. 16":
+        return True  # a misread can only open a fact section (units() never narrows one); body would silently skip it
+    if "§" in rest or any(p.search(rest) for p in (RECORD_RE, PLEADING_RE, ID_RE)) or next(scan_authorities(rest), None):
+        return False
+    if short:
+        return True
+    words = [w.rstrip(".?!:") for w in words]
+    return not rest.endswith(",") and first[:1].isupper() and all(
+        w[0].isupper() for w in words if w and w[0].isalpha() and w.lower() not in TITLE_MINOR)
+
+
 _SMALL_WORDS = {"of", "the", "and", "a", "an", "in", "on", "to", "for", "by", "with", "or", "at", "from",
                 "v.", "vs.", "as", "under", "into"}
 
@@ -602,13 +625,16 @@ def _carries_cite(line: str, quotes: bool = True) -> bool:
 
 
 def _heading(block: str, mode: str = "brief") -> int | None:
-    """Heading level of a one-line block, or None.
+    """Heading level of a one-line block, or None. Headings structure fact sections; units()
+    still checks their cites, quotations and fact tags.
 
-    A numbered line (and, in complaint mode, a lettered one) is a heading only when it is
-    short, carries no cite or quotation, and is either unpunctuated ("1. Background") or a
-    title ending in a period or colon ("1. Statement of Facts."). "1. On January 1,
-    officers …" and "12. See Doc. 16 at 3" are text. A roman-numeral line (and, in brief
-    mode, a lettered one) stays a heading unless it carries a record, pleading or case cite.
+    A numbered line (and, in complaint mode, a lettered one other than I, V, X, L or C) is a
+    heading only when it is short, carries no cite or quotation, and is either unpunctuated
+    ("1. Background") or a title ending in a period or colon ("1. Statement of Facts.").
+    "1. On January 1, officers …" and "12. See Doc. 16 at 3" are text. A multi-letter roman
+    line ("II. …") stays a heading unless it carries a record, pleading or case cite. After a
+    one-letter marker the rest must read as a title (`_titled`), so "J. Smith testified …" and
+    "W. Va. Code § 21-23-7 controls." are text, while "A. Factual background." is a heading.
     """
     line = block.strip()
     if "\n" in line or not line:
@@ -620,7 +646,7 @@ def _heading(block: str, mode: str = "brief") -> int | None:
     letters = [c for c in line if c.isalpha()]
     if letters and all(c.isupper() for c in letters) and len(words) <= 12 and not line.endswith(","):
         return 1
-    m = re.match(r"([IVXLC]+|[A-Z]|\d{1,3})\.\s+\S", line)
+    m = re.match(r"([IVXLC]+|[A-Z]|\d{1,3})\.\s+(\S.*)", line)
     if m and len(words) <= 25:
         tok = m.group(1)
         roman = bool(re.fullmatch(r"[IVXLC]+", tok))
@@ -631,9 +657,12 @@ def _heading(block: str, mode: str = "brief") -> int | None:
             if end and not (end.group(1) in ".:" and "," not in line and _title_case(words[1:])):
                 return None
             return 3 if tok.isdigit() else 2
+        if len(tok) == 1:  # "J. Smith testified …" is a sentence, not letter J
+            short = len(words) <= 8 and not re.search(r"[.?!:;,]\W*$", line)
+            return (1 if roman else 2) if _titled(m.group(2), short) else None
         if _carries_cite(line, quotes=False):
             return None
-        return 1 if roman else 2
+        return 1
     return None
 
 
@@ -1172,8 +1201,8 @@ class _Checker:
                 # ("2. Plaintiff Was Arrested.") unless it names a non-fact section ("2. Argument.")
                 sub = (lvl == fact_level and re.match(r"\s*\d{1,3}\.\s", block)
                        and not NONFACT_HEADING.search(block))
-                if FACT_HEADING.search(block):
-                    fact_level = lvl
+                if FACT_HEADING.search(block):  # an open fact section keeps its outer level ("I. FACTS" / "A. Background")
+                    fact_level = lvl if fact_level is None else min(fact_level, lvl)
                 elif fact_level is not None and lvl <= fact_level and not sub:
                     fact_level = None
                 hs = _lstrip(self.text, bm.start())
