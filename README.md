@@ -303,7 +303,9 @@ show` reads `Fed. R. Civ. P. 15(a)(2)`, `Local Rule 7(b)(4)` and the other
 `Rule 15` names no rule set, so it lists every pack that has it, exits 2 and
 picks none unless you pass `--pack`. With packs attached, `brief check` looks up
 each rule cite's subsection and warns when the pack lacks it; what blocks is
-unchanged. `deadline add --rule` stores a rule found in a pack as
+unchanged. A list member that is only subsection marks is a sibling of the
+last cite's mark of the same kind: `7(b) and (c)` checks 7(c), and
+`26(a)(1)(A)(i), (ii)` checks 26(a)(1)(A)(ii). `deadline add --rule` stores a rule found in a pack as
 `L.U.Civ.R. 7(b)(4) [pack@version#anchor]`, and anything else as the text you
 gave. The MCP tool is `matter.rules_show`. `rules stale` exits 1 for a pack
 past its review window, with no date or a date after today, or that cannot be

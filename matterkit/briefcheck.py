@@ -133,6 +133,53 @@ RULE_RE = re.compile(
 LOCAL_RE = re.compile(r"(?P<base>L\.\s*U\.\s*(?:Civ|Crim)\.\s*R\.\s*\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 RULE_TAIL_RE = re.compile(r"(?:,?\s+and\s+|\s*&\s*)(?P<cite>(?P<num>\d+(?:\.\d+)?)(?:\([A-Za-z0-9]{1,4}\))*)")
 RULE_CONT_RE = re.compile(r"(?P<num>\d+(?:\.\d+)?)(?:\s*(?:\([A-Za-z0-9]{1,4}\)|[-–—,&]|and(?!\w)))*")
+# a list member that is only subsection marks: "(c)" in "7(b) and (c)", "(ii)" in "(i), (ii), and (iv)"
+RULE_SIBLING_RE = re.compile(r"(?:,?\s+(?:and|or)\s+|\s*&\s*|,\s*)(?P<cite>(?:\([A-Za-z0-9]{1,4}\))+)")
+_RULE_MARK_RE = re.compile(r"\(([A-Za-z0-9]{1,4})\)")
+_RULE_MARKS_ONLY = re.compile(r"(?:\([A-Za-z0-9]{1,4}\))+")
+_SMALL_ROMANS = frozenset(rules.ROMANS[:39])  # i to xxxix: no c, d, l or m, which are letters here
+
+
+def _mark_kind(mark, roman):
+    """'digit', 'capital', 'roman' or 'letter'; `roman` says whether a lowercase mark that can be
+    either (i, v, x, ii, ...) is read as roman."""
+    if mark.isdigit():
+        return "digit"
+    if mark.isupper():
+        return "capital"
+    return "roman" if roman and mark in _SMALL_ROMANS else "letter"
+
+
+def _sibling_marks(marks, sib):
+    """The marks a sibling member stands for: '7(b) and (c)' is 7(c), '7(b)(1) and (2)' is 7(b)(2),
+    '26(a)(1)(A)(i) and (c)' is 26(c). None when the cite has no mark of the sibling's kind.
+    In the cite, a lowercase mark after the first is roman when it can be (rules nest (a)(1)(A)(i));
+    the sibling is roman when it can be and is more than one letter or the cite has a roman mark."""
+    kinds = [_mark_kind(m, n > 0) for n, m in enumerate(marks)]
+    want = _mark_kind(sib[0], len(sib[0]) > 1 or "roman" in kinds)
+    j = max((n for n, k in enumerate(kinds) if k == want), default=None)
+    return None if j is None else marks[:j] + sib
+
+
+def _rule_list(s, pos, num, sub, free, numbers=True):
+    """(num, marks, start, end) for each later member of a rule list that starts at `pos`, after a cite
+    of rule `num` with subsection marks `sub`: another rule ('and 15(a)', unless numbers is False) or a
+    sibling subsection of the last member ('and (c)')."""
+    marks = _RULE_MARK_RE.findall(sub)
+    while True:
+        if numbers and (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
+            num, marks = t["num"], _RULE_MARK_RE.findall(t["cite"])
+        elif (t := RULE_SIBLING_RE.match(s, pos)) and free(*t.span("cite")) and \
+                (new := _sibling_marks(marks, _RULE_MARK_RE.findall(t["cite"]))) is not None:
+            marks = new
+        else:
+            return
+        yield num, marks, t.start("cite"), t.end("cite")
+        pos = t.end()
+
+
+def _rule_label(num, marks):
+    return num + "".join(f"({m})" for m in marks)
 _SEC = r"\d[\dA-Za-z.\-]*(?:\s*\([^)]{1,24}\))*"
 _SUBSEC = r"\([A-Za-z0-9]{1,4}\)(?:\s*\([A-Za-z0-9]{1,4}\))*"  # "(b)" in "21-3-15(a) and (b)": the section before
 _SEC_SEP = r"\s*[,&]\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+"
@@ -397,12 +444,10 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
                 full = pat is RULE_RE
                 yield ("rule:" + _norm_key(m["base"]), m.group(0), None, m.start(), m.end(), "rule",
                        (prefix.strip(), num) if full else None)
-                pos = m.end()
-                while (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
-                    spans.append(t.span("cite"))
-                    yield ("rule:" + _norm_key(prefix + t["num"]), prefix + t["cite"], None,
-                           t.start("cite"), t.end("cite"), "rule", (prefix.strip(), t["num"]) if full else None)
-                    pos = t.end()
+                for n, marks, a, b in _rule_list(s, m.end(), num, m["sub"], free):
+                    spans.append((a, b))
+                    yield ("rule:" + _norm_key(prefix + n), prefix + _rule_label(n, marks), None,
+                           a, b, "rule", (prefix.strip(), n) if full else None)
     for m in LOCAL_WORDS_RE.finditer(s):
         if free(*m.span()):
             spans.append(m.span())
@@ -412,18 +457,21 @@ def scan_authorities(s: str, bare_rule: str = "Fed. R. Civ. P.", local_rule: str
                 prefix = re.match(r"(.*?Rules?)\s", words, re.S).group(1).replace("Rules", "Rule")
             yield ("rule:" + _norm_key(f"{prefix} {m['num']}"), f"{words} (read as {prefix} {m['num']})",
                    None, m.start(), m.end(), "rule", None)
-            pos = m.end()
-            while (t := RULE_TAIL_RE.match(s, pos)) and free(*t.span("cite")):
-                spans.append(t.span("cite"))
-                yield ("rule:" + _norm_key(f"{prefix} {t['num']}"), f"{prefix} {t['cite']}", None,
-                       t.start("cite"), t.end("cite"), "rule", None)
-                pos = t.end()
+            for n, marks, a, b in _rule_list(s, m.end(), m["num"], m["sub"], free):
+                spans.append((a, b))
+                yield ("rule:" + _norm_key(f"{prefix} {n}"), f"{prefix} {_rule_label(n, marks)}", None,
+                       a, b, "rule", None)
     bare = bare_rule
     for m in BARE_RULE_RE.finditer(s):
         if free(*m.span()):
             spans.append(m.span())
             yield ("rule:" + _norm_key(f"{bare} {m['num']}"), m.group(0), None, m.start(), m.end(),
                    "bare-rule", (bare, m["num"]))
+            # siblings only: "Rule 12(b)(1) and (6)"; a bare "Rule 7 and 15" was never read as a list
+            for n, marks, a, b in _rule_list(s, m.end(), m["num"], m["sub"], free, numbers=False):
+                spans.append((a, b))
+                yield ("rule:" + _norm_key(f"{bare} {n}"), f"Rule {_rule_label(n, marks)}", None, a, b,
+                       "bare-rule", (bare, n))
     # The extractor rejects "§§" (no digit after the first "§"), so scan with each list's "§§" read as "§ "
     # (same length: offsets hold) and yield every listed section as the single cite "<code> § <section>".
     lists = list(SECTION_LIST_RE.finditer(s))
@@ -1296,7 +1344,8 @@ class _Checker:
             if not free(a, b):
                 continue
             claimed.append((a, b))
-            raw = u.text[a:b] if re.search(r"[A-Za-z§]", u.text[a:b]) else disp  # "… and 15"
+            text = u.text[a:b]  # a list member alone ("… and 15", "… and (c)") is shown as its full cite
+            raw = text if re.search(r"[A-Za-z§]", text) and not _RULE_MARKS_ONLY.fullmatch(text) else disp
             c = Cite("authority", raw, disp, key, pin, a, b)
             self.resolve_authority(c, kind, extra, line, u.start + a)
             cites.append(c)
