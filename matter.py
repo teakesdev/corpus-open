@@ -52,6 +52,11 @@ Usage:
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
   matter.py brief check <dir> <draft.md> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
+  matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N]
+                        [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
+                        # sends the draft's case cites, nothing else, to CourtListener; needs a
+                        # human grant (consent activate --scope cite-lookup) and COURTLISTENER_TOKEN
+  matter.py consent propose|activate <dir> [--scope search|cite-lookup] [--caller ID]...
   matter.py docket suggest <dir>
   matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
                         [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]
@@ -554,6 +559,8 @@ def cmd_cite(args):
     is stored per row (`text_sha256`). The document (container) sha256 is
     recorded separately and never used to define offsets.
     """
+    if args.sub == "lookup":
+        return cmd_cite_lookup(args)
     conn = store.connect(args.case_dir)
     from matterkit import citations
     if args.sub == "extract":
@@ -580,6 +587,64 @@ def cmd_cite(args):
                   f"(text {r['text_sha256'][:12]}, parser {r['parser']})")
 
 
+def cmd_cite_lookup(args):
+    """cite lookup: send a draft's case cites, and nothing else, to CourtListener's citation lookup.
+    Exit 1 = a cite to check by hand (not found, name differs, unknown reporter), 2 = ambiguous or not
+    looked up, 0 = every case cite found. --dry-run prints the exact payload and sends nothing."""
+    import hashlib
+    from matterkit import citelookup
+    from matterkit.citations import now_iso
+    if not args.path:
+        sys.exit("usage: matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md]")
+    if args.path.lower().endswith((".docx", ".pdf", ".doc")):
+        sys.exit("cite lookup reads Markdown or plain text; use the .md copy of the draft")
+    try:
+        by = store.attribution(args.author, args.directed_by)
+    except ValueError as e:
+        sys.exit(f"invalid attribution: {e}")
+    if args.max_requests < 1:
+        sys.exit("--max-requests must be at least 1")
+    with open(args.path, "rb") as f:
+        raw = f.read()
+    cites = citelookup.draft_cites(raw.decode("utf-8", "replace"))
+    payloads = citelookup.payloads(cites)
+    if args.dry_run:
+        _write_or_print(citelookup.render_dry_run(args.path, payloads), args.out, "dry run: nothing sent")
+        return
+    if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
+        sys.exit(f"refused: {args.case_dir} is not a matter (no .matter/)")
+    answers, stopped, sent = [], None, 0
+    if payloads:
+        from matterkit.adapters.courtlistener_citations import CitationLookupAdapter
+        from matterkit.consent import ConsentError
+        try:
+            adapter = CitationLookupAdapter(args.case_dir, args.caller)
+            answers, stopped = adapter.lookup(payloads[: args.max_requests])
+        except (ConsentError, ValueError) as e:
+            sys.exit(f"refused: {e}")
+        sent = adapter.sent
+        if stopped is None and len(payloads) > args.max_requests:
+            stopped = f"over --max-requests {args.max_requests}; run again in a minute for the rest"
+    report = citelookup.Report(args.path, hashlib.sha256(raw).hexdigest(),
+                               citelookup.interpret(cites, payloads, answers, stopped), payloads, sent, now_iso())
+    if args.record:
+        report.recorded = citelookup.record(store.connect(args.case_dir), report.results, by)
+    if stopped:
+        print(f"lookup stopped early: {stopped}", file=sys.stderr)
+    _write_or_print(report.render(), args.out, report.summary())
+    sys.exit(report.exit_code)
+
+
+def _write_or_print(text, out, summary):
+    if out:
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"{summary}\nwrote {out}")
+    else:
+        print(text)
+
+
 def cmd_auth_stage(args):
     """Stage-validated authority status change (RFC 0001 §2.2c)."""
     conn = store.connect(args.case_dir)
@@ -597,20 +662,23 @@ def cmd_auth_stage(args):
 
 
 def cmd_consent(args):
-    from matterkit import consent
+    """consent propose|activate. --scope search: the R2 search adapter (query_text to the host);
+    --scope cite-lookup: bare case cites to the citation-lookup URL, and nothing else."""
+    from matterkit import citelookup, consent
     from matterkit.adapters.courtlistener import ENDPOINT_HOST
-    provider = "courtlistener-free"
-    endpoints = [ENDPOINT_HOST]
-    payloads = ["query_text"]
+    provider, endpoints, payloads, budget = {
+        "search": ("courtlistener-free", [ENDPOINT_HOST], ["query_text"], 20),
+        "cite-lookup": (citelookup.PROVIDER, [citelookup.ENDPOINT], [citelookup.PAYLOAD_TYPE], 10),
+    }[args.scope]
     if args.sub == "propose":
         g = consent.stage_proposal(
-            args.case_dir, provider, endpoints, payloads, args.as_user)
+            args.case_dir, provider, endpoints, payloads, args.as_user, daily_budget=budget)
         print(f"staged INERT proposal for {provider} by {g['created_by']!r} "
               "(authorizes no one until human TTY activate)")
     elif args.sub == "activate":
         try:
             g = consent.activate_human_grant(
-                args.case_dir, provider, endpoints, payloads, args.issuer,
+                args.case_dir, provider, endpoints, payloads, args.issuer, daily_budget=budget,
                 authorized_callers=args.caller or [])
         except consent.ConsentError as e:
             sys.exit(f"refused: {e}")
@@ -952,9 +1020,16 @@ def main():
     p.add_argument("--kind", choices=["media", "research"])
     p.set_defaults(fn=cmd_capture)
 
-    p = sub.add_parser("cite"); p.add_argument("sub", choices=["extract", "list"]); p.add_argument("case_dir")
+    p = sub.add_parser("cite"); p.add_argument("sub", choices=["extract", "list", "lookup"]); p.add_argument("case_dir")
     p.add_argument("path", nargs="?")
     p.add_argument("--status", choices=["extracted", "extraction-failed"])
+    p.add_argument("--dry-run", action="store_true", help="lookup: print the exact payload; send nothing")
+    p.add_argument("--record", action="store_true",
+                   help="lookup: move found cites' authorities rows from unverified to resolved")
+    p.add_argument("--out"); p.add_argument("--max-requests", type=int, default=3)
+    p.add_argument("--caller", default=os.environ.get("USER", "human"))
+    p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"))
+    p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"))
     p.set_defaults(fn=cmd_cite)
 
     p = sub.add_parser("stage"); p.add_argument("case_dir"); p.add_argument("authority_id"); p.add_argument("status")
@@ -967,6 +1042,7 @@ def main():
 
     p = sub.add_parser("consent"); p.add_argument("sub", choices=["propose", "activate"])
     p.add_argument("case_dir")
+    p.add_argument("--scope", choices=["search", "cite-lookup"], default="search")
     p.add_argument("--as-user", dest="as_user", default="agent")
     p.add_argument("--issuer", default=os.environ.get("USER", "human"))
     p.add_argument("--caller", action="append", default=[])

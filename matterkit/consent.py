@@ -20,15 +20,18 @@ all be forged by a compromised agent. The kit honestly provides:
         The kit does not ship one; without it the kit's promise is "the kit's
         own call graph refuses," never "the system cannot egress."
 
-Payload sensitivity ladder: query_text < passage_text < document_text.
-Query text is itself matter-derived; passage/document payloads are excluded
-from any default grant pattern and refuse at call time when not granted.
+Payload sensitivity ladder: citation_strings < query_text < passage_text <
+document_text. citation_strings are bare case cites ("123 F.4th 456"), each
+line checked against a strict pattern before it is sent (matterkit.citelookup);
+a grant for them authorizes nothing else. Query text is itself matter-derived;
+passage/document payloads are excluded from any default grant pattern and
+refuse at call time when not granted.
 """
 import datetime as _dt
 import json
 import os
 
-SENSITIVITY = {"query_text": 1, "passage_text": 2, "document_text": 3}
+SENSITIVITY = {"citation_strings": 0, "query_text": 1, "passage_text": 2, "document_text": 3}
 
 
 class ConsentError(PermissionError):
@@ -199,8 +202,9 @@ def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
     try:
         with open("/dev/tty", "w", encoding="utf-8") as tty_out:
             tty_out.write(
-                f"Activate CourtListener query_text for {matter_dir!r} as human "
-                f"issuer {issuer!r}? Type ACTIVATE then Enter.\n> ")
+                f"Activate {provider}: send {', '.join(payload_types)} to "
+                f"{', '.join(endpoints)} for {matter_dir!r} as human issuer "
+                f"{issuer!r}? Type ACTIVATE then Enter.\n> ")
             tty_out.flush()
         line = (tty_in.readline() or "").strip()
     except OSError as e:
