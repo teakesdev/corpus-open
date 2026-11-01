@@ -39,7 +39,7 @@ Usage:
   matter.py packet <dir> [--layer 30s|3min|15min] [--out FILE]
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
-  matter.py brief check <dir> <draft.md> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
+  matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
   matter.py docket suggest <dir>
   matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
                         [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]

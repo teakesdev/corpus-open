@@ -66,7 +66,7 @@ TOOLS = [
     {"name": "matter.hold_render", "description": "Render one custodian notice packet by notice_id (all correspondence kinds). Only DOCUMENTED FACT and UNKNOWN assertion rows; HYPOTHESIS omitted. Validates source hashes. Read-only, nosend; no approval or mailing writes.",
      "inputSchema": {"type": "object", "required": ["notice_id"],
                      "properties": {"notice_id": {"type": "string"}}, "additionalProperties": False}},
-    {"name": "matter.brief_check", "description": "Check a draft brief (Markdown/text inside MATTER_DIR): every record cite (Doc. 16 at 2), pleading cite (Compl. ¶ 59), authority, quotation and fact tag is tied to a hash-verified source in the store or flagged. Read-only; the store is never written. Returns the report; first line gives exit=0 (all tied), 1 (blocking), 2 (needs a human). Tied to a source is not legal correctness or good law.",
+    {"name": "matter.brief_check", "description": "Check a draft brief (Markdown, text, Word .docx or PDF inside MATTER_DIR; findings are located as para. N, fn. N or p. N:LINE for Word and PDF): every record cite (Doc. 16 at 2), pleading cite (Compl. ¶ 59), authority, quotation and fact tag is tied to a hash-verified source in the store or flagged. Read-only; the store is never written. Returns the report; first line gives exit=0 (all tied), 1 (blocking), 2 (needs a human). Tied to a source is not legal correctness or good law.",
      "inputSchema": {"type": "object", "required": ["path"],
                      "properties": {"path": {"type": "string"}, "pdftotext": {"type": "boolean"},
                                     "mode": {"type": "string", "enum": ["brief", "complaint"], "description": "complaint: allegations need no record cite"}}}},
