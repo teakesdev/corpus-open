@@ -205,6 +205,40 @@ class TestInterpret(unittest.TestCase):
         (r,) = citelookup.interpret(cites, p, [[result(p[0], "123 F.4th 456", 200, [c])]])
         self.assertIsNone(r.cluster["url"])
 
+    def test_an_answer_whose_index_and_echo_disagree_is_dropped(self):
+        # SWE-2 round 1, P2-1: an index pointing at line 2 must not bind an answer about line 1.
+        cites = citelookup.draft_cites("Alpha v. Beta, 1 F.3d 1; Gamma v. Delta, 2 F.3d 2.")
+        p = citelookup.payloads(cites)
+        self.assertEqual(p, ["1 F.3d 1\n2 F.3d 2"])
+        gamma = [cluster(111, "Gamma v. Delta", "1993-01-01", "2 F.3d 2")]
+
+        def item(start, echo, normalized=None):
+            return {"citation": echo, "normalized_citations": normalized or [echo], "start_index": start,
+                    "end_index": start + 8, "status": 200, "error_message": "", "clusters": gamma}
+
+        for bad in (item(9, "1 F.3d 1"), item(9, "2 F.3d 2", ["1 F.3d 1"]), item(9, "999 F.3d 999")):
+            res = citelookup.interpret(cites, p, [[bad]])
+            self.assertEqual([r.outcome for r in res], [citelookup.NOT_LOOKED_UP] * 2, bad)
+        # A dropped answer does not shadow a good one for the same line, and the echo alone still binds.
+        for good in ([item(9, "1 F.3d 1"), item(9, "2 F.3d 2")], [item(999, "2 F.3d 2")]):
+            res = citelookup.interpret(cites, p, [good])
+            self.assertEqual([r.outcome for r in res], [citelookup.NOT_LOOKED_UP, citelookup.FOUND], good)
+            self.assertEqual(res[1].cluster["id"], 111)
+
+    def test_only_a_word_cut_short_with_a_period_matches_by_prefix(self):
+        # SWE-2 round 1, P2-2: "Roger" is not "Rogers"; "Educ." is still "Education".
+        for draft_name, cl_name, outcome in (
+                ("Roger v. Lee", "Rogers v. Kent", citelookup.NAME_DIFFERS),
+                ("Marsh v. Lee", "Marshall v. Kent", citelookup.NAME_DIFFERS),
+                ("Hill v. Lee", "Hills v. Kent", citelookup.NAME_DIFFERS),
+                ("Bd. of Educ. v. Kappa", "Board of Education v. Lambda", citelookup.FOUND),
+                ("Board of Education v. Kappa", "Bd. of Educ. v. Lambda", citelookup.FOUND)):
+            cites = citelookup.draft_cites(f"{draft_name}, 9 F.3d 9.")
+            p = citelookup.payloads(cites)
+            (r,) = citelookup.interpret(cites, p, [[result(p[0], "9 F.3d 9", 200,
+                                                           [cluster(5, cl_name, "1993-01-01", "9 F.3d 9")])]])
+            self.assertEqual(r.outcome, outcome, (draft_name, cl_name))
+
 
 def recorded_one(payload):
     return [result(payload, "123 F.4th 456", 200, [cluster(9001, "Smith v. Jones", "2024-05-01", "123 F.4th 456")])]

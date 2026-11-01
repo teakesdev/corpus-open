@@ -147,22 +147,33 @@ _STOP = {"the", "and", "inc", "corp", "corporation", "company", "llc", "ltd", "l
          "parte", "for", "rel"}
 
 
+def _fold(name: str) -> str:
+    return re.sub(r"['’]", "", name.lower())
+
+
 def _words(name: str) -> set:
-    return {w for w in re.findall(r"[a-z0-9]+", re.sub(r"['’]", "", name.lower()))
-            if len(w) >= 3 and w not in _STOP}
+    return {w for w in re.findall(r"[a-z0-9]+", _fold(name)) if len(w) >= 3 and w not in _STOP}
+
+
+def _cut(name: str) -> set:
+    """Words the name cuts short with a period ("Educ.", "Mfrs.")."""
+    return set(re.findall(r"([a-z0-9]+)\.", _fold(name)))
 
 
 def _same_case(draft_name: str, names: list) -> bool:
     """True when the draft's name shares a significant word with one of CourtListener's names
-    ("Twombly" / "Bell Atlantic Corp. v. Twombly"; "Educ." / "Education"), or has none to compare."""
-    mine = _words(draft_name)
+    ("Twombly" / "Bell Atlantic Corp. v. Twombly"), or has none to compare. A word cut short with a
+    period matches the word it begins ("Educ." / "Education"); any other word must match whole, so
+    "Roger" is not "Rogers"."""
+    mine, my_cut = _words(draft_name), _cut(draft_name)
     if not mine:
         return True
-    for theirs in map(_words, names):
+    for name in names:
+        theirs, their_cut = _words(name), _cut(name)
         for a in mine:
             for b in theirs:
-                short, long_ = sorted((a, b), key=len)
-                if a == b or (len(short) >= 4 and long_.startswith(short)):
+                if a == b or (len(a) >= 4 and a in my_cut and b.startswith(a)) \
+                        or (len(b) >= 4 and b in their_cut and a.startswith(b)):
                     return True
     return False
 
@@ -241,11 +252,16 @@ def interpret(cites: list[DraftCite], payloads: list[str], batches: list, stoppe
         for item in batches[i] if isinstance(batches[i], list) else []:
             if not isinstance(item, dict):
                 continue
+            echo, normalized = item.get("citation"), item.get("normalized_citations")
             line = starts.get(item.get("start_index"))
-            if line is None and item.get("citation") in lines:
-                line = item["citation"]
-            if line is not None and line not in got:
-                got[line] = item
+            if line is None and echo in lines:
+                line = echo
+            # CourtListener echoes the cite it read. An answer that names a different cite than the
+            # line it points at is malformed: drop it, so that line is NOT LOOKED UP, never misjudged.
+            others = {n for n in (normalized if isinstance(normalized, list) else []) if n in lines} - {line}
+            if line is None or line in got or (isinstance(echo, str) and echo != line) or others:
+                continue
+            got[line] = item
         for line in lines:
             out[line] = _judge(by_sent[line], got.get(line))
     return [out[c.sent] for c in cites if c.sent in out]
