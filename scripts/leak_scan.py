@@ -209,9 +209,12 @@ def _name_email_hits(text: str, allow_emails=()):
 
 
 def _home_hit(path: str):
-    """A path that starts at a home directory ("Users/dan/..."); a directory that is merely called Users does not."""
+    """A path that starts at a macOS-style home directory ("Users/dan/..."). A directory called Users deeper in
+    the path does not count, and neither does a top-level home/ or users/: a web app or a Django app has them."""
     m = HOME_RE.match("/" + path.replace("\\", "/"))
-    return m if m and m.group("user").lower() not in GENERIC_USERS else None
+    if m and m.group(0).startswith("/Users/") and m.group("user").lower() not in GENERIC_USERS:
+        return m
+    return None
 
 
 def mask_path(path: str, patterns=(), allow_emails=()) -> str:

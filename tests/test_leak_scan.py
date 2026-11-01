@@ -744,6 +744,12 @@ class TestSensitiveFileNames(unittest.TestCase):
     def test_a_directory_that_happens_to_be_called_users_is_not(self):
         self.assertEqual(leak_scan.scan_path_name("vendor/Users/dan/notes.md"), [])
 
+    def test_ordinary_top_level_directories_are_not_home_directories(self):
+        # a web app's home/ and a Django users/ are common; only a macOS-style Users/<name>/ tree is read as a home
+        for name in ("home/index.html", "home/views.py", "home/dan/notes.md", "users/models.py", "Users_guide/a.md"):
+            with self.subTest(name=name):
+                self.assertEqual(leak_scan.scan_path_name(name), [])
+
     def test_an_allowed_email_in_a_name_is_neither_flagged_nor_masked(self):
         name = "docs/me" + AT + "mydomain.org.md"
         self.assertEqual(leak_scan.scan_path_name(name, allow_emails=("*" + AT + "mydomain.org*",)), [])
