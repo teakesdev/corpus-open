@@ -1,0 +1,60 @@
+#!/bin/sh
+# Sample pre-push hook: stop a push that would publish a home path, a personal email,
+# an assistant session transcript or a case identifier.
+#
+# It is a sample. Nothing installs it. To use it in your own clone:
+#   cp scripts/pre-push.sample .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+#
+# It scans the commits the push would add (messages and added lines), not the whole
+# history, and the names of the refs being pushed. Environment:
+#   LEAK_SCAN_PATTERNS       file of private case patterns, kept outside the repository
+#                            (see the header of scripts/leak_scan.py for the format)
+#   LEAK_SCAN_CHECK_AUTHORS  any value: also report author and committer addresses. Off by
+#                            default, because every commit carries its author's address;
+#                            turn it on together with LEAK_SCAN_ALLOW_EMAIL for your own
+#   LEAK_SCAN_PY             path to leak_scan.py (default: scripts/leak_scan.py in this repo)
+#   PYTHON                   interpreter (default: python3)
+#
+# Any nonzero exit from the scanner blocks the push, including exit 2 (a patterns file
+# that is missing or invalid), so a broken setup never lets a push through unchecked.
+# Bypass once, deliberately, with `git push --no-verify`.
+
+zero=0000000000000000000000000000000000000000
+remote=${1:-origin}
+root=$(git rev-parse --show-toplevel) || exit 1
+scan=${LEAK_SCAN_PY:-$root/scripts/leak_scan.py}
+python=${PYTHON:-python3}
+status=0
+authors=""
+[ -n "${LEAK_SCAN_CHECK_AUTHORS:-}" ] && authors="--check-authors"
+
+# git passes the remote's name, or its URL when the push names a URL. A URL, or a name this
+# clone has not configured, matches no remote-tracking branch, so every one counts as known.
+if git remote get-url "$remote" >/dev/null 2>&1; then
+    known="--remotes=$remote"
+else
+    known="--remotes"
+fi
+
+# The scanner and git read their own input; </dev/null keeps them from consuming the ref
+# lines this loop is reading.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # Deleting a ref pushes no commits.
+    [ "$local_sha" = "$zero" ] && continue
+    if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null </dev/null; then
+        range="$remote_sha..$local_sha"
+    else
+        # A new ref, or a remote tip this clone does not have: scan everything the
+        # remote's known branches lack.
+        range="$local_sha --not $known"
+    fi
+    echo "leak_scan: $local_ref -> $remote_ref ($range)" >&2
+    "$python" "$scan" --repo "$root" --range "$range" $authors </dev/null || status=1
+    # A branch or tag name can name the case too.
+    "$python" "$scan" --name "$local_ref" --name "$remote_ref" </dev/null || status=1
+done
+
+if [ "$status" -ne 0 ]; then
+    echo "push blocked: leak_scan found something (or could not run). Fix it, or use --no-verify on purpose." >&2
+fi
+exit "$status"
