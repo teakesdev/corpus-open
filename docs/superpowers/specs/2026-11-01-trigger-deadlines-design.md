@@ -84,7 +84,7 @@ ty's "ok continue" (2026-11-01) started the build from §6. No reviewer seat has
 | One `events` row on fire | Two rows in one transaction. The first is the `deadline … added` row, with the same shape as `deadline add`. The second is `trigger … fired`, with the date, service, reason, sources and every counting step. |
 | Sources checked as `deadline update` checks them | Stricter. `fire`, `holiday add` and `holiday year` also re-hash each local source and refuse one that is missing or changed since it was registered. The check moved into `deadlines.resolve_sources`, and `deadline update` keeps its old behaviour (`rehash=False`). |
 | (not in draft) | `fire --dry-run` shows the count and writes nothing. |
-| (not in draft) | `fire` refuses an `--on` date after today. |
+| (not in draft) | `fire` refuses an `--on` date after today, except with `--dry-run`. Fixed after the build: the first version refused a future dry run too, though its error said to use one, which blocked previewing an event still ahead. |
 | (not in draft) | Observed days. When a weekday observed for a weekend holiday (5 U.S.C. § 6103(b)) decides the date, the steps also give the date if only the statutory day counts. 6(a)(6)(A) names the § 6103 days without saying whether the observed day counts. |
 | (not in draft) | Declared days (6(a)(6)(B)) are recorded the same way as state holidays (`--kind declared`), not looked up. |
 

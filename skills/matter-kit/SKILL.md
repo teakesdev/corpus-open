@@ -77,6 +77,7 @@ matter fact list <dir> [--status ALLEGATION]     # unsupported rows render **[UN
 matter deadline add <dir> --label "Rule 4(m) service deadline" --due 2026-10-14 --rule "Fed. R. Civ. P. 4(m)" --confidence hard --verification secondary-source
 matter trigger add <dir> --label "Reply brief" --days 7 --waits-on "the response is served" --rule "L.U.Civ.R. 7(b)(4)" --owner ours
 matter trigger fire <dir> <t_id> --on 2026-11-02 --service ecf --source Filings/response.pdf@p.1 --reason "response served" [--dry-run]
+matter trigger fire <dir> <t_id> --on 2026-12-01 --service none --dry-run   # what if the order comes Dec. 1? writes nothing
 ```
 
 A deadline that starts when something happens is a trigger, not a hand-counted

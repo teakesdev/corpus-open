@@ -10,6 +10,7 @@ and the test that would catch it:
 - the deadline row and its events disagree -> test_fire_is_one_transaction
 - a year with no recorded state holidays is counted anyway -> test_fire_refusals_write_nothing
 - an old store breaks -> test_an_old_store_gains_the_tables
+- a dry run cannot preview an event still ahead, or a real fire records one -> test_a_dry_run_may_look_ahead*
 
 Synthetic tempdirs only. Run: python3 -m unittest discover -s tests -v
 """
@@ -20,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
@@ -163,6 +164,24 @@ class TestTriggerStore(Base):
         self.assertTrue(steps)
         self.assertEqual(self.counts(), before)
 
+    def test_a_dry_run_may_look_ahead_but_a_fire_may_not(self):
+        self.year()
+        self.year(2027)
+        tid = self.trigger()
+        before = self.counts()
+        # Fri 2026-12-18 + 14 = Fri 2027-01-01, New Year's Day, so the period runs to Mon 2027-01-04
+        did, due, steps = self.fire(tid, on="2026-12-18", sources=(), reason=None, dry_run=True)
+        self.assertIsNone(did)
+        self.assertEqual(due, date(2027, 1, 4))
+        self.assertTrue(steps)
+        with self.assertRaises(triggers.TriggerError) as cm:  # 2028 has no recorded state holidays
+            self.fire(tid, on="2027-12-27", sources=(), reason=None, dry_run=True)
+        self.assertIn("2028", str(cm.exception))
+        with self.assertRaises(triggers.TriggerError) as cm:
+            self.fire(tid, on="2026-12-18")
+        self.assertIn("after today", str(cm.exception))
+        self.assertEqual(self.counts(), before)
+
     def test_fire_is_one_transaction(self):
         self.year()
         tid = self.trigger()
@@ -274,6 +293,21 @@ class TestTriggerCli(Base):
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.count("deadlines"), 0)
 
+    def test_a_dry_run_may_look_ahead(self):
+        tid, _ = self.add_cli()
+        ahead = date.today() + timedelta(days=30)
+        for y in sorted({ahead.year, (ahead + timedelta(days=30)).year} - {2026}):
+            self.run_cli("holiday", "year", self.dir, "--year", str(y), "--jurisdiction", "Example State",
+                         "--source", LIST)
+        out = self.run_cli("trigger", "fire", self.dir, tid, "--on", ahead.isoformat(), "--service", "ecf",
+                           "--dry-run").stdout
+        self.assertIn("nothing was written", out)
+        r = self.run_cli("trigger", "fire", self.dir, tid, "--on", ahead.isoformat(), "--service", "ecf",
+                         "--source", ORDER, "--reason", "x", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("after today", r.stderr)
+        self.assertEqual(self.count("deadlines"), 0)
+
     def test_attribution_is_recorded(self):
         tid, _ = self.add_cli("--author", "agent:model-x", "--directed-by", "Pat Example")
         self.assertEqual(self.conn.execute("SELECT created_by FROM deadline_triggers WHERE id=?", (tid,))
@@ -339,6 +373,18 @@ class TestTriggerMcp(Base):
         self.assertEqual(self.counts(), before)
         res = self._call("matter.trigger_fire", {"trigger_id": tid, "on": "2026-10-05", "service": "ecf",
                                                  "dry_run": True})
+        self.assertIn("nothing was written", res["content"][0]["text"])
+        self.assertEqual(self.counts(), before)
+
+    def test_a_dry_run_may_look_ahead(self):
+        ahead = date.today() + timedelta(days=30)
+        for y in sorted({ahead.year, (ahead + timedelta(days=30)).year}):
+            self.year(y)
+        tid = self.trigger()
+        before = self.counts()
+        res = self._call("matter.trigger_fire", {"trigger_id": tid, "on": ahead.isoformat(), "service": "ecf",
+                                                 "dry_run": True})
+        self.assertFalse(res.get("isError"), res)
         self.assertIn("nothing was written", res["content"][0]["text"])
         self.assertEqual(self.counts(), before)
 

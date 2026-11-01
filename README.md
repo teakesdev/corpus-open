@@ -494,7 +494,9 @@ Saturday, Sunday or legal holiday. Under 6(d) it adds 3 days only for service by
 mail, by leaving the paper with the clerk, or by other consented means, then
 rolls again. It inserts one ordinary deadline, `working-estimate/unverified`,
 and records every counting step in `events`, so check the count before you
-mark it verified. `--dry-run` shows the count and writes nothing.
+mark it verified. `--dry-run` shows the count and writes nothing. It also takes
+a date after today, so you can see what an order entered that day would make
+due; without it, `fire` refuses a date after today.
 
 Legal holidays are the federal holidays of 5 U.S.C. § 6103, computed with the
 weekday observed for one on a weekend, plus the days you record with a source:

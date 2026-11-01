@@ -960,13 +960,14 @@ def main():
     p.add_argument("--label"); p.add_argument("--waits-on", dest="waits_on", help="add: the event it waits on")
     p.add_argument("--days", type=int, help="add: days after the event (Fed. R. Civ. P. 6(a)(1))")
     p.add_argument("--rule"); p.add_argument("--owner", choices=["ours", "theirs", "court"])
-    p.add_argument("--on", help="fire: the date the event happened, YYYY-MM-DD")
+    p.add_argument("--on", help="fire: the date the event happened, YYYY-MM-DD (with --dry-run, any date)")
     p.add_argument("--service", choices=["mail", "clerk", "consented-other", "email", "ecf", "hand", "none"],
                    help="fire: how the paper was served (6(d) adds 3 days for mail, clerk, consented-other); "
                         "none: the period runs from the event itself")
     p.add_argument("--source", action="append", default=[], help="fire: rel_path@locator of a registered document")
     p.add_argument("--reason", help="fire/withdraw: why (required)")
-    p.add_argument("--dry-run", action="store_true", help="fire: show the count and write nothing")
+    p.add_argument("--dry-run", action="store_true",
+                   help="fire: show the count and write nothing; the date may be after today")
     p.add_argument("--all", action="store_true", help="list: include fired and withdrawn triggers")
     p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
                    help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")

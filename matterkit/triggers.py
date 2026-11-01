@@ -234,13 +234,15 @@ def fire(conn, case_dir, trigger_id, on, service, sources, reason, by, today=Non
 
     Returns (deadline id or None for a dry run, last day, steps). The deadline row, the trigger's
     new state and both events commit together or not at all; a dry run checks and counts but
-    writes nothing and needs no source or reason."""
+    writes nothing, needs no source or reason, and may take a date after today, to show what an
+    event on that day would make due."""
     row = _waiting(conn, trigger_id)
     when = parse_date(on)
     if when is None:
         raise TriggerError(f"--on must be a valid date, YYYY-MM-DD (got {on!r})")
-    if when > (today or date.today()):
-        raise TriggerError(f"--on {on} is after today; record the event once it has happened, or use --dry-run")
+    if when > (today or date.today()) and not dry_run:
+        raise TriggerError(f"--on {on} is after today; record the event once it has happened, or use --dry-run "
+                           "to see what it would make due")
     due, steps = count(when, row["days"], service, calendar(conn))
     if dry_run:
         return None, due, steps
