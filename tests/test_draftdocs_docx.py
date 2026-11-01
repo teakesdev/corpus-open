@@ -352,5 +352,52 @@ class TestSilentDropsClosed(unittest.TestCase):
         self.assertTrue(any("headers and footers" in n and "not read" in n for n in d.notes), d.notes)
 
 
+class TestRoundTwoFollowups(unittest.TestCase):
+    """SWE-2's round-2 review (4f418f3): loose ends in the round-1 fixes."""
+
+    NUM = numbering_xml({0: [lvl(0, "decimal", "%1.")]}, {1: 0})
+    ITEM = '<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>%s</w:t></w:r>'
+
+    def notes_part(self, kind, body):
+        return ('<?xml version="1.0"?><w:%ss xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                '<w:%s w:id="1"><w:p>%s</w:p></w:%s></w:%ss>' % (kind, kind, body, kind, kind))
+
+    def test_a_missing_note_referenced_twice_is_warned_once_and_not_called_read(self):
+        d = read(para("A.", fnref(9)) + para("B.", fnref(9)))
+        self.assertEqual([w[0] for w in d.warnings], ["footnote-missing"])
+        self.assertFalse(any("more than one place" in n for n in d.notes), d.notes)
+
+    def test_footnote_and_endnote_lists_count_apart(self):
+        d = read(para("A.", fnref(1), enref(1)), numbering=self.NUM,
+                 parts={"word/footnotes.xml": self.notes_part("footnote", self.ITEM % "fn item"),
+                        "word/endnotes.xml": self.notes_part("endnote", self.ITEM % "en item")})
+        self.assertEqual(d.text, "A.\n\n1. fn item\n\n1. en item")
+
+    def test_a_note_reference_in_a_table_of_contents_paragraph_is_read_whether_or_not_the_line_has_text(self):
+        styles = styles_xml([("TOC1", "toc 1", None, "")])
+        for tag, p in (("empty", para(fnref(1), style="TOC1")), ("with text", para("Entry ", fnref(1), style="TOC1"))):
+            with self.subTest(tag):
+                d = read(p + para("Body."), styles=styles, footnotes={1: "Note."})
+                self.assertIn("Note.", d.text)
+                self.assertFalse(any("not referenced" in n for n in d.notes), d.notes)
+                self.assertNotIn("Entry", d.text)   # the line itself is still not checked
+
+    def test_the_unread_content_warning_says_what_was_lost_in_plain_words(self):
+        d = read(para("Compl. ", "<w:r><w:sym w:font='Symbol' w:char='F0B6'/></w:r>", " 59."))
+        self.assertIn("symbol characters", d.warnings[0][2])
+        self.assertEqual(d.warnings[0][1], "sym")
+        math = "<m:oMath xmlns:m='http://schemas.openxmlformats.org/officeDocument/2006/math'><m:r><m:t>x</m:t></m:r></m:oMath>"
+        d = read(para("V ", math, "."))
+        self.assertIn("equations", d.warnings[0][2])
+        self.assertIn("oMath", d.warnings[0][2])
+
+    def test_tables_inside_and_beside_a_content_control_get_their_own_numbers(self):
+        one = lambda s: "<w:tbl><w:tr><w:tc>%s</w:tc></w:tr></w:tbl>" % para(s)  # noqa: E731
+        sdt = lambda inner: "<w:sdt><w:sdtPr/><w:sdtContent>%s</w:sdtContent></w:sdt>" % inner  # noqa: E731
+        d = read(one("First.") + sdt(one("Second.") + one("Third.")) + one("Fourth."))
+        self.assertEqual([b[0] for b in blocks(d)], ["para. 1 (table 1, row 1, cell 1)", "para. 2 (table 2, row 1, cell 1)",
+                                                      "para. 3 (table 3, row 1, cell 1)", "para. 4 (table 4, row 1, cell 1)"])
+
+
 if __name__ == "__main__":
     unittest.main()

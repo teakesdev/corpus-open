@@ -359,7 +359,7 @@ class _Numbering:
 
     def __init__(self, root, warn):
         self.abstract, self.nums, self.links, self.counters, self.warn = {}, {}, {}, {}, warn
-        self.scope = "body"  # lists inside footnotes and endnotes count apart from the body's
+        self.scope = "body"  # "footnote" and "endnote" while reading a note: its lists count apart from the body's
         self.bad_formats = set()
         self.present = root is not None
         if root is None:
@@ -439,6 +439,9 @@ _RUN_INERT = {"rPr", "instrText", "fldChar", "delText", "delInstrText", "footnot
               "commentReference", "pgNum", "ruby"}
 _CONTAINERS = {"hyperlink", "fldSimple", "smartTag", "customXml", "dir", "bdo"}
 _MAX_TABLE_DEPTH = 24
+#: What the unread-content warning says for an element a pro se reader would not recognise by its XML name.
+_UNREAD_WORDS = {"sym": "symbol characters (sym)", "oMath": "equations (oMath)", "altChunk": "embedded content (altChunk)",
+                 "ruby": "phonetic guide text (ruby)"}
 
 
 _MATH_T = "{http://schemas.openxmlformats.org/officeDocument/2006/math}t"
@@ -518,16 +521,17 @@ def _table_parts(parent, want, st):
             st.unhandled.add(f"{_local(c.tag)} (directly inside a table or row)")
 
 
-def _paragraphs(container, tables=(), st=None, depth=0):
+def _paragraphs(container, tables=(), st=None, depth=0, counter=None):
     """(paragraph element, table path) for every w:p under `container` in reading order, descending into tables
     and block-level content controls. The table path is ((table no., row, cell), ...), outermost first; a table
     is numbered among the tables of its own container (the body, or a cell)."""
-    n_tables = 0
+    counter = counter if counter is not None else [0]   # shared with content controls that wrap tables
     for c in container:
         if c.tag == W + "p":
             yield c, tables
         elif c.tag == W + "tbl":
-            n_tables += 1
+            counter[0] += 1
+            n_tables = counter[0]
             if depth >= _MAX_TABLE_DEPTH:
                 if st is not None:
                     st.unhandled.add("tbl (nested too deep)")
@@ -538,7 +542,7 @@ def _paragraphs(container, tables=(), st=None, depth=0):
         elif c.tag == W + "sdt":
             content = c.find(W + "sdtContent")
             if content is not None:
-                yield from _paragraphs(content, tables, st, depth)
+                yield from _paragraphs(content, tables, st, depth, counter)
         elif st is not None and (_local(c.tag) == "altChunk" or (_local(c.tag) not in _INERT and _has_text(c))):
             st.unhandled.add(_local(c.tag))   # embedded content or an element holding text that is not read
 
@@ -646,11 +650,12 @@ def _read_docx(data: bytes) -> Draft:
     blocks, n_para, n_toc, counts = [], 0, 0, Counter()
     used = {"footnote": set(), "endnote": set()}
     seq = {"footnote": 0, "endnote": 0}
-    labelled, repeated = {}, {}   # (kind, id) -> label of the first reference; label -> extra references
+    labelled, repeated, missing = {}, {}, set()   # (kind, id) -> first label; label -> extra references; absent notes
 
     def note_blocks(kind, nid):
         if (kind, nid) in labelled:   # the same note referenced again: read once, under the first label
-            repeated[labelled[(kind, nid)]] = repeated.get(labelled[(kind, nid)], 0) + 1
+            if (kind, nid) not in missing:   # a note that is not there was warned about once and was not read
+                repeated[labelled[(kind, nid)]] = repeated.get(labelled[(kind, nid)], 0) + 1
             return
         seq[kind] += 1
         label_no = FORMATS.get(fmt_of[kind], FORMATS["decimal"])(seq[kind])
@@ -664,12 +669,13 @@ def _read_docx(data: bytes) -> Draft:
                     el = n
                     break
         if el is None:
+            missing.add((kind, nid))
             warn("footnote-missing", label, f"the text cites {label} but the draft has no such {kind}; it was not read")
             return
         used[kind].add(nid)
         counts[kind] += 1
         nst = _State()
-        numbering.scope = "note"
+        numbering.scope = kind   # a footnote's lists and an endnote's count apart, as Word's stories do
         for p, _ in _paragraphs(el, st=nst):
             out = []
             _walk(p, out, nst)
@@ -702,6 +708,8 @@ def _read_docx(data: bytes) -> Draft:
         sid = _val(ppr, "pStyle")
         if styles.is_toc(sid):
             n_toc += 1
+            for kind, nid in pst.refs:   # the line itself is not checked; a note it cites still is
+                note_blocks(kind, nid)
             continue
         detail = ([f"numbered {marker}"] if marker else []) + ([_table_label(tables)] if tables else [])
         label = f"para. {n_para}" + (f" ({', '.join(detail)})" if detail else "")
@@ -736,7 +744,7 @@ def _read_docx(data: bytes) -> Draft:
     notes.append("not read: " + ", ".join(unread + ["text boxes"]))
     if st.unhandled:
         warn("unread-content", ", ".join(sorted(st.unhandled)), "content in these Word elements was not read: "
-             + ", ".join(sorted(st.unhandled)))
+             + ", ".join(_UNREAD_WORDS.get(u, u) for u in sorted(st.unhandled)))
     if st.hidden:
         warn("hidden-text", "hidden text", f"{_plural(st.hidden, 'run')} of hidden text was not read (Word does not show or "
              "print it); unhide it and check again if it is part of the draft")
