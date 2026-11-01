@@ -152,7 +152,7 @@ def sha256(text: str) -> str:
 # --------------------------------------------------------------------------
 _STOP = {"the", "and", "inc", "corp", "corporation", "company", "llc", "ltd", "llp", "city", "county", "state",
          "states", "united", "america", "dept", "department", "people", "commonwealth", "matter", "estate",
-         "parte", "for", "rel"}
+         "parte", "for", "rel", "limited", "incorporated", "plc", "pllc", "lllp", "gmbh", "iii", "esq"}
 
 # Bluebook abbreviations (T6, and T10's states), folded as _fold folds them ("Nat'l" -> "natl"), each mapped to
 # the start of the word or words it shortens. Only these match by prefix, so "Educ." is "Education" while
@@ -215,10 +215,31 @@ _GENERIC = frozenset("""
     telephone tennessee texas town township trade transit transportation trust trustees unemployment unified
     union university utah utilities utility vermont village virginia warden washington water west western
     wisconsin workers wyoming york
-""".split())
+""".split()) | frozenset("""
+    advisers advisors aerospace affairs air aircraft airport airways allied apartments apparel approximately
+    army assets assorted automobile automotive aviation behalf beneficiaries beverage beverages brands
+    broadcasting cable cement certain child children citizens claimant claimants class clerk clothing coal
+    commercial computer computers concrete conservator consultants consulting contents court courts creditor
+    creditors currency customs dairy data debtor debtors defendant defendants detainee detainees detention
+    digital dollars drilling drug drugs election elections electronics enforcement equities equity executor
+    executrix exploration exports farm fiber films food friend funds furniture gaming global glass grain
+    guardian healthcare heirs highway homeland hotel hotels immigration imports individually inmate inmates
+    instruments investment investments investors iron items jail judge judges land lease leasing legislature
+    lending lines liquidator logistics lumber machinery marine maritime marketing materials media member
+    members metal metals mills minerals mines mining minor minors nation navy network networks news one
+    others owners packaging paper parcel parents petitioner petitioners petroleum pipeline plaintiff
+    plaintiffs plastics port postal premises printing prison prisoner prisoners prisons radio real receiver
+    recycling rental representative representatives republic residence residents resorts respondent
+    respondents restaurant restaurants retail scientific senate shareholders similarly situated software
+    solutions sports staffing standard steel stockholders successor successors taxpayers television tenants
+    textile textiles three timber title tobacco tools trading travel treasury tribal tribe truck trucking
+    trustee two universal unknown various vehicle vehicles venture ventures vessel veterans voters waste
+    wholesale wireless worldwide
+""".split())  # trades, roles and in-rem words, which many unrelated parties share (SWE-2 round 3)
 _LONG_STEMS = tuple(s for s in set(_ABBREV.values()) if len(s) >= 7)  # "associat" covers "associates"
 _CONNECT = {"of", "and", "the", "for", "in", "on", "at", "to", "a", "an"}
-_SUFFIX = {"inc", "corp", "co", "corporation", "company", "llc", "ltd", "llp"}
+_SUFFIX = {"inc", "corp", "co", "corporation", "company", "llc", "ltd", "llp", "limited", "incorporated", "plc",
+           "pllc", "lp", "lllp", "gmbh"}
 
 
 def _fold(name: str) -> str:
@@ -462,7 +483,8 @@ def render_dry_run(draft_path: str, payloads: list[str]) -> str:
 def record(conn, results: list[Result], by: str) -> list[tuple[str, str]]:
     """Move each FOUND cite's authorities row from unverified to resolved, or add a resolved row.
     Rows past unverified are left exactly as they are; nothing else is ever written. A cite whose write
-    fails is rolled back and reported as "not written"; the others still go on."""
+    fails is rolled back and reported as "not written", as is one several store rows answer to; the others
+    still go on."""
     actions = []
     now = citations.now_iso()
     for r in results:
@@ -472,7 +494,7 @@ def record(conn, results: list[Result], by: str) -> list[tuple[str, str]]:
         try:
             row = authority.find(conn, sent)
         except authority.AuthorityError:
-            actions.append((sent, "several store rows answer to this cite; nothing written"))
+            actions.append((sent, "not written: several store rows answer to this cite; resolve them by hand"))
             continue
         if row is not None and row["status"] != "unverified":
             actions.append((sent, f"{row['id']}: already {row['status']}; nothing written"))

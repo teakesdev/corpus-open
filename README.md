@@ -254,8 +254,9 @@ python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --re
   A throttled run stops and does not retry.
 - **Results:** FOUND (with the opinion's name, date and CourtListener link),
   NAME DIFFERS (an opinion exists at that cite but its name shares no
-  distinctive word with the draft's; generic words such as "Board", "Bank" or
-  "Doe" count only when a whole party matches), NOT FOUND, UNKNOWN REPORTER,
+  distinctive word with the draft's; generic words such as "Board", "Bank",
+  "Steel", "Trustee" or "Doe", and suffixes such as "Limited", count only when
+  a whole party matches), NOT FOUND, UNKNOWN REPORTER,
   AMBIGUOUS and NOT LOOKED UP. Exit 1 means a cite to check by hand, 2 one a
   person must resolve (or a found cite `--record` could not write), 0 every
   cite found or none in the draft.
@@ -267,7 +268,8 @@ python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --re
   `resolved`, with `checked_via` `courtlistener:id=…` and the lookup (cluster,
   link, `retrieved_at`) in its evidence, or adds a `resolved` row. Rows already
   past `unverified` are left alone, and nothing is ever marked
-  `source-checked`. The next `brief check` then shows the cite as located but
+  `source-checked`. A found cite that several store rows answer to is not
+  written; resolve those rows by hand. The next `brief check` then shows the cite as located but
   not source-checked instead of blocking it.
 
 ## Changes for the next amended pleading

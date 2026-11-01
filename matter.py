@@ -478,14 +478,14 @@ def cmd_cite(args):
     is stored per row (`text_sha256`). The document (container) sha256 is
     recorded separately and never used to define offsets.
     """
+    if args.status is not None and args.sub != "list":
+        sys.exit(f"--status applies to cite list, not cite {args.sub}")
     if args.sub == "lookup":
-        if args.status:
-            sys.exit("--status applies to cite list, not cite lookup")
         return cmd_cite_lookup(args)
     lookup_only = [flag for flag, value in (
         ("--dry-run", args.dry_run), ("--record", args.record), ("--out", args.out),
         ("--max-requests", args.max_requests), ("--caller", args.caller), ("--author", args.author),
-        ("--directed-by", args.directed_by)) if value not in (None, False)]
+        ("--directed-by", args.directed_by)) if value is not None and value is not False]  # 0 is given too
     if lookup_only:
         sys.exit(f"{', '.join(lookup_only)} applies to cite lookup, not cite {args.sub}")
     conn = store.connect(args.case_dir)
@@ -517,7 +517,8 @@ def cmd_cite(args):
 def cmd_cite_lookup(args):
     """cite lookup: send a draft's case cites, and nothing else, to CourtListener's citation lookup.
     Exit 1 = a cite to check by hand (not found, name differs, unknown reporter), 2 = ambiguous, not
-    looked up, or a found cite --record could not write, 0 = every case cite found (or the draft has
+    looked up, or a found cite --record could not write (several store rows answer to it, or the write
+    failed), 0 = every case cite found (or the draft has
     none). --dry-run prints the exact payload and sends nothing."""
     import hashlib
     from matterkit import citelookup

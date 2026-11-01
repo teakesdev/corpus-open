@@ -279,6 +279,23 @@ class TestInterpret(unittest.TestCase):
                  "Monell v. Department of Social Services of City of New York", citelookup.FOUND)):
             self.assertEqual(self.judge_names(draft_name, cl_name), outcome, (draft_name, cl_name))
 
+    def test_suffixes_trade_words_and_roles_do_not_make_the_same_case(self):
+        # SWE-2 round 3, P3-1: a spelled-out suffix or a trade word was still a distinctive word.
+        for draft_name, cl_name, outcome in (
+                ("Alpha Limited v. Doe", "Beta Limited v. Roe", citelookup.NAME_DIFFERS),
+                ("Alpha Incorporated v. Doe", "Beta Incorporated v. Roe", citelookup.NAME_DIFFERS),
+                ("Smith Trading Co. v. Doe", "Jones Trading Ltd. v. Roe", citelookup.NAME_DIFFERS),
+                ("Kappa Steel v. Doe", "Lambda Steel v. Roe", citelookup.NAME_DIFFERS),
+                ("Kappa Investments v. Doe", "Lambda Investments v. Roe", citelookup.NAME_DIFFERS),
+                ("Kappa Ventures v. Doe", "Lambda Ventures v. Roe", citelookup.NAME_DIFFERS),
+                ("Kappa Logistics v. Doe", "Lambda Logistics v. Roe", citelookup.NAME_DIFFERS),
+                ("Alpha, Trustee v. Doe", "Beta, Trustee v. Roe", citelookup.NAME_DIFFERS),
+                ("Kappa Steel Ltd. v. Doe", "Kappa Steel Limited v. Doe", citelookup.FOUND),
+                ("Kappa Trading v. Doe", "Kappa Trading Co. v. Lambda", citelookup.FOUND),
+                ("Steel Workers v. Doe", "United Steel Workers of America v. Doe", citelookup.FOUND),
+                ("Doe, Trustee v. Kappa Steel", "Doe v. Kappa Steel Corp.", citelookup.FOUND)):
+            self.assertEqual(self.judge_names(draft_name, cl_name), outcome, (draft_name, cl_name))
+
 
 def recorded_one(payload):
     return [result(payload, "123 F.4th 456", 200, [cluster(9001, "Smith v. Jones", "2024-05-01", "123 F.4th 456")])]
@@ -718,6 +735,13 @@ class TestCLI(Matter):
         code, _, err = run_cli("cite", "lookup", self.dir, self.draft, "--dry-run", "--status", "extracted")
         self.assertNotEqual(code, 0)
         self.assertIn("--status applies to cite list", err)
+        # SWE-2 round 3, P3-2: "--status" on extract, and a zero value, were still let through.
+        code, _, err = run_cli("cite", "extract", self.dir, self.draft, "--status", "extracted")
+        self.assertNotEqual(code, 0)
+        self.assertIn("--status applies to cite list, not cite extract", err)
+        code, _, err = run_cli("cite", "list", self.dir, "--max-requests", "0")
+        self.assertNotEqual(code, 0)
+        self.assertIn("--max-requests applies to cite lookup, not cite list", err)
 
     def test_cite_list_filters_by_status(self):
         # Found while checking SWE-2's round 1: "cite list --status" built "... ORDER BY ... WHERE ...".
@@ -741,6 +765,22 @@ class TestCLI(Matter):
         self.assertEqual(code, 2)
         self.assertIn("could not be recorded", err)
         self.assertIn("not written (AttributeError", out)
+
+    def test_a_found_cite_with_several_store_rows_exits_2(self):
+        # SWE-2 round 3, P3-3: a cite --record skipped because several rows answer to it exited 0.
+        with open(self.draft, "w") as f:
+            f.write("Smith v. Jones, 123 F.4th 456 (5th Cir. 2024).\n")
+        conn = store.connect(self.dir)
+        for aid, citation in (("auth_one", "Smith v. Jones, 123 F.4th 456"), ("auth_two", "Smith, 123 F.4th 456, 460")):
+            conn.execute("INSERT INTO authorities (id,citation,status) VALUES (?,?,?)", (aid, citation, "unverified"))
+        conn.commit()
+        consent.save_grants(self.dir, [grant()])
+        with mock.patch.dict(os.environ, {"COURTLISTENER_TOKEN": TOKEN}), \
+                mock.patch.object(clc, "post_form", side_effect=lambda u, f, t: recorded_one(f["text"])):
+            code, out, err = run_cli("cite", "lookup", self.dir, self.draft, "--record", "--caller", "ty")
+        self.assertEqual(code, 2)
+        self.assertIn("1 found cite(s) could not be recorded", err)
+        self.assertIn("not written: several store rows", out)
 
     def test_refused_without_grant(self):
         with mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
