@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import date, timedelta
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
@@ -120,6 +121,15 @@ class TestPackState(PackBase):
         self.attach(old)
         out = self.m.check("Responses are due. L.U.Civ.R. 7(b)(4).\n").render()
         self.assertIn("current as of 2020-01-01 [STALE]", out)
+
+    def test_a_recorded_check_shows_in_the_header(self):
+        old = make_pack(self._tmp.name, "old-pack", LOCAL, pack_id="old-local", version="2020-01-01",
+                        title="Old Local Rules", cite_prefix="L.U.Civ.R.", current_as_of="2020-01-01")
+        self.attach(old)
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        rules.record_check(self.m.dir, "old-local", yesterday, "none", ["Evidence/clerk_call_transcript.md"], "human")
+        out = self.m.check("Responses are due. L.U.Civ.R. 7(b)(4).\n").render()
+        self.assertIn("current as of 2020-01-01 [CHECKED]", out)
 
     def test_a_date_after_today_is_not_called_current(self):
         future = make_pack(self._tmp.name, "future-pack", LOCAL, pack_id="future-local", version="2999-01-01",

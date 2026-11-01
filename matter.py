@@ -44,6 +44,8 @@ Usage:
                         [--source-url U] [--anchor-prefix A] [--heading-regex RE] [--review-after-days N]
   matter.py rules attach <dir> <pack_dir> [--replace] [--author agent:MODEL [--directed-by PERSON]]
   matter.py rules list|stale <dir> [--today YYYY-MM-DD]
+  matter.py rules checked <dir> <pack_id> --on DATE --found none|amended --source REL[@LOC] [--source …]
+                         [--next-review DATE]   # record a check of the court's website
   matter.py rules show <dir> "<cite>|<anchor>" [--pack ID]   # exit 2: a bare "Rule 15" lists candidates
   matter.py ui <workspace> [--operator NAME] [--port N] [--no-open]
                               # browser UI on 127.0.0.1 only; <workspace> holds case folders (or is one)
@@ -357,9 +359,9 @@ def cmd_brief(args):
 
 
 def cmd_rules(args):
-    """rules build|attach|list|show|stale: a court's rules as Markdown with anchors, attached to a matter.
+    """rules build|attach|checked|list|show|stale: a court's rules as Markdown with anchors, attached to a matter.
     show exits 1 when nothing is found and 2 when a bare cite has candidates; stale exits 1 when a pack
-    is past its review window or undated."""
+    is past its review window (with no current recorded check) or undated."""
     from datetime import date
     from matterkit import rules
     today = None
@@ -392,6 +394,13 @@ def cmd_rules(args):
             except ValueError as e:
                 sys.exit(f"invalid attribution: {e}")
             print(rules.attach(args.case_dir, args.pack_dir, by, replace=args.replace)[1])
+        elif args.sub == "checked":
+            try:
+                by = store.attribution(args.author, args.directed_by)
+            except ValueError as e:
+                sys.exit(f"invalid attribution: {e}")
+            print(rules.record_check(args.case_dir, args.pack_id, args.on, args.found, args.source, by,
+                                     next_review=args.next_review, today=today)[1])
         elif args.sub == "list":
             print(rules.list_text(args.case_dir, today))
         else:
@@ -728,6 +737,16 @@ def main():
     c = commands.add_parser("attach", help="Copy a pack into the matter, register it and record it")
     c.add_argument("case_dir"); c.add_argument("pack_dir")
     c.add_argument("--replace", action="store_true", help="attach a new version in place of the attached one")
+    c.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"))
+    c.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"))
+    c = commands.add_parser("checked", help="Record a check of the court's website for amendments to an attached pack")
+    c.add_argument("case_dir"); c.add_argument("pack_id")
+    c.add_argument("--on", required=True, help="YYYY-MM-DD the court's website was checked")
+    c.add_argument("--found", required=True, choices=("none", "amended"), help="whether an amendment was found")
+    c.add_argument("--source", action="append", required=True,
+                   help="registered file showing what was found, rel_path[@locator]; repeat for more")
+    c.add_argument("--next-review", help="YYYY-MM-DD to check again by (e.g. the court's next amendment date)")
+    c.add_argument("--today", help="YYYY-MM-DD to treat as today (default: today)")
     c.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"))
     c.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"))
     for action in ("list", "show", "stale"):

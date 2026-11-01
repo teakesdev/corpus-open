@@ -1051,7 +1051,7 @@ def _pack_cell(a) -> str:
     if a.pack is None:
         return f"`{a.entry['id']}@{a.entry['version']}` not used: {a.problem}"
     m = a.pack.manifest
-    state = rules.staleness(m["current_as_of"], m["review_after_days"])[0]
+    state = rules.checked_staleness(m["current_as_of"], m["review_after_days"], a.checks)[0]
     return f"`{a.pack.id}@{a.pack.version}` ({a.pack.cite_prefix}, current as of {m['current_as_of'] or 'UNKNOWN'} [{state}])"
 
 

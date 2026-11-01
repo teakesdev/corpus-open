@@ -21,8 +21,8 @@ import re
 import shutil
 import subprocess
 import unicodedata
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 from . import ingest, store
 
@@ -33,6 +33,8 @@ BODY_MARK = "<!-- rules-pack:body -->"
 ATTACH_FILE = os.path.join(".matter", "rules.json")
 PACK_ROOT = os.path.join("Research", "Rules")
 PACK_FILES = ("manifest.json", "rules.md")
+CHECK_FOUND = ("none", "amended")  # what a recorded check of the court's website found
+PASSING = ("ok", "CHECKED")  # pack states that need no action now
 REVIEW_AFTER_DAYS = 365  # most courts amend their rules once a year
 DEFAULT_HEADING = r"^Rule\s+(?P<num>\d+(?:\.\d+)?)\.?\s+(?P<title>[A-Z].*)$"
 DERIVED = "derived text, not the official copy: quote the official source in anything filed"
@@ -554,6 +556,33 @@ def staleness(current_as_of, review_after_days, today=None):
     return "ok", f"{age} days since {current_as_of}, within its {review_after_days}-day review window"
 
 
+def checked_staleness(current_as_of, review_after_days, checks, today=None):
+    """staleness(), then the latest site check recorded for this pack version (see record_check).
+    A check that found no amendment reads CHECKED until its next review date or its check date plus
+    the review window, whichever comes first; a check that found one keeps the pack STALE. A check
+    never vouches for an undated pack, or for a date after today."""
+    today = today or date.today()
+    state, why = staleness(current_as_of, review_after_days, today)
+    done = sorted((c for c in checks if date.fromisoformat(c["checked_on"]) <= today),
+                  key=lambda c: (c["checked_on"], c["recorded_at"]))
+    if state == "UNKNOWN" or not done:
+        return state, why
+    last = done[-1]
+    if last["found"] == "amended":
+        return "STALE", (f"a check on {last['checked_on']} found an amendment; attach the new version "
+                         f"(this pack is current as of {current_as_of})")
+    if state == "ok":
+        return state, why
+    on = date.fromisoformat(last["checked_on"])
+    until = on + timedelta(days=review_after_days)
+    if last.get("next_review"):
+        until = min(until, date.fromisoformat(last["next_review"]))
+    if today < until:
+        return "CHECKED", (f"current as of {current_as_of}; no amendment found when checked on {on} "
+                           f"(sources in {ATTACH_FILE}); next review by {until}")
+    return "STALE", f"{why}; last checked {on}, and its next review was due {until}"
+
+
 # --------------------------------------------------------------------------
 # Attaching packs to a matter
 # --------------------------------------------------------------------------
@@ -586,6 +615,19 @@ def read_attachments(case_dir: str) -> dict:
             raise RulesError(f"{p}: {e['id']}: current_as_of must be YYYY-MM-DD")
         if ingest.resolve_document_path(os.path.abspath(case_dir), e["path"]) is None:
             raise RulesError(f"{p}: pack path {e['path']!r} is not inside the matter")
+    checks = d.get("checks", [])
+    if not isinstance(checks, list):
+        raise RulesError(f"{p}: 'checks' must be a list")
+    ckeys = ("pack_id", "version", "checked_on", "found", "recorded_at", "recorded_by")
+    for c in checks:
+        ok = isinstance(c, dict) and all(isinstance(c.get(k), str) for k in ckeys) and _is_date(c["checked_on"]) \
+            and c["found"] in CHECK_FOUND and (c.get("next_review") is None or _is_date(c["next_review"])) \
+            and isinstance(c.get("sources"), list) and c["sources"] \
+            and all(isinstance(s, dict) and isinstance(s.get("ref"), str) and _SHA.fullmatch(str(s.get("sha256")))
+                    for s in c["sources"])
+        if not ok:
+            raise RulesError(f"{p}: each check needs {', '.join(ckeys)}, found as {' or '.join(CHECK_FOUND)}, "
+                             "dates as YYYY-MM-DD and at least one source with its sha256")
     d.setdefault("history", [])
     return d
 
@@ -595,6 +637,7 @@ class Attached:
     entry: dict
     pack: Pack | None
     problem: str | None
+    checks: list = field(default_factory=list)  # site checks recorded for this pack version
 
 
 def load_attached(case_dir: str) -> list:
@@ -602,25 +645,27 @@ def load_attached(case_dir: str) -> list:
     A pack that fails comes back with pack=None and the reason; it is never used. So does a pack
     that shares a cite or anchor prefix with one listed before it (possible only by hand-editing)."""
     out, cites, anchors = [], {}, {}
-    for e in read_attachments(case_dir)["packs"]:
+    att = read_attachments(case_dir)
+    for e in att["packs"]:
+        mine = [c for c in att.get("checks", []) if (c["pack_id"], c["version"]) == (e["id"], e["version"])]
         d = ingest.resolve_document_path(os.path.abspath(case_dir), e["path"])
         try:
             pack = load_pack(d)
         except RulesError as err:
-            out.append(Attached(e, None, str(err)))
+            out.append(Attached(e, None, str(err), mine))
             continue
         if pack.rules_md_sha256 != e["rules_md_sha256"] or pack.manifest_sha256 != e["manifest_sha256"]:
-            out.append(Attached(e, None, f"{e['path']} changed after it was attached; run verify"))
+            out.append(Attached(e, None, f"{e['path']} changed after it was attached; run verify", mine))
             continue
         cite = default_anchor_prefix(pack.cite_prefix)
         if cite in cites:
-            out.append(Attached(e, None, f"shares the cite prefix {pack.cite_prefix!r} with {cites[cite]}"))
+            out.append(Attached(e, None, f"shares the cite prefix {pack.cite_prefix!r} with {cites[cite]}", mine))
         elif pack.anchor_prefix in anchors:
             out.append(Attached(e, None, f"shares the anchor prefix {pack.anchor_prefix!r} with "
-                                         f"{anchors[pack.anchor_prefix]}"))
+                                         f"{anchors[pack.anchor_prefix]}", mine))
         else:
             cites[cite] = anchors[pack.anchor_prefix] = pack.id
-            out.append(Attached(e, pack, None))
+            out.append(Attached(e, pack, None, mine))
     return out
 
 
@@ -694,6 +739,81 @@ def attach(case_dir: str, pack_dir: str, by: str, replace: bool = False) -> tupl
             conn.execute("INSERT INTO events (id,occurred_on,text,actors,sources) VALUES (?,?,?,?,?)",
                          (store.new_id("ev_"), date.today().isoformat(), text, by,
                           json.dumps([os.path.join(rel, n) for n in shas])))
+            _write_atomic(_attach_path(case_dir),
+                          (json.dumps(att, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+    finally:
+        conn.close()
+    return entry, text
+
+
+def record_check(case_dir: str, pack_id: str, checked_on: str, found: str, sources, by: str,
+                 next_review: str | None = None, today=None) -> tuple:
+    """Record that someone checked the court's website for amendments to an attached pack: when,
+    what was found, and the registered files that show it (each re-hashed against its registration
+    first). The check goes into .matter/rules.json and the events table together or not at all.
+    matter-kit checks no website itself. Returns (check entry, message)."""
+    today = today or date.today()
+    if found not in CHECK_FOUND:
+        raise RulesError(f"--found must be one of: {', '.join(CHECK_FOUND)}")
+    if not _is_date(checked_on):
+        raise RulesError(f"--on must be a date, YYYY-MM-DD (got {checked_on!r})")
+    on = date.fromisoformat(checked_on)
+    if on > today:
+        raise RulesError(f"--on {checked_on} is after today ({today}); record a check once it is done")
+    if next_review is not None:
+        if found != "none":
+            raise RulesError("--next-review applies only to a check that found no amendment; attach the amended "
+                             "rules instead")
+        if not _is_date(next_review) or date.fromisoformat(next_review) <= on:
+            raise RulesError(f"--next-review must be a date after --on (got {next_review!r})")
+    sources = [s.strip() for s in (sources or []) if s and s.strip()]
+    if not sources:
+        raise RulesError("name at least one --source: the registered file(s) showing what the check found")
+    a = next((x for x in load_attached(case_dir) if x.entry["id"] == pack_id), None)
+    if a is None:
+        raise RulesError(f"no attached pack has the id {pack_id!r}; see: matter.py rules list")
+    if a.pack is None:
+        raise RulesError(f"{pack_id} cannot be used ({a.problem}); fix that before recording a check")
+    as_of = a.pack.manifest["current_as_of"]
+    if as_of and on < date.fromisoformat(as_of):
+        raise RulesError(f"--on {checked_on} is before the pack's current-as-of date {as_of}; a check can only "
+                         "speak for later dates")
+    abs_case = os.path.abspath(case_dir)
+    conn = store.connect(case_dir)
+    try:
+        recs, problems = [], []
+        for src in sources:
+            ref, _, loc = src.partition("@")
+            row = conn.execute("SELECT rel_path, sha256 FROM documents WHERE rel_path=? OR id=?",
+                               (ref, ref)).fetchone()
+            path = row and ingest.resolve_document_path(abs_case, row["rel_path"])
+            if row is None:
+                problems.append(f"{ref} is not registered in this matter")
+            elif not path or not os.path.isfile(path):
+                problems.append(f"{row['rel_path']} is registered but missing; run verify")
+            elif sha256_file(path) != row["sha256"]:
+                problems.append(f"{row['rel_path']} changed since it was registered; run verify")
+            else:
+                recs.append({"ref": row["rel_path"] + (f"@{loc}" if loc else ""), "sha256": row["sha256"]})
+        if problems:
+            raise RulesError("; ".join(problems) + ". Nothing was recorded.")
+        att = read_attachments(case_dir)
+        checks = att.setdefault("checks", [])
+        same = (pack_id, a.pack.version, checked_on, found, next_review, [r["ref"] for r in recs])
+        for c in checks:
+            if (c["pack_id"], c["version"], c["checked_on"], c["found"], c.get("next_review"),
+                    [s["ref"] for s in c["sources"]]) == same:
+                return c, (f"this check of {pack_id}@{a.pack.version} on {checked_on} is already recorded; "
+                           "nothing changed")
+        entry = {"pack_id": pack_id, "version": a.pack.version, "checked_on": checked_on, "found": found,
+                 "next_review": next_review, "sources": recs, "recorded_at": store.now_iso(), "recorded_by": by}
+        checks.append(entry)
+        text = f"rules pack {pack_id}@{a.pack.version} checked on {checked_on}: " + (
+            "no amendment found" + (f"; next review by {next_review}" if next_review else "") if found == "none"
+            else "an amendment was found; attach the new version")
+        with conn:  # as in attach: the event commits only if rules.json was written
+            conn.execute("INSERT INTO events (id,occurred_on,text,actors,sources) VALUES (?,?,?,?,?)",
+                         (store.new_id("ev_"), checked_on, text, by, json.dumps([r["ref"] for r in recs])))
             _write_atomic(_attach_path(case_dir),
                           (json.dumps(att, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     finally:
@@ -793,7 +913,8 @@ def show(case_dir: str, cite: str, pack_id: str | None = None, today=None) -> tu
     res = resolve(case_dir, cite, pack_id)
     if res.status == "found":
         a, aid = res.hits[0]
-        state, why = staleness(a.pack.manifest["current_as_of"], a.pack.manifest["review_after_days"], today)
+        state, why = checked_staleness(a.pack.manifest["current_as_of"], a.pack.manifest["review_after_days"],
+                                       a.checks, today)
         head = [f"{a.pack.label(aid)} · pack {a.pack.id}@{a.pack.version} · current as of "
                 f"{a.pack.manifest['current_as_of'] or 'UNKNOWN'} [{state}: {why}]",
                 f"{os.path.join(a.entry['path'], 'rules.md')}#{aid} · {DERIVED}"]
@@ -835,7 +956,8 @@ def list_text(case_dir: str, today=None) -> str:
     out = []
     for a in load_attached(case_dir):
         e = a.entry
-        state, why = staleness(e.get("current_as_of"), e.get("review_after_days", REVIEW_AFTER_DAYS), today)
+        state, why = checked_staleness(e.get("current_as_of"), e.get("review_after_days", REVIEW_AFTER_DAYS),
+                                       a.checks, today)
         out.append(f"{e['id']}@{e['version']}  {e.get('cite_prefix', '?')}  current as of "
                    f"{e.get('current_as_of') or 'UNKNOWN'} [{state}]  {e['path']}  "
                    + (f"anchors={len(a.pack.anchors)}" if a.pack else f"NOT USABLE: {a.problem}"))
@@ -845,7 +967,8 @@ def list_text(case_dir: str, today=None) -> str:
 
 
 def stale_report(case_dir: str, today=None) -> tuple:
-    """(exit code, text): 1 if any attached pack is past its review window, has no date, or cannot be used."""
+    """(exit code, text): 1 if any attached pack is past its review window with no current recorded check,
+    has no date, or cannot be used."""
     attached = load_attached(case_dir)
     if not attached:
         return 0, "no rules pack is attached"
@@ -855,8 +978,10 @@ def stale_report(case_dir: str, today=None) -> tuple:
         if a.pack is None:
             state, why = "NOT USABLE", a.problem
         else:
-            state, why = staleness(a.pack.manifest["current_as_of"], a.pack.manifest["review_after_days"], today)
-        worst = max(worst, 0 if state == "ok" else 1)
+            state, why = checked_staleness(a.pack.manifest["current_as_of"], a.pack.manifest["review_after_days"],
+                                           a.checks, today)
+        worst = max(worst, 0 if state in PASSING else 1)
         out.append(f"[{state}] {e['id']}@{e['version']}: {why}")
-    out.append("No court website was checked; this compares dates only.")
+    out.append("This command checked no website; it compares dates and the checks recorded with `rules checked`."
+               if any(a.checks for a in attached) else "No court website was checked; this compares dates only.")
     return worst, "\n".join(out)

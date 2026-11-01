@@ -105,3 +105,13 @@ The founder assigned the build (`27ea7fb..9fb77b4`) to SWE-2 (Devin `swe-2-max`,
 The real-text trial, rebuilt after the fixes, gave the same 416 anchors in the same order and a byte-identical body, with 50 page numbers now listed under `dropped`.
 
 Revision 2 has not been re-reviewed.
+
+## 9. Follow-up (2026-11-01): recording a site check
+
+Using the pack on a real matter showed that `rules stale` could only ever say STALE once a pack passed its window, even right after someone had checked the court's website and found no amendment. ty approved the follow-up on 2026-10-31 ("start working on all of these changes"). Built on branch `feat/rules-checked`, not reviewed.
+
+- **`matter rules checked <dir> <pack_id> --on DATE --found none|amended --source REL[@LOC]… [--next-review DATE]`** records who checked, when, what they found and the registered files that show it. matter-kit still checks no website itself.
+- **Contract change, additive:** `.matter/rules.json` may hold a `checks` list. Each entry has `pack_id`, `version`, `checked_on`, `found`, `next_review` (or null), `sources` (`ref` and `sha256`), `recorded_at` and `recorded_by`. A file without `checks` reads exactly as before, and attaching never adds the key. Entries are shape-checked on every read, like `packs`.
+- **Status:** `checked_staleness` applies the latest check for the attached version, dated on or before the reading date. `none` gives CHECKED until the earlier of `next_review` and the check date plus `review_after_days`; after that the pack is STALE and the message names the last check. `amended` is STALE even inside the window. UNKNOWN (no date, or a date after today) is never cleared by a check. `list`, `show`, `stale` and brief check's header use it; `stale` exits 0 for ok and CHECKED.
+- **Refused, writing nothing:** a date after today or before the pack's current-as-of date; `--next-review` not after `--on`, or given with `amended`; an unattached or unusable pack; a source that is unregistered, missing, or changed since registration. The same check recorded twice changes nothing.
+- **Writes:** like `attach`, the event and `rules.json` are written in one transaction. The event's date is the check date.

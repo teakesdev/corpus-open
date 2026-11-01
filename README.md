@@ -298,6 +298,22 @@ past its review window, with no date or a date after today, or that cannot be
 used (changed since it was attached). It compares dates only; it does not check
 the court's website.
 
+When you have checked the court's website, record it so `stale` stops asking:
+
+```bash
+python3 matter.py rules checked ~/cases/my-case my-district-local --on 2025-11-30 --found none \
+  --source Research/Rules/site-check/CHECK_2025-11-30.md --next-review 2026-12-01
+```
+
+Each `--source` must be a registered file (a note, a saved copy of the court's
+page) and is re-hashed before the check is recorded; the check goes into
+`.matter/rules.json` with its sources' sha256, plus an `events` row. A pack past
+its window then reads `CHECKED` (and `stale` exits 0) until `--next-review` or
+the check date plus the pack's review window, whichever comes first. A check
+applies to the pack version it was recorded for, never vouches for an undated
+pack, and `--found amended` keeps the pack `STALE` until you attach the new
+version.
+
 ## Deadlines and subcases
 
 ```bash
