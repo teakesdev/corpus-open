@@ -38,6 +38,8 @@ Usage:
   matter.py rules attach <dir> <pack_dir> [--replace] [--author agent:MODEL [--directed-by PERSON]]
   matter.py rules list|stale <dir> [--today YYYY-MM-DD]
   matter.py rules show <dir> "<cite>|<anchor>" [--pack ID]   # exit 2: a bare "Rule 15" lists candidates
+  matter.py ui <workspace> [--operator NAME] [--port N] [--no-open]
+                              # browser UI on 127.0.0.1 only; <workspace> holds case folders (or is one)
 """
 import argparse
 import json
@@ -46,18 +48,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from matterkit import ingest as ing, packet as pk, store  # noqa: E402
+from matterkit import cases, ingest as ing, packet as pk, store  # noqa: E402
 
-FOLDERS = ["Filings", "Evidence", "Correspondence", "Case_Tracking", "Research", "Media"]
+FOLDERS = cases.FOLDERS  # cmd_subcase hands these to subcase.init
 
 
 def cmd_init(args):
     d = args.case_dir
-    os.makedirs(d, exist_ok=True)
-    for f in FOLDERS:
-        os.makedirs(os.path.join(d, f), exist_ok=True)
-    conn = store.connect(d)
-    n = conn.execute("SELECT COUNT(*) c FROM documents").fetchone()["c"]
+    n = cases.init(d)
     print(f"initialized {d} (.matter/matter.db, {n} documents registered)")
 
 
@@ -89,42 +87,31 @@ def cmd_status(args):
 
 
 def cmd_fact(args):
+    from matterkit import facts
     conn = store.connect(args.case_dir)
     if args.sub == "add":
-        from matterkit.store import new_id, now_iso
-        status = args.status.replace("-", " ").upper()
-        if status not in store.VALID_STATUS:
-            sys.exit(f"invalid status '{args.status}' — use one of: "
-                     f"{', '.join(sorted(s.lower().replace(' ', '-')) for s in store.VALID_STATUS)}")
+        from matterkit import subcase
+        try:
+            facts.normalize_status(args.status)
+        except facts.FactError as e:
+            sys.exit(str(e))
         try:
             by = store.attribution(args.author, args.directed_by)
         except ValueError as e:
             sys.exit(f"invalid attribution: {e}")
-        from matterkit import subcase
         try:  # parent: refs are re-hashed against the parent before anything is written
-            parents = subcase.resolve_parent_sources(args.case_dir, args.source)
-        except subcase.SubcaseError as e:
+            r = facts.add(conn, args.case_dir, args.text, args.status, args.source, by)
+        except (facts.FactError, subcase.SubcaseError) as e:
             sys.exit(f"refused: {e}")
-        aid = new_id("a_")
-        try:
-            with conn:
-                conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
-                             (aid, args.text, status, by, now_iso()))
-                unrec, notes = subcase.attach_sources(conn, aid, args.source, parents)
-        except subcase.SubcaseError as e:
-            sys.exit(f"refused: {e}")
-        n = conn.execute("SELECT COUNT(*) c FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()["c"]
-        warn = "" if n else "\n⚠ UNSUPPORTED — no recognized sources attached."
-        bad = "" if not unrec else f"\n⚠ unrecognized source refs: {unrec}"
-        print(f"{aid} [{status}] by {by}{warn}{bad}" + "".join(f"\n  ↳ {note}" for note in notes))
+        warn = "\n⚠ UNSUPPORTED — no recognized sources attached." if r["unsupported"] else ""
+        bad = f"\n⚠ unrecognized source refs: {r['unrecognized']}" if r["unrecognized"] else ""
+        print(f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}"
+              + "".join(f"\n  ↳ {note}" for note in r["notes"]))
     else:
         st = args.status.upper().replace("-", " ") if args.status else None
-        q = "SELECT * FROM assertions" + (" WHERE status=?" if st else "") + " ORDER BY status, created_at"
-        for r in conn.execute(q, (st,) if st else ()):
-            srcs = conn.execute(
-                "SELECT d.rel_path, s.locator FROM assertion_sources s JOIN documents d ON d.id=s.document_id"
-                " WHERE s.assertion_id=?", (r["id"],)).fetchall()
-            s = "; ".join(x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "") for x in srcs) or "**[UNSUPPORTED]**"
+        for r in facts.list_(conn, st):
+            s = "; ".join(x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "")
+                          for x in r["sources"]) or "**[UNSUPPORTED]**"
             print(f"[{r['status']:15}] {r['text']}\n                ↳ {s}"
                   f"\n                by {r['created_by'] or 'unrecorded'}")
 
@@ -506,6 +493,20 @@ def cmd_search(args):
         print(f"recorded {len(rows)} authorities as resolved (not source-checked)")
 
 
+def cmd_ui(args):
+    """ui: a browser UI over a workspace of cases, served to this computer only (127.0.0.1)."""
+    from matterkit import webui
+    name = args.operator
+    if not name:
+        if not sys.stdin.isatty():
+            sys.exit("matter ui needs --operator NAME: the person recorded as the author of what is added")
+        name = input("Your name (recorded as the author of what you add): ")
+    try:
+        webui.serve(args.workspace, webui.check_operator(name), port=args.port, open_browser=not args.no_open)
+    except (ValueError, OSError) as e:
+        sys.exit(f"matter ui: {e}")
+
+
 def cmd_outreach(args):
     from matterkit import outreach as ou
     conn = store.connect(args.case_dir)
@@ -765,6 +766,13 @@ def main():
     p.add_argument("--representation")
     p.add_argument("--jurisdiction")
     p.set_defaults(fn=cmd_outreach)
+
+    p = sub.add_parser("ui", help="Open a browser UI for the cases in a folder (this computer only)")
+    p.add_argument("workspace", help="a folder of case folders, or one case folder")
+    p.add_argument("--operator", help="your name, recorded as the author of what you add")
+    p.add_argument("--port", type=int, default=0, help="port on 127.0.0.1 (default: any free port)")
+    p.add_argument("--no-open", action="store_true", help="print the link instead of opening the browser")
+    p.set_defaults(fn=cmd_ui)
 
     args = ap.parse_args()
     args.fn(args)

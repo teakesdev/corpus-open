@@ -2,25 +2,19 @@
 from collections import Counter
 from datetime import date
 
-from . import subcase
+from . import deadlines, subcase
 
 
 def _badge(status: str) -> str:
     return "" if status == "DOCUMENTED FACT" else f" `{status}`"
 
 
-def status_report(conn, matter_dir: str) -> str:
+def status_data(conn, matter_dir: str) -> dict:
+    """The counts `status_report` renders, as a dict. `overdue_deadlines` is the open deadlines
+    dated before today; the text report does not show it (children_lines carries the subcases')."""
     docs = conn.execute("SELECT kind, COUNT(*) c FROM documents GROUP BY kind ORDER BY kind").fetchall()
-    total = sum(r["c"] for r in docs)
-    lines = [f"# Matter status — {matter_dir}", ""]
-    parent = subcase.parent_line(matter_dir)
-    if parent:
-        lines += [parent, ""]
-    lines.append(f"Documents registered: **{total}**")
-    for r in docs:
-        lines.append(f"- {r['kind']}: {r['c']}")
     n_assert = conn.execute("SELECT COUNT(*) c FROM assertions").fetchone()["c"]
-    n_dead = conn.execute("SELECT COUNT(*) c FROM deadlines WHERE state='open'").fetchone()["c"]
+    open_dl = conn.execute("SELECT due_date, state FROM deadlines WHERE state='open'").fetchall()
     # "Unverified" = no source check yet (RFC 0001 §2.2 vocabulary):
     # pre-check stages are unverified/resolved/research-pending; legacy
     # 'verified-official' rows count as checked.
@@ -28,15 +22,35 @@ def status_report(conn, matter_dir: str) -> str:
     n_auth = conn.execute(
         "SELECT COUNT(*) c FROM authorities WHERE status NOT IN ({})".format(
             ",".join("?" * len(checked))), checked).fetchone()["c"]
-    lines += ["", f"Assertions: {n_assert} · Open deadlines: {n_dead} · Unverified authorities: {n_auth}"]
     notices = conn.execute(
         "SELECT status,COUNT(*) c FROM correspondence_notices GROUP BY status ORDER BY status").fetchall()
-    if notices:
+    return {"matter_dir": matter_dir,
+            "parent_line": subcase.parent_line(matter_dir),
+            "documents_total": sum(r["c"] for r in docs),
+            "documents_by_kind": {r["kind"]: r["c"] for r in docs},
+            "assertions": n_assert,
+            "open_deadlines": len(open_dl),
+            "overdue_deadlines": sum(deadlines.is_overdue(r["due_date"], r["state"]) for r in open_dl),
+            "unverified_authorities": n_auth,
+            "notices_by_status": {r["status"]: r["c"] for r in notices},
+            "children_lines": subcase.children_lines(matter_dir)}
+
+
+def status_report(conn, matter_dir: str) -> str:
+    d = status_data(conn, matter_dir)
+    lines = [f"# Matter status — {d['matter_dir']}", ""]
+    if d["parent_line"]:
+        lines += [d["parent_line"], ""]
+    lines.append(f"Documents registered: **{d['documents_total']}**")
+    for kind, c in d["documents_by_kind"].items():
+        lines.append(f"- {kind}: {c}")
+    lines += ["", f"Assertions: {d['assertions']} · Open deadlines: {d['open_deadlines']} · "
+                  f"Unverified authorities: {d['unverified_authorities']}"]
+    if d["notices_by_status"]:
         lines += ["", "Custodian notices (transport=nosend; humans send): " +
-                  " · ".join(f"{r['status']}: {r['c']}" for r in notices)]
-    children = subcase.children_lines(matter_dir)
-    if children:
-        lines += [""] + children
+                  " · ".join(f"{s}: {c}" for s, c in d["notices_by_status"].items())]
+    if d["children_lines"]:
+        lines += [""] + d["children_lines"]
     return "\n".join(lines)
 
 

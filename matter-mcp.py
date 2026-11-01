@@ -115,31 +115,20 @@ def call(name: str, args: dict):
     if name == "matter.status":
         return pk.status_report(conn, MATTER_DIR)
     if name == "matter.fact_add":
-        from matterkit.store import new_id, now_iso
-        from matterkit import subcase
-        aid = new_id("a_")
-        status = args.get("status", "UNKNOWN")
+        from matterkit import facts
         by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
-        parents = subcase.resolve_parent_sources(MATTER_DIR, args.get("sources", []))  # raises -> isError, nothing written
-        with conn:
-            conn.execute("INSERT INTO assertions (id,text,status,created_by,created_at) VALUES (?,?,?,?,?)",
-                         (aid, args["text"], status, by, now_iso()))
-            unsupported, notes = subcase.attach_sources(conn, aid, args.get("sources", []), parents)
-        n = conn.execute("SELECT COUNT(*) c FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()["c"]
-        warn = f"\n⚠ UNSUPPORTED — no recognized sources." if n == 0 else ""
-        bad = f"\n⚠ Unrecognized source refs ignored: {unsupported}" if unsupported else ""
-        return f"{aid} [{status}] by {by}{warn}{bad}" + "".join(f"\n  ↳ {note}" for note in notes)
+        # raises -> isError, nothing written: invalid label, empty text, an uncitable parent: ref
+        r = facts.add(conn, MATTER_DIR, args["text"], args.get("status", "UNKNOWN"), args.get("sources", []), by)
+        warn = "\n⚠ UNSUPPORTED — no recognized sources." if r["unsupported"] else ""
+        bad = f"\n⚠ Unrecognized source refs ignored: {r['unrecognized']}" if r["unrecognized"] else ""
+        return (f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}"
+                + "".join(f"\n  ↳ {note}" for note in r["notes"]))
     if name == "matter.fact_list":
-        st = args.get("status")
-        q = "SELECT * FROM assertions" + (" WHERE status=?" if st else "") + " ORDER BY status"
-        out = []
-        for r in conn.execute(q, (st,) if st else ()):
-            srcs = conn.execute(
-                "SELECT d.rel_path, s.locator FROM assertion_sources s JOIN documents d ON d.id=s.document_id"
-                " WHERE s.assertion_id=?", (r["id"],)).fetchall()
-            out.append({"id": r["id"], "status": r["status"], "text": r["text"],
-                        "supported": bool(srcs),
-                        "sources": [f"{x['rel_path']}" + (f"@{x['locator']}" if x['locator'] else "") for x in srcs]})
+        from matterkit import facts
+        out = [{"id": f["id"], "status": f["status"], "text": f["text"],
+                "supported": not f["unsupported"],
+                "sources": [x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "") for x in f["sources"]]}
+               for f in facts.list_(conn, args.get("status"))]
         return json.dumps(out, indent=1)
     if name == "matter.deadline_list":
         q = "SELECT * FROM deadlines" + ("" if args.get("all") else " WHERE state='open'") + " ORDER BY due_date"

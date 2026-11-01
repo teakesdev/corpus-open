@@ -44,6 +44,36 @@ matter_fact=$(python3 matter.py fact add ~/cases/my-case \
 python3 matter.py packet ~/cases/my-case --layer 3min --out COUNSEL_PACKET.md
 ```
 
+## Using the kit without a terminal
+
+```bash
+python3 matter.py ui ~/cases --operator "Your Name"   # a folder of case folders, or one case folder
+```
+
+This opens the kit in your browser. It runs only on your computer (`127.0.0.1`),
+with nothing to install and nothing fetched from the internet. One person can
+keep several people's cases in one folder: each subfolder holding a `.matter/` is
+a case, and subcases show under their parent. In the browser you can:
+
+- create a case;
+- add files by dragging them in, or register files you copied into the folder;
+- check that no file has changed;
+- see deadlines, with any that have passed shown first;
+- add facts with a label and the document and page they come from;
+- run brief check on a `.md` or `.txt` draft;
+- read, copy or save the counsel packet.
+
+Everything else, including adding or changing deadlines, stays in the CLI for
+now. Word and PDF drafts need a `.txt` copy before brief check can read them.
+
+Your name is recorded as the author of everything you add (`human:Your Name`).
+The page can't choose a different author. The link the command prints carries a
+one-time key: other websites open in the same browser can't use the kit, and the
+server answers only to `127.0.0.1` and `localhost`. The UI is a WSGI app with one
+`authorize()` check on every route, so it can later run on a private server
+behind TLS, shared with a lawyer. That deployment isn't built yet: see
+[the design](docs/superpowers/specs/2026-10-31-local-frontend-design.md).
+
 ## Capturing a web page
 
 ```bash
