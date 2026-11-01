@@ -18,3 +18,31 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Run tests
         run: python -m unittest discover -s tests -v
+
+  leak-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Case identifiers live in a repository secret, never in the repository. Without
+      # the secret the scan still runs and says that case identifiers were not checked.
+      - name: Load case patterns
+        env:
+          CASE_PATTERNS: ${{ secrets.LEAK_SCAN_CASE_PATTERNS }}
+        run: |
+          if [ -n "$CASE_PATTERNS" ]; then
+            printf '%s\n' "$CASE_PATTERNS" > "$RUNNER_TEMP/case-patterns.txt"
+            echo "LEAK_SCAN_PATTERNS=$RUNNER_TEMP/case-patterns.txt" >> "$GITHUB_ENV"
+          fi
+      - name: Scan the tree
+        run: python scripts/leak_scan.py --tree . --redact
+      - name: Scan the commits in this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/leak_scan.py --range "$BASE_SHA..$HEAD_SHA" --redact
