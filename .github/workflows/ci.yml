@@ -28,8 +28,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Case identifiers live in a repository secret, never in the repository. Without
-      # the secret the scan still runs and says that case identifiers were not checked.
+      # Case identifiers live in a repository secret, never in the repository. GitHub does not give
+      # secrets to a pull request from a fork, so that pull request is scanned without case
+      # patterns and the log says so; its case identifiers are checked when it is merged and the
+      # push is scanned. Without the secret at all, the scan still runs and says that case
+      # identifiers were not checked.
       - name: Load case patterns
         env:
           CASE_PATTERNS: ${{ secrets.LEAK_SCAN_CASE_PATTERNS }}
@@ -38,11 +41,39 @@ jobs:
             printf '%s\n' "$CASE_PATTERNS" > "$RUNNER_TEMP/case-patterns.txt"
             echo "LEAK_SCAN_PATTERNS=$RUNNER_TEMP/case-patterns.txt" >> "$GITHUB_ENV"
           fi
+      # Optional repository variables (Settings, Secrets and variables, Actions, Variables):
+      #   LEAK_SCAN_EXCLUDE        globs of paths to skip, separated by commas or newlines
+      #   LEAK_SCAN_ALLOW_EMAIL    globs of addresses that may appear, such as the project's own
+      #   LEAK_SCAN_CHECK_AUTHORS  any value: also report author and committer addresses. Off by
+      #                            default, because every commit carries its author's address
       - name: Scan the tree
+        env:
+          LEAK_SCAN_EXCLUDE: ${{ vars.LEAK_SCAN_EXCLUDE }}
+          LEAK_SCAN_ALLOW_EMAIL: ${{ vars.LEAK_SCAN_ALLOW_EMAIL }}
         run: python scripts/leak_scan.py --tree . --redact
       - name: Scan the commits in this pull request
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python scripts/leak_scan.py --range "$BASE_SHA..$HEAD_SHA" --redact
+          LEAK_SCAN_EXCLUDE: ${{ vars.LEAK_SCAN_EXCLUDE }}
+          LEAK_SCAN_ALLOW_EMAIL: ${{ vars.LEAK_SCAN_ALLOW_EMAIL }}
+          LEAK_SCAN_CHECK_AUTHORS: ${{ vars.LEAK_SCAN_CHECK_AUTHORS }}
+        run: python scripts/leak_scan.py --range "$BASE_SHA..$HEAD_SHA" --redact ${LEAK_SCAN_CHECK_AUTHORS:+--check-authors}
+      # A push to main is scanned too: commits that reach main without a pull request are checked.
+      # A new branch has no "before" commit, and a force push can leave it unreachable; both scan
+      # every commit that leads to the new tip.
+      - name: Scan the commits in this push
+        if: github.event_name == 'push'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          LEAK_SCAN_EXCLUDE: ${{ vars.LEAK_SCAN_EXCLUDE }}
+          LEAK_SCAN_ALLOW_EMAIL: ${{ vars.LEAK_SCAN_ALLOW_EMAIL }}
+          LEAK_SCAN_CHECK_AUTHORS: ${{ vars.LEAK_SCAN_CHECK_AUTHORS }}
+        run: |
+          RANGE="$AFTER_SHA"
+          if [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            RANGE="$BEFORE_SHA..$AFTER_SHA"
+          fi
+          python scripts/leak_scan.py --range "$RANGE" --redact ${LEAK_SCAN_CHECK_AUTHORS:+--check-authors}

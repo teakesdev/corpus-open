@@ -135,7 +135,8 @@ class TestCasePatterns(unittest.TestCase):
 class TestPathNames(unittest.TestCase):
     def test_assistant_session_transcript_names_are_found(self):
         for name in ("docs/r/swe2-transcript.md", "a/swe2-transcript-r2.md", "x/claude-session-transcript.txt",
-                     "x/astra_transcript.md", "x/codex-conversation.json", "x/run.jsonl", "x/Session-Export.md"):
+                     "x/astra_transcript.md", "x/codex-conversation.json", "x/claude-session.jsonl",
+                     "x/claude-session-export.md"):
             with self.subTest(name=name):
                 self.assertEqual(kinds(leak_scan.scan_path_name(name)), ["session-transcript"])
 
@@ -252,10 +253,10 @@ class TestScanRange(GitCase):
         self.write("a.txt", "x\n")
         base = self.commit("base")
         self.write("img.bin", b"\x00\x01" + (MAC + "dan/x").encode(), mode="wb")
-        self.write("run.jsonl", b"\x00\x01", mode="wb")
+        self.write("claude-session.jsonl", b"\x00\x01", mode="wb")
         tip = self.commit("add")
         found = leak_scan.scan_range(self.repo, f"{base}..{tip}")
-        self.assertEqual([(f.kind, f.where.split(":", 1)[1]) for f in found], [("session-transcript", "run.jsonl")])
+        self.assertEqual([(f.kind, f.where.split(":", 1)[1]) for f in found], [("session-transcript", "claude-session.jsonl")])
 
     def test_merge_conflict_resolution_is_scanned(self):
         self.write("a.txt", "base\n")
@@ -357,14 +358,14 @@ class TestScanTreeAndRev(GitCase):
         self.write("a.txt", "clean\n")
         self.commit("one")
         self.write("a.txt", "p " + MAC + "a/x\n")
-        self.write("run.jsonl", "{}\n")
+        self.write("claude-session.jsonl", "{}\n")
         tip = self.commit("two")
         self.write("a.txt", "clean\n")
-        os.remove(os.path.join(self.repo, "run.jsonl"))
+        os.remove(os.path.join(self.repo, "claude-session.jsonl"))
         self.commit("three")
         found = leak_scan.scan_rev(self.repo, tip)
         self.assertEqual(sorted((f.kind, f.where) for f in found),
-                         [("home-path", f"{tip[:10]}:a.txt:1"), ("session-transcript", f"{tip[:10]}:run.jsonl")])
+                         [("home-path", f"{tip[:10]}:a.txt:1"), ("session-transcript", f"{tip[:10]}:claude-session.jsonl")])
         self.assertEqual(leak_scan.scan_rev(self.repo, "HEAD"), [])
 
 
@@ -501,6 +502,426 @@ class TestPrePushSample(GitCase):
         tip = self.commit("leak")
         r = self.hook(f"refs/heads/new {tip} refs/heads/new {self.ZERO}\n")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+
+# ---- SWE-2's review of 81e8344 (docs/superpowers/reviews/2026-11-01-leak-scan-code/) -----------------------
+
+def write_patterns(case, body, encoding="utf-8"):
+    d = tempfile.TemporaryDirectory()
+    case.addCleanup(d.cleanup)
+    p = os.path.join(d.name, "patterns.txt")
+    with open(p, "w", encoding=encoding) as fh:
+        fh.write(body)
+    return p
+
+
+class TestLitPatterns(unittest.TestCase):
+    """F1 (P1): a `lit:` line must be a literal of its own text whatever surrounds it."""
+
+    def literal(self, body, encoding="utf-8"):
+        return leak_scan.load_patterns(write_patterns(self, body, encoding))
+
+    def test_leading_whitespace_before_lit_is_ignored(self):
+        pats = self.literal("  lit:zebra\n\tlit:quagga\n")
+        self.assertEqual([p.regex.pattern for p in pats], ["zebra", "quagga"])
+        self.assertTrue(pats[0].regex.search("a zebra here"))
+
+    def test_the_prefix_is_not_case_sensitive(self):
+        for body in ("LIT:zebra\n", "Lit:zebra\n"):
+            with self.subTest(body=body):
+                pats = self.literal(body)
+                self.assertEqual(pats[0].regex.pattern, "zebra")
+
+    def test_a_byte_order_mark_on_the_first_line_is_dropped(self):
+        pats = self.literal("lit:zebra\nlit:quagga\n", encoding="utf-8-sig")
+        self.assertEqual(len(pats), 2)
+        self.assertTrue(pats[0].regex.search("a zebra here"))
+
+    def test_a_regex_line_after_a_byte_order_mark_still_works(self):
+        pats = self.literal("zeb+ra\n", encoding="utf-8-sig")
+        self.assertTrue(pats[0].regex.search("a zebbra here"))
+
+    def test_the_text_after_the_prefix_is_kept_whole(self):
+        pats = self.literal("lit:Foo v. Bar (2d)  \n")
+        self.assertTrue(pats[0].regex.search("see foo v. bar (2d) here"))
+
+
+class TestHookRemoteAndRefs(GitCase):
+    """F2, F8 and the stdin idiom: the sample hook."""
+    ZERO = "0" * 40
+
+    def hook(self, lines, first="origin", env=None):
+        e = dict(os.environ, LEAK_SCAN_PY=os.path.join(KIT, "scripts", "leak_scan.py"))
+        e.pop(leak_scan.PATTERNS_ENV, None)
+        e.update(env or {})
+        return subprocess.run(["sh", SHELL_SAMPLE, first, "https://example.invalid/r.git"],
+                              cwd=self.repo, input=lines, capture_output=True, text=True, env=e)
+
+    def two_commits(self):
+        self.write("a.txt", "p " + MAC + "dan/x\n")
+        old = self.commit("old, already on the remote")
+        self.write("a.txt", "p " + MAC + "dan/x\nclean\n")
+        new = self.commit("new")
+        self.git("update-ref", "refs/remotes/origin/main", old)
+        return old, new
+
+    def test_a_url_instead_of_a_remote_name_scans_only_what_no_remote_branch_has(self):
+        _, new = self.two_commits()
+        r = self.hook(f"refs/heads/b {new} refs/heads/b {self.ZERO}\n", first="https://example.invalid/r.git")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_named_remote_that_is_not_configured_falls_back_the_same_way(self):
+        _, new = self.two_commits()
+        r = self.hook(f"refs/heads/b {new} refs/heads/b {self.ZERO}\n", first="nosuchremote")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_ref_named_for_a_case_is_blocked_though_its_commits_are_clean(self):
+        self.write("a.txt", "x\n")
+        sha = self.commit("clean")
+        pats = write_patterns(self, "lit:zebra\n")
+        r = self.hook(f"refs/heads/zebra-case {sha} refs/heads/zebra-case {self.ZERO}\n",
+                      env={leak_scan.PATTERNS_ENV: pats})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("[case-pattern] pattern #1", r.stdout)
+        self.assertNotIn("zebra", r.stdout)
+
+    def test_an_ordinary_ref_name_passes(self):
+        self.write("a.txt", "x\n")
+        sha = self.commit("clean")
+        pats = write_patterns(self, "lit:zebra\n")
+        r = self.hook(f"refs/heads/feat/ok {sha} refs/heads/feat/ok {self.ZERO}\n", env={leak_scan.PATTERNS_ENV: pats})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_every_pushed_ref_is_read_even_when_the_first_is_clean(self):
+        self.write("a.txt", "x\n")
+        base = self.commit("base")
+        self.write("a.txt", "x\n" + MAC + "dan/y\n")
+        bad = self.commit("leak")
+        r = self.hook(f"refs/heads/one {base} refs/heads/one {self.ZERO}\nrefs/heads/two {bad} refs/heads/two {base}\n")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_the_scanner_call_does_not_inherit_the_hooks_stdin(self):
+        with open(SHELL_SAMPLE, encoding="utf-8") as fh:
+            lines = [l for l in fh if "--range" in l and l.strip().startswith('"$python"')]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("</dev/null", lines[0])
+
+    def test_check_authors_is_wired_behind_an_opt_in_variable(self):
+        with open(SHELL_SAMPLE, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("LEAK_SCAN_CHECK_AUTHORS", text)
+        self.assertIn("--check-authors", text)
+
+
+class TestDiffHeaderParsing(GitCase):
+    """F3: quoted names and diff.* prefix settings must not break path extraction."""
+
+    def tip_and_base(self, files, seed="seed.txt"):
+        self.write(seed, "x\n")
+        base = self.commit("base")
+        for name, text in files.items():
+            self.write(name, text)
+        return base, self.commit("add")
+
+    def test_a_name_with_a_tab_is_still_name_checked(self):
+        name = "a\tb-swe2-transcript.md"
+        base, tip = self.tip_and_base({name: "clean\n"})
+        found = leak_scan.scan_range(self.repo, f"{base}..{tip}")
+        self.assertEqual([(f.kind, f.where) for f in found], [("session-transcript", f"{tip[:10]}:{name}")])
+
+    def test_a_name_with_a_quote_and_a_backslash(self):
+        name = 'q"uote\\back-swe2-transcript.md'
+        base, tip = self.tip_and_base({name: "clean\n"})
+        found = leak_scan.scan_range(self.repo, f"{base}..{tip}")
+        self.assertEqual([(f.kind, f.where) for f in found], [("session-transcript", f"{tip[:10]}:{name}")])
+
+    def test_a_leak_in_a_file_with_a_quoted_name_has_its_name_and_line(self):
+        name = "a\tb.txt"
+        base, tip = self.tip_and_base({name: "ok\n" + MAC + "dan/x\n"})
+        found = leak_scan.scan_range(self.repo, f"{base}..{tip}")
+        self.assertEqual([(f.kind, f.where) for f in found], [("home-path", f"{tip[:10]}:{name}:2")])
+
+    def test_prefix_settings_in_the_users_git_config_do_not_change_the_result(self):
+        for key, value in [("diff.noprefix", "true"), ("diff.mnemonicPrefix", "true"),
+                           ("diff.srcPrefix", "SRC/"), ("diff.dstPrefix", "DST/")]:
+            with self.subTest(setting=key):
+                self.git("config", key, value)
+                base, tip = self.tip_and_base({"swe2-transcript-%s.md" % key.split(".")[1]: "p " + MAC + "dan/x\n"},
+                                              seed="seed-%s.txt" % key.split(".")[1])
+                found = leak_scan.scan_range(self.repo, f"{base}..{tip}")
+                name = "swe2-transcript-%s.md" % key.split(".")[1]
+                self.assertEqual(sorted((f.kind, f.where) for f in found),
+                                 [("home-path", f"{tip[:10]}:{name}:1"), ("session-transcript", f"{tip[:10]}:{name}")])
+                self.git("config", "--unset", key)
+
+
+class TestUnreadableAndInternalErrors(GitCase):
+    """F4: an unreadable file is an error with exit 2, never a traceback, and a stray exception is one line."""
+
+    def run_cli(self, argv, env=None):
+        out, err = io.StringIO(), io.StringIO()
+        old = dict(os.environ)
+        os.environ.pop(leak_scan.PATTERNS_ENV, None)
+        os.environ.update(env or {})
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = leak_scan.main(argv)
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+        return rc, out.getvalue(), err.getvalue()
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can read anything")
+    def test_an_unreadable_file_is_exit_2_and_the_rest_is_still_scanned(self):
+        self.write("locked.txt", "x\n")
+        self.write("leaky.txt", MAC + "dan/x\n")
+        self.commit("c")
+        path = os.path.join(self.repo, "locked.txt")
+        os.chmod(path, 0)
+        self.addCleanup(os.chmod, path, 0o644)
+        rc, out, err = self.run_cli(["--tree", self.repo])
+        self.assertEqual(rc, 2)
+        self.assertIn("leaky.txt:1: [home-path]", out)
+        self.assertIn("cannot read locked.txt", err)
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn(self.repo, err)
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can read anything")
+    def test_an_unreadable_file_whose_name_matches_a_case_pattern_is_masked(self):
+        self.write("zebra-notes.txt", "x\n")
+        self.commit("c")
+        path = os.path.join(self.repo, "zebra-notes.txt")
+        os.chmod(path, 0)
+        self.addCleanup(os.chmod, path, 0o644)
+        rc, _, err = self.run_cli(["--tree", self.repo, "--patterns", write_patterns(self, "lit:zebra\n")])
+        self.assertEqual(rc, 2)
+        self.assertNotIn("zebra", err)
+
+    def test_an_unexpected_exception_is_one_sanitized_line_and_exit_2(self):
+        self.write("a.txt", "x\n")
+        self.commit("c")
+        real = leak_scan.scan_tree
+
+        def boom(*a, **k):
+            raise RuntimeError("secret detail in " + self.repo)
+
+        leak_scan.scan_tree = boom
+        self.addCleanup(setattr, leak_scan, "scan_tree", real)
+        rc, _, err = self.run_cli(["--tree", self.repo])
+        self.assertEqual(rc, 2)
+        self.assertIn("unexpected RuntimeError", err)
+        self.assertNotIn("secret detail", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_an_unexpected_exception_can_be_shown_for_debugging(self):
+        self.write("a.txt", "x\n")
+        self.commit("c")
+        real = leak_scan.scan_tree
+
+        def boom(*a, **k):
+            raise RuntimeError("visible")
+
+        leak_scan.scan_tree = boom
+        self.addCleanup(setattr, leak_scan, "scan_tree", real)
+        with self.assertRaises(RuntimeError):
+            self.run_cli(["--tree", self.repo], env={"LEAK_SCAN_DEBUG": "1"})
+
+
+class TestSensitiveFileNames(unittest.TestCase):
+    """F5: an address or a home path inside a file name is a finding, and the location hides it."""
+
+    def test_an_email_in_a_file_name_is_a_finding_and_masked_in_the_location(self):
+        found = leak_scan.scan_path_name("docs/" + "jane.doe" + AT + "gmail.com-notes.md")
+        self.assertEqual(kinds(found), ["email"])
+        self.assertEqual(found[0].where, "docs/<masked>")
+        self.assertEqual(found[0].detail, "jane.doe" + AT + "gmail.com")
+
+    def test_a_home_path_at_the_start_of_a_path_is_a_finding(self):
+        found = leak_scan.scan_path_name("Users/dan/notes.md")
+        self.assertEqual(kinds(found), ["home-path"])
+        self.assertNotIn("dan", found[0].where)
+
+    def test_a_directory_that_happens_to_be_called_users_is_not(self):
+        self.assertEqual(leak_scan.scan_path_name("vendor/Users/dan/notes.md"), [])
+
+    def test_an_allowed_email_in_a_name_is_neither_flagged_nor_masked(self):
+        name = "docs/me" + AT + "mydomain.org.md"
+        self.assertEqual(leak_scan.scan_path_name(name, allow_emails=("*" + AT + "mydomain.org*",)), [])
+        self.assertEqual(leak_scan.mask_path(name, allow_emails=("*" + AT + "mydomain.org*",)), name)
+
+    def test_content_findings_in_such_a_file_do_not_print_its_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            name = "jane.doe" + AT + "gmail.com-notes.md"
+            with open(os.path.join(d, name), "w") as fh:
+                fh.write("see " + MAC + "dan/x\n")
+            found = leak_scan.scan_tree(d)
+        self.assertEqual(sorted(f.where for f in found), ["<masked>", "<masked>:1"])
+
+
+class TestTranscriptNameRule(unittest.TestCase):
+    """F6: names that only look like a session transcript are not flagged; real ones still are."""
+
+    def test_ordinary_files_are_not_flagged(self):
+        for name in ("data/train.jsonl", "evals/cases.jsonl", "chat-export.py", "session-history.md",
+                     "matterkit/session_export.py", "docs/agent-notes.md", "docs/chat-history.md",
+                     "docs/session-export.md", "x/run.jsonl",
+                     # the launch logs and usage files review folders carry (two lines of timestamps)
+                     "docs/superpowers/reviews/x/swe2.log", "docs/superpowers/reviews/x/astra.log",
+                     "docs/superpowers/reviews/x/swe2-run1.log", "docs/superpowers/reviews/x/usage.json"):
+            with self.subTest(name=name):
+                self.assertEqual(leak_scan.scan_path_name(name), [])
+
+    def test_session_transcripts_still_are(self):
+        for name in ("docs/r/swe2-transcript.md", "x/claude-session-transcript.txt", "x/astra_transcript.md",
+                     "x/codex-conversation.json", "docs/agent-conversation.md", "x/chat_transcript.md",
+                     "x/claude-session.jsonl", "x/claude-session-export.md",
+                     "x/3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b.jsonl"):
+            with self.subTest(name=name):
+                self.assertEqual(kinds(leak_scan.scan_path_name(name)), ["session-transcript"])
+
+    def test_session_log_text_is_found_by_its_content_whatever_the_file_is_called(self):
+        line = '{"parent' + 'Uuid":null,"session' + 'Id":"3f2a1b4c","type":"assistant"}\n'
+        self.assertEqual(kinds(leak_scan.scan_text(line, "x/anything.jsonl")), ["session-transcript"])
+
+    def test_the_knobs_exist_for_a_name_that_is_flagged_anyway(self):
+        found = leak_scan.scan_path_name("docs/agent-conversation.md")
+        self.assertEqual(kinds(found), ["session-transcript"])
+
+
+class TestEnvironmentKnobsAndNames(GitCase):
+    """F6 and F8: --exclude and --allow-email from the environment, and --name for ref names."""
+
+    def call(self, argv, env=None):
+        out, err = io.StringIO(), io.StringIO()
+        old = dict(os.environ)
+        for k in (leak_scan.PATTERNS_ENV, "LEAK_SCAN_EXCLUDE", "LEAK_SCAN_ALLOW_EMAIL"):
+            os.environ.pop(k, None)
+        os.environ.update(env or {})
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = leak_scan.main(argv)
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_exclude_globs_can_come_from_the_environment(self):
+        self.write("docs/agent-conversation.md", "clean\n")
+        self.write("keep/agent-conversation.md", "clean\n")
+        rc, out, _ = self.call(["--tree", self.repo], env={"LEAK_SCAN_EXCLUDE": "docs/*"})
+        self.assertEqual(rc, 1)
+        self.assertEqual(out.strip(), "keep/agent-conversation.md: [session-transcript] "
+                                      "file name looks like an assistant session transcript")
+
+    def test_allowed_emails_can_come_from_the_environment_separated_by_commas_or_newlines(self):
+        self.write("a.txt", "me" + AT + "mydomain.org and you" + AT + "gmail.com and x" + AT + "other.net\n")
+        rc, out, _ = self.call(["--tree", self.repo],
+                               env={"LEAK_SCAN_ALLOW_EMAIL": "*" + AT + "mydomain.org\n*" + AT + "other.net, "})
+        self.assertEqual(rc, 1)
+        self.assertEqual(out.strip(), "a.txt:1: [email] you" + AT + "gmail.com")
+
+    def test_name_flag_checks_a_ref_name_against_case_patterns(self):
+        pats = write_patterns(self, "lit:zebra\n")
+        rc, out, _ = self.call(["--name", "refs/heads/zebra-case", "--patterns", pats])
+        self.assertEqual(rc, 1)
+        self.assertEqual(out.strip(), "name:refs/heads/<masked>: [case-pattern] pattern #1")
+
+    def test_name_flag_is_clean_for_an_ordinary_name_and_repeatable(self):
+        pats = write_patterns(self, "lit:zebra\n")
+        rc, out, _ = self.call(["--name", "refs/heads/feat/ok", "--name", "refs/tags/v1", "--patterns", pats])
+        self.assertEqual((rc, out), (0, ""))
+
+    def test_name_flag_also_applies_the_builtin_name_rules(self):
+        rc, out, _ = self.call(["--name", "refs/heads/swe2-transcript"])
+        self.assertEqual(rc, 1)
+        self.assertIn("[session-transcript]", out)
+
+
+class TestPatternsPathIsNotEchoed(GitCase):
+    """F9: the error for an unreadable patterns file names where the path came from, not the path."""
+
+    def test_flag(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = leak_scan.main(["--tree", self.repo, "--patterns", "/nonexistent-dir/private-name/p.txt"])
+        self.assertEqual(rc, 2)
+        self.assertNotIn("private-name", err.getvalue())
+        self.assertIn("--patterns", err.getvalue())
+
+    def test_environment_variable(self):
+        out, err = io.StringIO(), io.StringIO()
+        old = dict(os.environ)
+        os.environ[leak_scan.PATTERNS_ENV] = "/nonexistent-dir/private-name/p.txt"
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = leak_scan.main(["--tree", self.repo])
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+        self.assertEqual(rc, 2)
+        self.assertNotIn("private-name", err.getvalue())
+        self.assertIn(leak_scan.PATTERNS_ENV, err.getvalue())
+
+    def test_load_patterns_error_does_not_contain_the_path(self):
+        with self.assertRaises(leak_scan.ConfigError) as cm:
+            leak_scan.load_patterns("/nonexistent-dir/private-name/p.txt")
+        self.assertNotIn("private-name", str(cm.exception))
+
+
+class TestSeparatorsInCommitMessages(GitCase):
+    """F16: a record or unit separator inside a commit message must not corrupt or crash the range scan."""
+
+    def test_record_separator_in_a_message(self):
+        self.write("a.txt", "x\n")
+        base = self.commit("base")
+        self.write("a.txt", "y\n")
+        tip = self.commit("subject\n\nbody with \x1e a record separator\nand " + MAC + "dan/leak")
+        found = leak_scan.scan_range(self.repo, f"{base}..{tip}")
+        self.assertEqual(kinds(found), ["home-path"])
+        self.assertTrue(found[0].where.startswith(f"{tip[:10]}:message:"))
+
+    def test_unit_separator_in_a_message(self):
+        self.write("a.txt", "x\n")
+        base = self.commit("base")
+        self.write("a.txt", "y\n")
+        tip = self.commit("subject\n\nbody \x1f unit\n" + MAC + "dan/leak")
+        self.assertEqual(kinds(leak_scan.scan_range(self.repo, f"{base}..{tip}")), ["home-path"])
+
+    def test_several_commits_with_separators_keep_their_own_messages(self):
+        self.write("a.txt", "x\n")
+        base = self.commit("base")
+        for i in range(3):
+            self.write("a.txt", f"v{i}\n")
+            tip = self.commit(f"c{i} \x1e \x1f \n\n" + (MAC + "dan/leak" if i == 1 else "clean"))
+        found = leak_scan.scan_range(self.repo, f"{base}..{tip}")
+        self.assertEqual(kinds(found), ["home-path"])
+
+
+class TestWorkflowFile(unittest.TestCase):
+    """F7: the CI job scans pushes as well as pull requests, and --check-authors is wired behind a variable."""
+
+    def setUp(self):
+        with open(os.path.join(KIT, ".github", "workflows", "ci.yml"), encoding="utf-8") as fh:
+            self.text = fh.read()
+
+    def test_a_push_gets_a_range_scan(self):
+        self.assertIn("github.event_name == 'push'", self.text)
+        self.assertIn("github.event.before", self.text)
+        self.assertIn("github.sha", self.text)
+
+    def test_a_new_branch_push_without_a_before_sha_is_handled(self):
+        self.assertIn("0000000000000000000000000000000000000000", self.text)
+
+    def test_check_authors_is_opt_in_through_a_repository_variable(self):
+        self.assertIn("vars.LEAK_SCAN_CHECK_AUTHORS", self.text)
+        self.assertIn("--check-authors", self.text)
+
+    def test_the_exclude_and_allow_email_knobs_come_from_repository_variables(self):
+        self.assertIn("vars.LEAK_SCAN_EXCLUDE", self.text)
+        self.assertIn("vars.LEAK_SCAN_ALLOW_EMAIL", self.text)
+
+    def test_the_fork_limit_is_documented_in_the_file(self):
+        self.assertIn("fork", self.text.lower())
 
 
 if __name__ == "__main__":
