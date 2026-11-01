@@ -183,7 +183,9 @@ class TestAuthorIsTheServers(ServerCase):
         cid = self.ids["Alpha v. City"]
         before = tree_snapshot(self.ws)
         writes = [("POST", "/cases", {"name": "Gamma"}), ("POST", f"/cases/{cid}/facts", {"text": "x", "status": "UNKNOWN"}),
-                  ("POST", f"/cases/{cid}/brief-check", {"path": "Filings/drafts/response_v1.md"})]
+                  ("POST", f"/cases/{cid}/brief-check", {"path": "Filings/drafts/response_v1.md"}),
+                  ("POST", f"/cases/{cid}/amendments", {"text": "x"}),
+                  ("POST", f"/cases/{cid}/amendments/am_000000000000/status", {"status": "approved"})]
         for method, path, body in writes:
             for key in sorted(webui.AUTHOR_KEYS):
                 with self.subTest(path=path, key=key):

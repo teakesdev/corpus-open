@@ -23,7 +23,7 @@ from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import parse_qs
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 
-from . import cases, deadlines, facts, ingest, store, subcase
+from . import amendments, cases, deadlines, facts, ingest, store, subcase
 from . import packet as pk
 
 API = "/api/v0"
@@ -94,6 +94,7 @@ class Request:
         self.method = environ.get("REQUEST_METHOD", "GET").upper()
         self.path = environ.get("PATH_INFO", "") or "/"
         self.query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", ""), keep_blank_values=True).items()}
+        self.params = {}  # named groups of the matched route pattern, set by App.handle
 
     def header(self, name):
         return self.environ.get("HTTP_" + name.upper().replace("-", "_"))
@@ -177,7 +178,8 @@ class App:
             if method != req.method:
                 allowed.append(method)
                 continue
-            case_id = m.groupdict().get("case")
+            req.params = m.groupdict()
+            case_id = req.params.get("case")
             if not self.policy(self.identity, case_id, action):
                 raise HttpError(403, "not allowed")
             case = self.case(case_id) if case_id else None
@@ -247,6 +249,7 @@ def h_status(app, req, case):
     conn = _read(case)
     try:
         data = pk.status_data(conn, case["path"])
+        data["amendments_open"] = amendments.counts(conn)["open"]  # 0 on a store that predates the tables
     finally:
         conn.close()
     data.pop("matter_dir", None)
@@ -386,6 +389,58 @@ def h_fact_add(app, req, case):
         conn.close()
 
 
+def h_amendments(app, req, case):
+    conn = _read(case)
+    try:
+        try:
+            items = amendments.list_(conn, req.query.get("status", "open"))
+        except amendments.AmendmentError as e:
+            raise HttpError(400, str(e)) from None
+        return {"amendments": items, "counts": amendments.counts(conn)}
+    finally:
+        conn.close()
+
+
+def h_amendment_add(app, req, case):
+    body = req.json()
+    facts_in, docs_in = body.get("facts", []), body.get("documents", [])
+    if not isinstance(facts_in, list):
+        raise HttpError(400, "facts must be a list of fact ids")
+    if not isinstance(docs_in, list):
+        raise HttpError(400, "documents must be a list")
+    pairs = []
+    for d in docs_in:
+        if not isinstance(d, dict) or not isinstance(d.get("id"), str):
+            raise HttpError(400, "each document needs an id")
+        pairs.append((d["id"], d.get("locator")))  # the page or place is checked by amendments.add
+    conn = store.connect(case["path"])
+    try:
+        try:
+            made = amendments.add(conn, body.get("text"), body.get("paragraphs"), body.get("reason"),
+                                  body.get("target", amendments.DEFAULT_TARGET), facts_in, pairs,
+                                  by=store.attribution(app.identity.author))
+        except amendments.AmendmentError as e:
+            raise HttpError(400, str(e)) from None
+        return {"amendment": made}
+    finally:
+        conn.close()
+
+
+def h_amendment_status(app, req, case):
+    body = req.json()
+    item_id = req.params["item"]
+    conn = store.connect(case["path"])
+    try:
+        try:
+            amendments.set_status(conn, item_id, body.get("status"), body.get("note"),
+                                  by=store.attribution(app.identity.author))
+        except amendments.AmendmentError as e:
+            raise HttpError(404 if e.kind == "not-found" else 400, str(e)) from None
+        return {"amendment": amendments.get(conn, item_id)}
+    finally:
+        conn.close()
+
+
 def _drafts(root):
     out = []
     for fp in ingest.walk_files(root):
@@ -428,6 +483,7 @@ def h_packet(app, req, case):
 
 
 CASE = r"/cases/(?P<case>[0-9a-f]{16})"
+ITEM = r"(?P<item>am_[0-9a-f]{12})"  # an amendment-list item id
 # (method, path under /api/v0, action, handler). Every API route is here, and App.handle runs
 # the policy before any handler, so no route can skip authorization.
 ROUTES = [
@@ -442,6 +498,9 @@ ROUTES = [
     ("GET", CASE + r"/deadlines", "read", h_deadlines),
     ("GET", CASE + r"/facts", "read", h_facts),
     ("POST", CASE + r"/facts", "write", h_fact_add),
+    ("GET", CASE + r"/amendments", "read", h_amendments),
+    ("POST", CASE + r"/amendments", "write", h_amendment_add),
+    ("POST", CASE + r"/amendments/" + ITEM + r"/status", "write", h_amendment_status),
     ("GET", CASE + r"/drafts", "read", h_drafts),
     ("POST", CASE + r"/brief-check", "read", h_brief_check),
     ("GET", CASE + r"/packet", "read", h_packet),

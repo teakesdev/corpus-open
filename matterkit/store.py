@@ -106,6 +106,34 @@ CREATE TABLE IF NOT EXISTS correspondence_history (
   recorded_by TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS amendment_items (
+  id TEXT PRIMARY KEY,
+  target TEXT NOT NULL DEFAULT 'complaint',
+  text TEXT NOT NULL,
+  paragraphs TEXT,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'proposed'
+    CHECK (status IN ('proposed','approved','incorporated','dropped')),
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS amendment_item_links (
+  item_id TEXT NOT NULL REFERENCES amendment_items(id),
+  kind TEXT NOT NULL CHECK (kind IN ('fact','document')),
+  ref TEXT NOT NULL,
+  locator TEXT,
+  PRIMARY KEY (item_id, kind, ref, locator)
+);
+CREATE TABLE IF NOT EXISTS amendment_item_history (
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL REFERENCES amendment_items(id),
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  note TEXT,
+  recorded_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 VALID_STATUS = {"DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"}

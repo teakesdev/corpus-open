@@ -132,11 +132,17 @@ class ServerCase(unittest.TestCase):
             conn.close()
 
 
+def shipped_text(name):
+    """The text of one shipped page file (app.js, app.css, index.html)."""
+    with open(os.path.join(webui.STATIC_DIR, name), encoding="utf-8") as f:
+        return f.read()
+
+
 def route_samples(case_id):
     """One concrete request per API route, for 'every route' tests."""
     out = []
     for method, pattern, _, _ in webui.ROUTES:
-        path = webui.API + pattern.replace(webui.CASE, f"/cases/{case_id}")
+        path = webui.API + pattern.replace(webui.CASE, f"/cases/{case_id}").replace(webui.ITEM, "am_000000000000")
         if method == "PUT":
             path += "?folder=Evidence&name=x.txt"
         body = {"text": "x", "status": "UNKNOWN"} if method == "POST" else None

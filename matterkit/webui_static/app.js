@@ -11,13 +11,13 @@ const LABELS = [
 ];
 const LABEL_NAME = Object.fromEntries(LABELS.map(([k, name]) => [k, name]));
 const TABS = [
-  ["overview", "Overview"], ["documents", "Documents"], ["facts", "Facts"],
+  ["overview", "Overview"], ["documents", "Documents"], ["facts", "Facts"], ["amend", "Next amendment"],
   ["deadlines", "Deadlines"], ["brief", "Brief check"], ["packet", "Packet"],
 ];
 const LAYER_NAMES = { "30s": "30-second view", "3min": "3-minute view", "15min": "15-minute view" };
 
 let token = null;
-const state = { session: null, cases: [], caseId: null, tab: "overview", layer: "3min", factFilter: "all" };
+const state = { session: null, cases: [], caseId: null, tab: "overview", layer: "3min", factFilter: "all", amendFilter: "open" };
 const $ = (id) => document.getElementById(id);
 
 class ApiError extends Error {
@@ -242,7 +242,7 @@ async function render() {
   const panel = el("div");
   main.append(banner, panel);
   pastDueBanner(banner, c.id);
-  const views = { overview: viewOverview, documents: viewDocuments, facts: viewFacts,
+  const views = { overview: viewOverview, documents: viewDocuments, facts: viewFacts, amend: viewAmend,
                   deadlines: viewDeadlines, brief: viewBrief, packet: viewPacket };
   try {
     await views[state.tab](panel, c);
@@ -298,6 +298,11 @@ async function viewOverview(panel, c) {
       : `${plural(status.assertions, "fact", "facts")}, each with a source`,
     nosource ? ` out of ${plural(status.assertions, "fact", "facts")}` : ""),
   el("a", { href: caseHref(c.id, "facts"), text: nosource ? "Find them" : "Facts" })));
+  const queued = status.amendments_open || 0;
+  if (queued) {
+    items.push(el("li", {}, el("span", { text: `${plural(queued, "change", "changes")} queued for the next amended pleading` }),
+      el("a", { href: caseHref(c.id, "amend"), text: "Review them" })));
+  }
   const verifyOut = el("span");
   items.push(el("li", {}, el("span", {}, `${plural(status.documents_total, "document", "documents")} registered. `, verifyOut),
     el("button", { class: "btn quiet", type: "button", text: "Check files for changes", onclick: (e) => runVerify(e.target, verifyOut, c) })));
@@ -455,6 +460,147 @@ function factForm(c, documents) {
     documents.length ? sources : el("p", { class: "hint", text: "Add documents to this case first; then you can point to them here." }),
     documents.length ? el("button", { class: "btn quiet", type: "button", text: "Add another source", onclick: addSource }) : null),
   err, el("button", { class: "btn", type: "submit", text: "Add fact" }));
+  return form;
+}
+
+// --- next amendment: changes to make the next time a pleading is amended ---
+const AMEND_STATUS = { proposed: "Proposed", approved: "Approved", incorporated: "In the draft", dropped: "Dropped" };
+const AMEND_FILTERS = [["open", "Still to do"], ["all", "All changes"]];
+// What a person can do from each status: [the status it moves to, the button's words]
+const AMEND_ACTIONS = {
+  proposed: [["approved", "Approve"], ["incorporated", "Mark “in the draft”"], ["dropped", "Drop"]],
+  approved: [["incorporated", "Mark “in the draft”"], ["dropped", "Drop"], ["proposed", "Back to proposed"]],
+  incorporated: [["proposed", "Reopen"]],
+  dropped: [["proposed", "Reopen"]],
+};
+
+function fmtWhen(iso) {
+  const d = new Date(iso || "");
+  return Number.isNaN(d.getTime()) ? (iso || "") : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+async function viewAmend(panel, c) {
+  const [{ facts }, { documents }] = await Promise.all([api("GET", `/cases/${c.id}/facts`), api("GET", `/cases/${c.id}/documents`)]);
+  const heading = el("h2", { tabindex: "-1" });
+  const bar = el("div", { class: "segmented", role: "group", "aria-label": "Show" });
+  const list = el("ul", { class: "amend-list" });
+  const draw = async (keepFocus) => {
+    clear(bar).append(...AMEND_FILTERS.map(([k, name]) => el("button", { type: "button", "aria-pressed": String(state.amendFilter === k), text: name,
+      onclick: () => { state.amendFilter = k; draw(true); } })));
+    try {
+      const { amendments } = await api("GET", `/cases/${c.id}/amendments?status=${encodeURIComponent(state.amendFilter)}`);
+      heading.textContent = state.amendFilter === "all" ? `All changes (${amendments.length})` : `Changes still to make (${amendments.length})`;
+      clear(list).append(...(amendments.length ? amendments.map((a) => amendItem(c, a, () => draw(true)))
+        : [el("li", { class: "muted", text: state.amendFilter === "all" ? "Nothing has been added yet." : "Nothing is waiting. Add a change above, or choose All changes to see finished and dropped ones." })]));
+    } catch (ex) { clear(list).append(el("li", { class: "error", role: "alert", text: ex.message })); }
+    if (keepFocus) heading.focus();  // the button that was pressed is gone; keep the keyboard in this part of the page
+  };
+  panel.append(el("section", {}, el("h2", { text: "Add a change" }),
+    el("p", { class: "lede", text: "Keep a list of what you want to change the next time you amend a pleading, for example: “attribute all three ER injuries to the jail beating, ¶¶ 37 and 172.” This only keeps the list. It doesn't change your draft or file anything. When you've made a change in the new draft, mark it “in the draft.”" }),
+    amendForm(c, facts, documents)),
+  el("section", {}, heading, bar, list));
+  await draw(false);
+}
+
+function amendItem(c, a, redraw) {
+  const textId = `amend-text-${a.id}`;
+  const noteId = `amend-note-${a.id}`;
+  const note = el("input", { type: "text", id: noteId, maxlength: 500, autocomplete: "off" });
+  const err = el("p", { class: "error", role: "alert" });
+  const actions = el("div", { class: "amend-actions" });
+  actions.append(...(AMEND_ACTIONS[a.status] || []).map(([to, name]) => el("button", {
+    class: to === "approved" ? "btn" : "btn quiet", type: "button", text: name, "aria-describedby": textId,
+    onclick: async () => {
+      const buttons = [...actions.querySelectorAll("button")];
+      buttons.forEach((b) => { b.disabled = true; });  // one click, one change
+      err.textContent = "";
+      try {
+        await api("POST", `/cases/${c.id}/amendments/${a.id}/status`, { status: to, note: note.value.trim() });
+        toast(`Marked ${AMEND_STATUS[to] || to}.`);
+        await redraw();
+      } catch (ex) {
+        err.textContent = ex.message;
+        buttons.forEach((b) => { b.disabled = false; });
+      }
+    } })));
+  const factLinks = a.links.facts.map((f) => el("li", {}, el("span", { class: "label", text: LABEL_NAME[f.label] || f.label || "Unknown" }), " ", f.text || ""));
+  const docLinks = a.links.documents.map((d) => el("li", { text: (d.rel_path || d.id) + (d.locator ? `, ${d.locator}` : "") }));
+  return el("li", { class: "amend", "data-status": a.status },
+    el("p", { class: "amend-head" },
+      el("span", { class: "amend-status", text: AMEND_STATUS[a.status] || a.status }),
+      a.paragraphs ? el("span", { class: "amend-paras", text: a.paragraphs }) : null,
+      a.target !== "complaint" ? el("span", { class: "muted", text: `For: ${a.target}` }) : null),
+    el("p", { class: "amend-text", id: textId, text: a.text }),
+    a.reason ? el("p", { class: "amend-reason" }, el("b", { text: "Why: " }), a.reason) : null,
+    factLinks.length ? el("div", {}, el("p", { class: "amend-label", text: "Facts behind it" }), el("ul", { class: "amend-links" }, factLinks)) : null,
+    docLinks.length ? el("div", {}, el("p", { class: "amend-label", text: "Documents" }), el("ul", { class: "amend-links" }, docLinks)) : null,
+    el("p", { class: "fact-meta", text: `Added by ${who(a.created_by)}, ${fmtWhen(a.created_at)}` }),
+    el("details", { class: "amend-history" }, el("summary", { text: `History (${a.history.length})` }),
+      el("ol", {}, a.history.map((h) => el("li", { text: amendHistoryLine(h) })))),
+    el("div", { class: "field" }, el("label", { for: noteId, text: "Note (optional)" }), note),
+    actions, err);
+}
+
+function amendHistoryLine(h) {
+  const to = AMEND_STATUS[h.to_status] || h.to_status;
+  const what = h.from_status ? `${AMEND_STATUS[h.from_status] || h.from_status} → ${to}` : `Added as ${to}`;
+  return `${what}, by ${who(h.recorded_by)}, ${fmtWhen(h.created_at)}${h.note ? `. Note: ${h.note}` : ""}`;
+}
+
+function amendForm(c, facts, documents) {
+  const err = el("p", { class: "error", role: "alert" });
+  const text = el("textarea", { id: "amend-text", required: true });
+  const paragraphs = el("input", { type: "text", id: "amend-paras", maxlength: 200, autocomplete: "off" });
+  const reason = el("textarea", { id: "amend-reason", class: "short" });
+  // facts: a find box over a scrollable list of check boxes, so a case with hundreds of facts stays usable
+  const find = el("input", { type: "text", id: "amend-find", autocomplete: "off" });
+  const picks = facts.map((f) => ({ f, row: el("label", { class: "choice" }, el("input", { type: "checkbox", name: "amend-fact", value: f.id }),
+    el("span", {}, el("b", { text: LABEL_NAME[f.status] || f.status }), ` ${f.text}`)) }));
+  find.addEventListener("input", () => {
+    const q = find.value.trim().toLowerCase();
+    picks.forEach(({ f, row }) => { row.hidden = !!q && !f.text.toLowerCase().includes(q); });
+  });
+  // documents: the same picker the facts form uses; each row is a document and the page or place in it
+  const docs = el("div");
+  const addDoc = () => {
+    const row = el("div", { class: "source-row" },
+      el("select", { "aria-label": "Document" }, el("option", { value: "", text: "Pick a document…" }),
+        documents.map((d) => el("option", { value: d.id, text: d.rel_path }))),
+      el("input", { type: "text", "aria-label": "Page or place in the document", placeholder: "Page or ¶", maxlength: 200 }),
+      el("button", { class: "btn quiet", type: "button", text: "Remove", onclick: () => row.remove() }));
+    docs.append(row);
+  };
+  if (documents.length) addDoc();
+  const form = el("form", { class: "form-panel",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      err.textContent = "";
+      if (!text.value.trim()) { err.textContent = "Say what should change."; text.focus(); return; }
+      const submit = form.querySelector("button[type=submit]");
+      submit.disabled = true;
+      try {
+        await api("POST", `/cases/${c.id}/amendments`, {
+          text: text.value, paragraphs: paragraphs.value.trim(), reason: reason.value.trim(),
+          facts: [...form.querySelectorAll("input[name=amend-fact]:checked")].map((i) => i.value),
+          documents: [...docs.querySelectorAll(".source-row")].map((r) => ({
+            id: r.querySelector("select").value, locator: r.querySelector("input").value.trim() })).filter((d) => d.id) });
+        toast("Change added to the list.");
+        render();
+      } catch (ex) { err.textContent = ex.message; submit.disabled = false; }
+    } },
+  el("div", { class: "field" }, el("label", { for: "amend-text", text: "What should change?" }), text,
+    el("p", { class: "hint", text: "Say what to add, fix or take out, in plain words." })),
+  el("div", { class: "field" }, el("label", { for: "amend-paras", text: "Which paragraphs? (optional)" }), paragraphs,
+    el("p", { class: "hint", text: "For example: ¶¶ 37, 172" })),
+  el("div", { class: "field" }, el("label", { for: "amend-reason", text: "Why? (optional)" }), reason),
+  el("fieldset", {}, el("legend", { text: "Facts behind it (optional)" }),
+    facts.length ? el("div", {}, el("label", { for: "amend-find", text: "Find a fact" }), find,
+      el("div", { class: "pick-list", role: "group", "aria-label": "Facts in this case" }, picks.map((p) => p.row)))
+      : el("p", { class: "hint", text: "This case has no facts yet. Add facts first if you want to point to them here." })),
+  el("fieldset", {}, el("legend", { text: "Documents behind it (optional)" }),
+    documents.length ? docs : el("p", { class: "hint", text: "Add documents to this case first; then you can point to them here." }),
+    documents.length ? el("button", { class: "btn quiet", type: "button", text: "Add another document", onclick: addDoc }) : null),
+  err, el("button", { class: "btn", type: "submit", text: "Add to the list" }));
   return form;
 }
 

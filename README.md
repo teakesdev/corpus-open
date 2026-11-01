@@ -60,6 +60,10 @@ a case, and subcases show under their parent. In the browser you can:
 - check that no file has changed;
 - see deadlines, with any that have passed shown first;
 - add facts with a label and the document and page they come from;
+- keep the list of changes for the next amended pleading (the "Next amendment"
+  tab): add a change with the facts and documents behind it, then approve it,
+  mark it "in the draft", drop it or reopen it, with a note if you like. The
+  overview says how many are still queued;
 - run brief check on a `.md` or `.txt` draft;
 - read, copy or save the counsel packet.
 
@@ -147,13 +151,16 @@ outreach.
 ```
 
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
+`matter.amend_add` · `matter.amend_list` ·
 `matter.deadline_list` · `matter.packet_render` · `matter.cite_extract` ·
 `matter.ingest_path` · `matter.verify` · `matter.hold_render` ·
 `matter.correspondence_list`.
 `matter.ingest_path` refuses paths that escape `MATTER_DIR`. `matter.verify`
 prints absolute `root=` and ok/changed/missing; it does not send network.
 `matter.hold_render` takes a `notice_id` and returns a filtered custodian packet.
-MCP cannot approve a notice, record mailing, or send it.
+MCP cannot approve a notice, record mailing, or send it. `matter.amend_add`
+can only propose a change to the amendment list; approving or dropping one is a
+person's step (CLI or browser).
 
 ## Citations and stages (v0.2, RFC 0001)
 
@@ -213,6 +220,33 @@ unpunctuated ("1. Background") or a title ending in a period or colon
 at 3" are paragraphs. Inside a fact section, a numbered title at the same level
 ("2. Plaintiff Was Arrested.") is a subheading; one naming a non-fact section
 ("2. Argument.") ends it.
+
+## Changes for the next amended pleading
+
+```bash
+python3 matter.py amend add ~/cases/my-case --para "¶¶ 37, 172" \
+  --text "Attribute all three ER injuries to the jail beating" \
+  --reason "The ER notes tie them to one event" \
+  --fact a_0123456789ab --source "Evidence/er-notes.pdf@p. 2"      # add --target for another pleading
+python3 matter.py amend list ~/cases/my-case                       # open changes: approved first, then proposed
+python3 matter.py amend list ~/cases/my-case --status all --target complaint
+python3 matter.py amend set ~/cases/my-case am_0123456789ab --status approved --note "checked against the ER notes"
+```
+
+The amendment list is a queue of what to change in the next version of a
+pleading: what to add or fix, which paragraphs it touches, why, and what it
+rests on. `--fact` takes the `a_…` id that `fact add` printed (over MCP,
+`matter.fact_list` lists them). `--source` takes `rel_path@page` for a
+registered document, split on the last `@`; a file name that has an `@` and no
+page ends in `@`. Every item starts as `proposed`. A person moves it to
+`approved`, to `incorporated` (shown as "In the draft", once the change is in
+the new draft) or to `dropped`, and back to `proposed` if they change their
+mind. Each move records who, when and an optional note; nothing is ever
+deleted. `add` and `set` take `--author agent:MODEL [--directed-by PERSON]`
+like `fact add`. `list` shows open changes (proposed and approved) unless
+`--status` asks for `all` or one status, and it never writes to the case. The
+list only records changes: it does not edit a draft, and brief check does not
+read it.
 
 ## Court rules attached to a case
 

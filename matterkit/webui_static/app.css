@@ -143,6 +143,38 @@ legend { font-weight: 600; margin-bottom: .4rem; padding: 0; }
 .legend li { padding-left: .8rem; font-size: .9rem; }
 .legend li[data-label] { margin: 0; }
 
+/* --- next amendment: one card per change; the label and the margin line say where it stands --- */
+.amend-list { list-style: none; margin: 0; padding: 0; max-width: calc(var(--measure) + 2rem); }
+.amend {
+  background: var(--surface); border: 1px solid var(--rule); border-left: 5px solid var(--ink);
+  border-radius: 0 6px 6px 0; padding: .9rem 1.2rem 1rem; margin: 0 0 1rem;
+}
+.amend[data-status="proposed"] { border-left: 5px dashed var(--ink); }
+.amend[data-status="approved"] { border-left: 6px solid var(--ok); }
+.amend[data-status="incorporated"] { border-left: 3px solid var(--ink-2); }
+.amend[data-status="dropped"] { border-left: 4px dotted var(--ink-2); }
+.amend[data-status="dropped"] .amend-text { color: var(--ink-2); }
+.amend-head { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: baseline; margin: 0 0 .4rem; }
+.amend-status { font-weight: 600; font-size: .85rem; border: 1px solid var(--ink); border-radius: 3px; padding: 0 .5rem; }
+.amend[data-status="approved"] .amend-status { background: var(--ok); border-color: var(--ok); color: var(--paper); }
+.amend[data-status="incorporated"] .amend-status { background: var(--ink); color: var(--paper); }
+.amend[data-status="dropped"] .amend-status { border-style: dotted; color: var(--ink-2); border-color: var(--ink-2); }
+.amend-paras { font-weight: 600; }
+.amend-text { font-family: var(--record); font-size: 1.08rem; line-height: 1.6; margin: 0 0 .4rem; }
+.amend-reason { margin: 0 0 .5rem; color: var(--ink-2); max-width: var(--measure); }
+.amend-reason b { color: var(--ink); }
+.amend-label { margin: .5rem 0 .15rem; font-size: .85rem; font-weight: 600; color: var(--ink-2); }
+.amend-links { margin: 0 0 .4rem; padding-left: 1.1rem; font-size: .93rem; }
+.amend-links .label { font-weight: 600; margin-right: .3rem; }
+.amend-history { margin: .3rem 0 .6rem; font-size: .9rem; }
+.amend-history summary { cursor: pointer; color: var(--action); }
+.amend-history ol { margin: .4rem 0 0; padding-left: 1.3rem; color: var(--ink-2); }
+.amend-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.amend .field { margin: .6rem 0; }
+textarea.short { min-height: 3.5rem; }
+.choice[hidden] { display: none; }  /* the fact finder hides rows with the hidden attribute */
+.pick-list { max-height: 14rem; overflow: auto; margin-top: .4rem; padding: .3rem .7rem; max-width: var(--measure); border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+
 /* --- documents --- */
 .drop {
   border: 2px dashed var(--rule); border-radius: 6px; padding: 1.5rem; max-width: calc(var(--measure) + 3rem);

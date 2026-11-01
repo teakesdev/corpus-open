@@ -26,6 +26,18 @@ TOOLS = [
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
     {"name": "matter.fact_list", "description": "List assertions, optionally filtered by label, with their provenance.",
      "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}}}},
+    {"name": "matter.amend_add", "description": "Queue a change for the next version of a pleading (the amendment list): what to add or change, the paragraphs it touches, why, and the facts (assertion ids) and registered documents ('rel_path@page', split on the last '@') that support it. Starts as 'proposed'. Refuses empty text, an empty target, an unknown fact id and a document that is not registered; changes nothing when it refuses. Agents only propose: approving, dropping or marking a change as in the draft is a person's decision, made with `matter.py amend set` or in the browser UI.",
+     "inputSchema": {"type": "object", "required": ["text"],
+                     "properties": {"text": {"type": "string", "description": "what to add or change"},
+                                    "paragraphs": {"type": "string", "description": "e.g. '¶¶ 37, 172'"},
+                                    "reason": {"type": "string"},
+                                    "target": {"type": "string", "description": "which pleading; default 'complaint'"},
+                                    "facts": {"type": "array", "items": {"type": "string"}, "description": "assertion ids (a_...) in this case"},
+                                    "sources": {"type": "array", "items": {"type": "string"}},
+                                    "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+    {"name": "matter.amend_list", "description": "List the amendment list with each change's status, paragraphs, text, reason, linked facts and documents, and history. status: 'open' (default: proposed + approved, approved first), 'all', or one of proposed|approved|incorporated|dropped. target limits it to one pleading. Read-only.",
+     "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}, "target": {"type": "string"}}}},
     {"name": "matter.deadline_list", "description": "List deadlines (open only unless all=true) with confidence and verification status. Open deadlines dated before today carry overdue=true and marker '⚠ OVERDUE'.",
      "inputSchema": {"type": "object", "properties": {"all": {"type": "boolean"}}}},
     {"name": "matter.deadline_update", "description": "Change a deadline's state (open|met|superseded|lapsed|vacated), verification, confidence or due date. A reason is required; each change appends an events row (old->new, reason, sources, actor). Sources are 'rel_path@locator' refs that must be registered documents. Refuses unknown ids, invalid values, no-op updates and unregistered sources, and changes nothing when it refuses.",
@@ -130,6 +142,19 @@ def call(name: str, args: dict):
                 "sources": [x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "") for x in f["sources"]]}
                for f in facts.list_(conn, args.get("status"))]
         return json.dumps(out, indent=1)
+    if name == "matter.amend_add":
+        from matterkit import amendments
+        by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
+        sources = args.get("sources") or []
+        if not isinstance(sources, list):
+            raise ValueError("sources must be a list of 'rel_path@page' strings")
+        documents = [amendments.resolve_source(conn, ref) for ref in sources]  # raises -> isError, nothing written
+        r = amendments.add(conn, args.get("text"), args.get("paragraphs"), args.get("reason"),
+                           args.get("target", amendments.DEFAULT_TARGET), args.get("facts") or [], documents, by)
+        return f"{r['id']} [{r['status_label']}] by {r['created_by']}"
+    if name == "matter.amend_list":
+        from matterkit import amendments
+        return json.dumps(amendments.list_(conn, args.get("status", "open"), args.get("target")), indent=1)
     if name == "matter.deadline_list":
         q = "SELECT * FROM deadlines" + ("" if args.get("all") else " WHERE state='open'") + " ORDER BY due_date"
         from matterkit import deadlines as dl

@@ -112,6 +112,9 @@ class TestUiUnderHarness(unittest.TestCase):
         c = f"/cases/{cid}"
         with open(os.path.join(self.alpha, "Correspondence", "letter.txt"), "w") as f:
             f.write("synthetic letter\n")
+        status, made = self.call("POST", c + "/amendments", {"text": "Synthetic change"})
+        self.assertEqual(status, 200, made)
+        item = made["amendment"]["id"]
         calls = [("GET", "/session", None, None), ("GET", "/cases", None, None),
                  ("POST", "/cases", {"name": "Gamma v. County"}, None),
                  ("GET", c + "/status", None, None), ("GET", c + "/documents", None, None),
@@ -121,9 +124,13 @@ class TestUiUnderHarness(unittest.TestCase):
                  ("POST", c + "/facts", {"text": "Synthetic fact", "status": "UNKNOWN"}, None),
                  ("GET", c + "/drafts", None, None),
                  ("POST", c + "/brief-check", {"path": "Filings/drafts/response_v1.md"}, None),
-                 ("GET", c + "/packet?layer=15min", None, None)]
+                 ("GET", c + "/packet?layer=15min", None, None),
+                 ("GET", c + "/amendments?status=all", None, None),
+                 ("POST", c + "/amendments", {"text": "Another synthetic change", "paragraphs": "para 1"}, None),
+                 ("POST", c + f"/amendments/{item}/status", {"status": "approved", "note": "ok"}, None)]
         # every route in the table is exercised here
-        exercised = {(m, re.sub(r"\?.*$", "", p).replace(c, webui.CASE)) for m, p, _, _ in calls}
+        exercised = {(m, re.sub(r"\?.*$", "", p).replace(c, webui.CASE).replace(item, webui.ITEM))
+                     for m, p, _, _ in calls}
         self.assertEqual(exercised, {(m, p) for m, p, _, _ in webui.ROUTES})
         for method, path, body, raw in calls:
             with self.subTest(route=f"{method} {path}"):

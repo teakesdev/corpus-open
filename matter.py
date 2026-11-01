@@ -12,6 +12,13 @@ Usage:
                            [--author agent:MODEL [--directed-by PERSON]]
                            # in a subcase, a source may be parent:<rel_path>@loc (hash-checked, no copy)
   matter.py fact list <dir> [--status LABEL]
+  matter.py amend add <dir> --text T [--para "¶¶ 37, 172"] [--reason R] [--target complaint]
+                            [--fact a_ID]... [--source rel@loc]...
+                            [--author agent:MODEL [--directed-by PERSON]]
+                            # queue a change for the next version of a pleading
+  matter.py amend list <dir> [--status open|all|proposed|approved|incorporated|dropped] [--target T]
+  matter.py amend set <dir> <am_id> --status proposed|approved|incorporated|dropped [--note N]
+                            [--author agent:MODEL [--directed-by PERSON]]   # appends a history row
   matter.py deadline add <dir> --label L --due YYYY-MM-DD [--rule R] [--confidence hard|working-estimate]
                               [--verification verified-official|secondary-source|unverified]
                               [--author agent:MODEL [--directed-by PERSON]]
@@ -48,7 +55,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from matterkit import cases, ingest as ing, packet as pk, store  # noqa: E402
+from matterkit import amendments, cases, ingest as ing, packet as pk, store  # noqa: E402
 
 FOLDERS = cases.FOLDERS  # cmd_subcase hands these to subcase.init
 
@@ -114,6 +121,60 @@ def cmd_fact(args):
                           for x in r["sources"]) or "**[UNSUPPORTED]**"
             print(f"[{r['status']:15}] {r['text']}\n                ↳ {s}"
                   f"\n                by {r['created_by'] or 'unrecorded'}")
+
+
+def _amend_line(item):
+    import textwrap
+    head = f"{item['id']} [{item['status_label']}]"
+    if item["paragraphs"]:
+        head += f" {item['paragraphs']}"
+    if item["target"] != amendments.DEFAULT_TARGET:
+        head += f" (for: {item['target']})"
+    lines = [head, textwrap.indent(item["text"], "  ")]
+    if item["reason"]:
+        lines.append(textwrap.indent("why: " + item["reason"], "  "))
+    for f in item["links"]["facts"]:
+        lines.append(f"  fact {f['id']} [{f['label']}]: {f['text']}")
+    for d in item["links"]["documents"]:
+        lines.append(f"  source: {d['rel_path']}" + (f"@{d['locator']}" if d["locator"] else ""))
+    lines.append(f"  added by {item['created_by'] or 'unrecorded'}, {item['created_at']}")
+    if len(item["history"]) > 1:
+        last = item["history"][-1]
+        note = f" — {last['note']}" if last["note"] else ""
+        lines.append(f"  last change: {amendments.LABELS.get(last['to_status'], last['to_status'])} by "
+                     f"{last['recorded_by']}, {last['created_at']}{note}")
+    return "\n".join(lines)
+
+
+def cmd_amend(args):
+    if args.sub == "list":  # a read: never creates a store or its tables
+        try:
+            conn = store.connect_readonly(args.case_dir)
+        except FileNotFoundError as e:
+            sys.exit(str(e))
+        try:
+            items = amendments.list_(conn, args.status, args.target)
+        except amendments.AmendmentError as e:
+            sys.exit(f"refused: {e}")
+        finally:
+            conn.close()
+        print("\n\n".join(_amend_line(i) for i in items) if items else "No changes queued.")
+        return
+    conn = store.connect(args.case_dir)
+    try:
+        by = store.attribution(args.author, args.directed_by)
+    except ValueError as e:
+        sys.exit(f"invalid attribution: {e}")
+    try:
+        if args.sub == "add":
+            documents = [amendments.resolve_source(conn, ref) for ref in args.source]
+            r = amendments.add(conn, args.text, args.para, args.reason, args.target, args.fact, documents, by)
+            print(f"{r['id']} [{r['status_label']}] by {r['created_by']}")
+        else:
+            r = amendments.set_status(conn, args.item_id, args.status, args.note, by)
+            print(f"{r['id']}: {amendments.LABELS[r['from_status']]} -> {r['status_label']} by {r['recorded_by']}")
+    except amendments.AmendmentError as e:
+        sys.exit(f"refused: {e}")
 
 
 def cmd_deadline(args):
@@ -607,6 +668,36 @@ def main():
     p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
                    help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_fact)
+
+    p = sub.add_parser("amend", help="Changes queued for the next version of a pleading")
+    commands = p.add_subparsers(dest="sub", required=True)
+    c = commands.add_parser("add", help="Queue a change")
+    c.add_argument("case_dir")
+    c.add_argument("--text", help="what to add or change (required)")
+    c.add_argument("--para", help='where, e.g. "¶¶ 37, 172"')
+    c.add_argument("--reason", help="why the change is needed")
+    c.add_argument("--target", default="complaint", help="which pleading (default: complaint)")
+    c.add_argument("--fact", action="append", default=[], help="a_ID of a fact in this case that supports the change")
+    c.add_argument("--source", action="append", default=[],
+                   help="rel_path@page of a registered document; split on the last '@' "
+                        "(a file name containing '@' and no page needs a trailing '@')")
+    c = commands.add_parser("list", help="Show the queue (default: open changes, approved first)")
+    c.add_argument("case_dir")
+    c.add_argument("--status", default="open", choices=["open", "all", *amendments.STATUSES],
+                   help="open = proposed + approved (default)")
+    c.add_argument("--target", help="only changes for this pleading")
+    c = commands.add_parser("set", help="Move a change to another status; the old status stays in its history")
+    c.add_argument("case_dir")
+    c.add_argument("item_id", help="the am_... id from `amend list`")
+    c.add_argument("--status", required=True, choices=amendments.STATUSES)
+    c.add_argument("--note", help="why (kept in the history)")
+    for c in (commands.choices["add"], commands.choices["set"]):
+        c.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
+                       help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
+        c.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
+                       help="person who directed an agent author (not an approval); env MATTER_DIRECTED_BY")
+    for c in commands.choices.values():
+        c.set_defaults(fn=cmd_amend)
 
     p = sub.add_parser("brief"); p.add_argument("sub", choices=["check"]); p.add_argument("case_dir")
     p.add_argument("draft"); p.add_argument("--out"); p.add_argument("--no-pdftotext", action="store_true")
