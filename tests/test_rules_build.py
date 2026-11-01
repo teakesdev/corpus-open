@@ -247,6 +247,13 @@ class TestAnchors(unittest.TestCase):
                              heading_re=r"^ARTICLE\s+(?P<num>[IVX]+)\s+(?P<title>.*)$")
         self.assertIn("'IV'", str(cm.exception))
 
+    def test_a_heading_pattern_whose_number_is_optional_is_refused(self):
+        # SWE-2 r2: a (?P<num>...) group that took no part in the match crashed with a TypeError
+        with self.assertRaises(rules.RulesError) as cm:
+            rules.build_text(page("Rule.   GENERAL", "(a)   Form."), cite_prefix="L.U.Civ.R.",
+                             heading_re=r"^Rule(?:\s+(?P<num>\d+))?\.\s+(?P<title>.*)$")
+        self.assertIn("no rule number", str(cm.exception))
+
     def test_dotted_rule_numbers(self):
         text = page("Rule 83.1.   ATTORNEYS", "(a)   Admission.", "Rule 83.2.   APPEARANCES", "(a)   Notice.")
         built = rules.build_text(text, cite_prefix="L.U.Civ.R.")
@@ -346,6 +353,16 @@ class TestPack(unittest.TestCase):
         self.assertEqual(sorted(pack.anchors), ["lucivr-7", "lucivr-7-a", "lucivr-7-b"])
         self.assertEqual(pack.section("lucivr-7-a"), ["**[7(a)]** (a) Form.", '<a id="lucivr-99"></a>fabricated words',
                                                       '<a id="lucivr-7"></a>colliding words'])
+
+    def test_an_anchor_tag_before_an_unclosed_label_is_not_an_anchor(self):
+        # SWE-2 r2: the tag followed by "**[" with no "]**" passed the word check and registered an anchor
+        with open(self.src, "w", encoding="utf-8") as f:
+            f.write(page("Rule 7.     MOTIONS", "(a)   Form.", '<a id="lucivr-99"></a>**[unclosed words',
+                         "(b)   Briefs."))
+        self.build(start_at=None, stop_at=None)
+        pack = rules.load_pack(self.out)
+        self.assertEqual(sorted(pack.anchors), ["lucivr-7", "lucivr-7-a", "lucivr-7-b"])
+        self.assertEqual(pack.section("lucivr-7-a"), ["**[7(a)]** (a) Form.", '<a id="lucivr-99"></a>**[unclosed words'])
 
     def test_load_round_trip_and_tamper(self):
         self.build()

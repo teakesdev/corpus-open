@@ -52,7 +52,7 @@ MARKER = re.compile(r"\((?P<tok>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\)(?=\s|$)")
 DOTTED = re.compile(r"(?:(?P<dot>[0-9]{1,2}|[A-Z]|[a-z]|[ivx]{2,4})\.|\((?P<par>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\))(?=\s|$)")
 MARKER_STYLES = ("paren", "dotted")
 # an anchor the builder added: the tag and then a label; source text shaped like a tag alone stays text
-ANCHOR_LINE = re.compile(r'<a id="(?P<id>[^"]+)"></a>(?=\*\*\[)')
+ANCHOR_LINE = re.compile(r'<a id="(?P<id>[^"]+)"></a>(?=\*\*\[[^\]\n]*\]\*\*)')
 ADDED = re.compile(r'^<a id="[^"]+"></a>\*\*\[[^\]\n]*\]\*\* ?')
 GAP = re.compile(r"\S {5,}\S")
 _CONTENTS = re.compile(r"(?:\.\s?){4,}\s*[\divxlc]+\s*$", re.I)
@@ -305,8 +305,9 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
     heads, last = {}, None
     for i in region:
         m = heading.match(lines[i][1].replace("\f", "").strip())
-        if m and not re.fullmatch(_NUM, m["num"]):
-            raise RulesError(f"the heading pattern read {m['num']!r} as a rule number on page {lines[i][0]}; "
+        if m and not re.fullmatch(_NUM, m["num"] or ""):
+            read = f"read {m['num']!r} as a rule number" if m["num"] is not None else "matched with no rule number"
+            raise RulesError(f"the heading pattern {read} on page {lines[i][0]}; "
                              "anchors and cites need digits such as 7 or 83.1. Nothing was written.")
         if m and (last is None or _num_key(m["num"]) > last):
             heads[i], last = m, _num_key(m["num"])
@@ -978,7 +979,9 @@ def resolve(case_dir: str, cite: str, pack_id: str | None = None) -> Resolution:
         if m := _prefix_re(a.pack.cite_prefix).fullmatch(s):
             return find(a, m["num"], m["sub"])
     from . import briefcheck  # lazy: briefcheck imports this module
-    if m := briefcheck.LOCAL_WORDS_RE.fullmatch(s.rstrip(".")):  # the words brief check reads as a local rule
+    # the words brief check reads as a local rule; spaces before a mark or the period are dropped, as
+    # prefix cites allow them ("Local Rule 7 (b)" is 7(b))
+    if m := briefcheck.LOCAL_WORDS_RE.fullmatch(re.sub(r" (?=\()", "", s).rstrip(".").rstrip()):
         local = briefcheck.rule_prefixes(briefcheck.load_docket(case_dir)[0])[1]
         a = next((a for a in usable if default_anchor_prefix(a.pack.cite_prefix) == default_anchor_prefix(local)),
                  None)
@@ -1046,10 +1049,11 @@ def list_text(case_dir: str, today=None) -> str:
     out = []
     for a in load_attached(case_dir):
         e = a.entry
-        state, why = checked_staleness(e.get("current_as_of"), e.get("review_after_days", REVIEW_AFTER_DAYS),
+        d = a.pack.manifest if a.pack else e  # the checked manifest's dates when the pack loads, as stale reads
+        state, why = checked_staleness(d.get("current_as_of"), d.get("review_after_days", REVIEW_AFTER_DAYS),
                                        a.checks, today)
-        out.append(f"{e['id']}@{e['version']}  {e.get('cite_prefix', '?')}  current as of "
-                   f"{e.get('current_as_of') or 'UNKNOWN'} [{state}]  {e['path']}  "
+        out.append(f"{e['id']}@{e['version']}  {d.get('cite_prefix', '?')}  current as of "
+                   f"{d.get('current_as_of') or 'UNKNOWN'} [{state}]  {e['path']}  "
                    + (f"anchors={len(a.pack.anchors)}" if a.pack else f"NOT USABLE: {a.problem}"))
     if att["history"]:
         out.append(f"({len(att['history'])} earlier attachment(s) replaced; see {ATTACH_FILE})")

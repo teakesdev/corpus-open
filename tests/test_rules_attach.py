@@ -219,6 +219,17 @@ class TestAttach(Base):
         self.assertIn("example-local@2030-01-01  L.U.Civ.R.", out)
         self.assertIn("example-frcp@2030-12-01  Fed. R. Civ. P.", out)
 
+    def test_list_reads_dates_from_the_pack_as_stale_does(self):
+        # SWE-2 r2: list read current_as_of from the rules.json entry, so a hand edit there showed a
+        # state that stale, which reads the checked manifest, does not
+        self.attach(self.local)  # current as of 2030-01-01
+        att = self.attachments()
+        att["packs"][0]["current_as_of"] = "2020-01-01"
+        self.write_attachments(att)
+        listed = self.cli("rules", "list", self.dir, "--today", "2030-06-01").stdout
+        self.assertIn("current as of 2030-01-01 [ok]", listed)
+        self.assertEqual(self.cli("rules", "stale", self.dir, "--today", "2030-06-01", check=False).returncode, 0)
+
 
 class TestShow(Base):
     def setUp(self):
@@ -276,6 +287,13 @@ class TestShow(Base):
         for cite in ("Local Rules 7(b)(4)", "Local Civil Rule 7(b)(4)."):
             out = self.show(cite)
             self.assertEqual(out.returncode, 0, out.stdout)
+            self.assertIn("read as L.U.Civ.R. 7(b)(4)", out.stdout)
+
+    def test_local_rule_words_with_spaces_before_marks_or_the_period(self):
+        # SWE-2 r2: these resolved before brief check's words were reused, and prefix cites still take them
+        for cite in ("Local Rule 7 (b)(4)", "Local Rule 7 (b) (4)", "Local Rule 7(b)(4) ."):
+            out = self.show(cite)
+            self.assertEqual(out.returncode, 0, f"{cite}: {out.stdout}")
             self.assertIn("read as L.U.Civ.R. 7(b)(4)", out.stdout)
 
     def test_anchor_id(self):
