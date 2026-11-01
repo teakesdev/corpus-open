@@ -1,0 +1,138 @@
+# rule rows, b32d490 vs 8bbd9f6: 56 eval docs + 37 edge strings
+eval-doc rule rows: before 0, after 0
+only at b32d490 (lost or changed):
+  - ('edge', 'W. Va. R. App. P. 10(c)', 'rule:varappp10', 'Va. R. App. P. 10(c)', 3)
+  - ('edge', 'W. Va. R. Civ. P. 12', 'rule:varcivp12', 'Va. R. Civ. P. 12', 3)
+  - ('edge', 'W. Va. R. Civ. P. 12 and 15', 'rule:varcivp12', 'Va. R. Civ. P. 12', 3)
+  - ('edge', 'W. Va. R. Civ. P. 12 and 15', 'rule:varcivp15', 'Va. R. Civ. P. 15', 25)
+  - ('edge', 'W. Va. R. Evid. 401', 'rule:varevid401', 'Va. R. Evid. 401', 3)
+  - ('edge', 'W.Va. R. Civ. P. 12', 'rule:varcivp12', 'Va. R. Civ. P. 12', 2)
+only at 8bbd9f6 (new or changed):
+  + ('edge', 'D.C. R. Civ. P. 12', 'rule:dcrcivp12', 'D.C. R. Civ. P. 12', 0)
+  + ('edge', 'Iowa R. Civ. P. 1.421', 'rule:iowarcivp1421', 'Iowa R. Civ. P. 1.421', 0)
+  + ('edge', 'N. D. R. Civ. P. 12', 'rule:ndrcivp12', 'N. D. R. Civ. P. 12', 0)
+  + ('edge', 'N.D. R. Civ. P. 12', 'rule:ndrcivp12', 'N.D. R. Civ. P. 12', 0)
+  + ('edge', 'N.H. R. Civ. P. 12', 'rule:nhrcivp12', 'N.H. R. Civ. P. 12', 0)
+  + ('edge', 'Ohio  R. Civ. P. 12', 'rule:ohiorcivp12', 'Ohio  R. Civ. P. 12', 0)
+  + ('edge', 'Ohio R. Civ. P. 12', 'rule:ohiorcivp12', 'Ohio R. Civ. P. 12', 0)
+  + ('edge', 'R.I. R. Civ. P. 12', 'rule:rircivp12', 'R.I. R. Civ. P. 12', 0)
+  + ('edge', 'S.C. R. Civ. P. 12', 'rule:scrcivp12', 'S.C. R. Civ. P. 12', 0)
+  + ('edge', 'W. Va. R. App. P. 10(c)', 'rule:wvarappp10', 'W. Va. R. App. P. 10(c)', 0)
+  + ('edge', 'W. Va. R. Civ. P. 12', 'rule:wvarcivp12', 'W. Va. R. Civ. P. 12', 0)
+  + ('edge', 'W. Va. R. Civ. P. 12 and 15', 'rule:wvarcivp12', 'W. Va. R. Civ. P. 12', 0)
+  + ('edge', 'W. Va. R. Civ. P. 12 and 15', 'rule:wvarcivp15', 'W. Va. R. Civ. P. 15', 25)
+  + ('edge', 'W. Va. R. Evid. 401', 'rule:wvarevid401', 'W. Va. R. Evid. 401', 0)
+  + ('edge', 'W.Va. R. Civ. P. 12', 'rule:wvarcivp12', 'W.Va. R. Civ. P. 12', 0)
+
+# every edge string: before -> after
+* 'W. Va. R. Civ. P. 12'
+      b32d490: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+      8bbd9f6: [('rule:wvarcivp12', 'W. Va. R. Civ. P. 12')]
+* 'W.Va. R. Civ. P. 12'
+      b32d490: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+      8bbd9f6: [('rule:wvarcivp12', 'W.Va. R. Civ. P. 12')]
+  'Va. R. Civ. P. 12'
+      b32d490: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+      8bbd9f6: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+* 'W. Va. R. Evid. 401'
+      b32d490: [('rule:varevid401', 'Va. R. Evid. 401')]
+      8bbd9f6: [('rule:wvarevid401', 'W. Va. R. Evid. 401')]
+* 'W. Va. R. App. P. 10(c)'
+      b32d490: [('rule:varappp10', 'Va. R. App. P. 10(c)')]
+      8bbd9f6: [('rule:wvarappp10', 'W. Va. R. App. P. 10(c)')]
+* 'W. Va. R. Civ. P. 12 and 15'
+      b32d490: [('rule:varcivp12', 'Va. R. Civ. P. 12'), ('rule:varcivp15', 'Va. R. Civ. P. 15')]
+      8bbd9f6: [('rule:wvarcivp12', 'W. Va. R. Civ. P. 12'), ('rule:wvarcivp15', 'W. Va. R. Civ. P. 15')]
+* 'N.D. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:ndrcivp12', 'N.D. R. Civ. P. 12')]
+* 'S.C. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:scrcivp12', 'S.C. R. Civ. P. 12')]
+* 'N.H. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:nhrcivp12', 'N.H. R. Civ. P. 12')]
+* 'R.I. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:rircivp12', 'R.I. R. Civ. P. 12')]
+* 'D.C. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:dcrcivp12', 'D.C. R. Civ. P. 12')]
+* 'N. D. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:ndrcivp12', 'N. D. R. Civ. P. 12')]
+* 'Ohio R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:ohiorcivp12', 'Ohio R. Civ. P. 12')]
+* 'Ohio  R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: [('rule:ohiorcivp12', 'Ohio  R. Civ. P. 12')]
+  'Ohio. R. Civ. P. 12'
+      b32d490: [('rule:ohiorcivp12', 'Ohio. R. Civ. P. 12')]
+      8bbd9f6: [('rule:ohiorcivp12', 'Ohio. R. Civ. P. 12')]
+* 'Iowa R. Civ. P. 1.421'
+      b32d490: []
+      8bbd9f6: [('rule:iowarcivp1421', 'Iowa R. Civ. P. 1.421')]
+  'Am. Samoa R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: []
+  '(Fed. R. Civ. P. 12)'
+      b32d490: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12')]
+      8bbd9f6: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12')]
+  'Fed.R.Civ.P.12'
+      b32d490: [('rule:fedrcivp12', 'Fed.R.Civ.P.12')]
+      8bbd9f6: [('rule:fedrcivp12', 'Fed.R.Civ.P.12')]
+  'See Fed. R. Civ. P. 12(b)(6).'
+      b32d490: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12(b)(6)')]
+      8bbd9f6: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12(b)(6)')]
+  '*Fed. R. Civ. P. 12*'
+      b32d490: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12')]
+      8bbd9f6: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12')]
+  '[Fed. R. Civ. P. 12]'
+      b32d490: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12')]
+      8bbd9f6: [('rule:fedrcivp12', 'Fed. R. Civ. P. 12')]
+  'Rule 12 (Fed.R.Civ.P. 12)'
+      b32d490: [('rule:fedrcivp12', 'Fed.R.Civ.P. 12'), ('rule:fedrcivp12', 'Rule 12')]
+      8bbd9f6: [('rule:fedrcivp12', 'Fed.R.Civ.P. 12'), ('rule:fedrcivp12', 'Rule 12')]
+  'Fed. R. App. P. 4(a)(1)(A)'
+      b32d490: [('rule:fedrappp4', 'Fed. R. App. P. 4(a)(1)(A)')]
+      8bbd9f6: [('rule:fedrappp4', 'Fed. R. App. P. 4(a)(1)(A)')]
+  'Fed. R. Crim. P. 11'
+      b32d490: [('rule:fedrcrimp11', 'Fed. R. Crim. P. 11')]
+      8bbd9f6: [('rule:fedrcrimp11', 'Fed. R. Crim. P. 11')]
+  'Tex.R.Civ.P. 91'
+      b32d490: [('rule:texrcivp91', 'Tex.R.Civ.P. 91')]
+      8bbd9f6: [('rule:texrcivp91', 'Tex.R.Civ.P. 91')]
+  'Mont. R. Civ. P. 12'
+      b32d490: [('rule:montrcivp12', 'Mont. R. Civ. P. 12')]
+      8bbd9f6: [('rule:montrcivp12', 'Mont. R. Civ. P. 12')]
+  'Mo. R. Civ. P. 55.03'
+      b32d490: [('rule:morcivp5503', 'Mo. R. Civ. P. 55.03')]
+      8bbd9f6: [('rule:morcivp5503', 'Mo. R. Civ. P. 55.03')]
+  'Or. R. Civ. P. 21'
+      b32d490: [('rule:orrcivp21', 'Or. R. Civ. P. 21')]
+      8bbd9f6: [('rule:orrcivp21', 'Or. R. Civ. P. 21')]
+  'Md. R. Civ. P. 2-322'
+      b32d490: [('rule:mdrcivp2', 'Md. R. Civ. P. 2')]
+      8bbd9f6: [('rule:mdrcivp2', 'Md. R. Civ. P. 2')]
+  'E.D. Va. R. Civ. P. 12'
+      b32d490: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+      8bbd9f6: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+  'W.D.Tex.R. Civ. P. 12'
+      b32d490: [('rule:texrcivp12', 'Tex.R. Civ. P. 12')]
+      8bbd9f6: [('rule:texrcivp12', 'Tex.R. Civ. P. 12')]
+  'the U.S.C. R. Civ. P. 3'
+      b32d490: []
+      8bbd9f6: []
+  'The Ohio R. Smith Co. filed suit.'
+      b32d490: []
+      8bbd9f6: []
+  'W.  Va. R. Civ. P. 12'
+      b32d490: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+      8bbd9f6: [('rule:varcivp12', 'Va. R. Civ. P. 12')]
+  'N.  D. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: []
+  'W. VA. R. Civ. P. 12'
+      b32d490: []
+      8bbd9f6: []

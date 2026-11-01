@@ -7,9 +7,9 @@ in) it resolves:
   record cites      Doc. 16 at 2 · Docs. 16 and 18 · Dkt. 27 · ECF No. 19
   pleading cites    Compl. ¶ 59 · Am. Compl. ¶¶ 67–69
   authorities       X v. Y, 579 U.S. 40, 45 (2016) · 579 U.S. at 46 · Id. at 46 ·
-                    Fed. R. Civ. P. 15(a)(2) · Rule 15 · L.U.Civ.R. 7(b)(4) ·
-                    42 U.S.C. § 1983 · § 1983 · Miss. Code (Ann.) § 95-1-5 · Section 95-1-5 ·
-                    Section 552.101
+                    Fed. R. Civ. P. 15(a)(2) · W. Va. R. Civ. P. 12 · Rule 15 ·
+                    L.U.Civ.R. 7(b)(4) · 42 U.S.C. § 1983 · § 1983 ·
+                    Miss. Code (Ann.) § 95-1-5 · Section 95-1-5 · Section 552.101
   quotations        searched in the cited source's text, on the pinned page
   facts             {fact:a_x} / <!-- fact:a_x --> tags; uncited sentences in a
                     Facts / Background / Statement section
@@ -127,8 +127,13 @@ CASE_RE = re.compile(
     r"(?:\s*\((?P<paren>[^()]{0,60}?\d{4})\))?")
 SHORT_RE = re.compile(rf"(?<![\w.])(?P<vol>\d{{1,4}})\s+(?P<rep>{_REP})\s+at\s+(?P<pin>{_PINS})")
 WL_RE = re.compile(r"(?P<year>\d{4})\s+WL\s+(?P<num>\d{3,9})(?:\s*,\s*at\s*\*\s*(?P<pin>\d+(?:\s*[-–]\s*\*?\d+)?))?")
+# The prefix is the whole state ("W. Va.", "N.D.", "Ohio"), so "W. Va. R. Civ. P. 12" keys apart from
+# "Va. R. Civ. P. 12". A state starts a token (the "S.C" in "U.S.C." is not South Carolina); any other
+# one-word prefix ("Fed.") reads as before.
 RULE_RE = re.compile(
-    r"(?P<base>(?:Fed|[A-Z][a-z]{1,5})\.\s*R\.\s*(?:(?:Civ|Crim|App)\.\s*P\.|Evid\.)\s*\d+(?:\.\d+)?)"
+    rf"(?P<base>(?:(?:Fed|(?<![\w.])(?:{citations._STATE_DOTTED})|[A-Z][a-z]{{1,5}})\.\s*"
+    rf"|(?<![\w.])(?:{citations._STATE_UNDOTTED})\s+)"
+    r"R\.\s*(?:(?:Civ|Crim|App)\.\s*P\.|Evid\.)\s*\d+(?:\.\d+)?)"
     r"(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 LOCAL_RE = re.compile(r"(?P<base>L\.\s*U\.\s*(?:Civ|Crim)\.\s*R\.\s*\d+(?:\.\d+)?)(?P<sub>(?:\([A-Za-z0-9]{1,4}\))*)")
 RULE_TAIL_RE = re.compile(r"(?:,?\s+and\s+|\s*&\s*)(?P<cite>(?P<num>\d+(?:\.\d+)?)(?:\([A-Za-z0-9]{1,4}\))*)")
