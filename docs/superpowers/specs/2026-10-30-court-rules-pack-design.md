@@ -132,4 +132,13 @@ Building the Federal Rules of Civil Procedure (142 pages) gave a wrong anchor. A
 - **Rule** (paren mode only): a marker that continues a list in sequence, but is indented unlike that list's last item, stays text when the next marker at the list's own indentation, before the list ends or the rule ends, is the same marker. It gets a note naming both pages.
 - **Unchanged:** uneven indentation alone anchors as before. A marker whose level was guessed is not tested, and dotted builds are not affected.
 - **Real-text trials** (private, outside the repo): the local rules (416 anchors) and the procedures (87) rebuild with the same body and the same notes. The FRCP built with 98 rules and 1,628 anchors and 0 warnings, and 30(d)(2) is now `(2) Sanction.`.
-- **Known gap:** a line that chains two markers (`(A)(i) deliver ...`) is not read as markers, so FRCP 4(i)(1)(A)–(C) stay unanchored text with notes.
+- **Known gap:** a line that chains two markers (`(A)(i) deliver ...`) is not read as markers, so FRCP 4(i)(1)(A)–(C) stay unanchored text with notes. Closed in § 12.
+
+## 12. Follow-up (2026-11-01): two markers that open one line
+
+FRCP 4(i)(1) opens its list with `(A)(i) deliver ...`. The builder read only a single marker at a line's start, so the line was text. The `(ii)`, `(B)` and `(C)` after it then followed nothing in sequence and were kept as text too, each with a note. Built on branch `fix/rules-r2-p3`, not reviewed.
+
+- **Rule** (paren mode only): a line that starts with two markers and then a space reads the first as an item, with every check a single marker gets: sequence, level, indentation and the later twin of § 11. The second is accepted only as the first item of a list directly under the first: `(1)` under a letter or a capital, `(A)` under a letter or a number, `(i)` under any of them. Both levels take the line's indentation. The item gets a label line with no words, followed by the child's anchor line, which holds all of the text: `**[4(i)(1)(A)]**`, then `**[4(i)(1)(A)(i)]** (A)(i) deliver ...`. The word check is unchanged, and the item's section shows its children up to its next sibling.
+- **Otherwise** (`(A)(ii)`, say), only the first marker is anchored, on the line with its text, and a note says so.
+- **Unchanged:** lines with one marker, dotted builds, and a chained line that is a wrapped cross-reference, which the later-twin rule keeps as text.
+- **Real-text trials** (private, outside the repo): the local rules (416 anchors) and the procedures (87) rebuild byte-identical. The FRCP gains exactly 4(i)(1)(A), (A)(i), (A)(ii), (B) and (C) (1,633 anchors), and its three out-of-sequence notes for that list are gone. There are no new notes.

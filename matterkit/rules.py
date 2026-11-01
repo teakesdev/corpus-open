@@ -48,6 +48,8 @@ _NUM = r"\d+(?:\.\d+)?"
 _SUB = r"(?:\s*\([A-Za-z0-9]{1,5}\))*"
 PAGE_NO = re.compile(r"(?:[Pp]age\s+)?[-–]?\s*(?P<n>\d{1,4}|[ivxlc]{1,7})\s*[-–]?(?:\s+of\s+\d{1,4})?")
 MARKER = re.compile(r"\((?P<tok>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\)(?=\s|$)")
+# an item and its first child opening one line: "(A)(i) deliver ..."
+CHAINED = re.compile(r"\((?P<tok>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\)\((?P<sub>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\)(?=\s|$)")
 # --markers dotted: an outline's "A." "1." "a." "i." at a line's start, or a parenthesized marker under them
 DOTTED = re.compile(r"(?:(?P<dot>[0-9]{1,2}|[A-Z]|[a-z]|[ivx]{2,4})\.|\((?P<par>[0-9]{1,2}|[A-Z]{1,2}|[a-z]{1,5})\))(?=\s|$)")
 MARKER_STYLES = ("paren", "dotted")
@@ -188,6 +190,15 @@ def _fits(k, indent, lv, ind):
     return parent is not None and indent > parent
 
 
+FIRST_CHILD = {"1": (DIGIT, NESTED), "A": (CAPITAL,), "i": (ROMAN,)}
+
+
+def _first_child(tok, k):
+    """The level of `tok` as the first item of a list directly under level k ("(i)" under "(A)"), or None."""
+    kids = [j for j in FIRST_CHILD.get(tok, ()) if k in PARENT[j]]
+    return kids[0] if len(kids) == 1 else None
+
+
 def _level(tok, lv, ind, indent, nxt):
     """(level, other readings) for a marker: (None, []) when it continues no list (out of sequence);
     a non-empty list of other readings means the level was guessed."""
@@ -311,12 +322,20 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
                              "anchors and cites need digits such as 7 or 83.1. Nothing was written.")
         if m and (last is None or _num_key(m["num"]) > last):
             heads[i], last = m, _num_key(m["num"])
+    chained = {}  # line -> the second marker of "(A)(i)"; paren markers only
     if outline:
         found = {i: m for i in region if i not in heads and (m := DOTTED.match(_norm(lines[i][1])))}
         markers = {i: m["dot"] or m["par"] for i, m in found.items()}
         wraps = {i: "." if m["dot"] else "()" for i, m in found.items()}
     else:
-        markers = {i: m["tok"] for i in region if i not in heads and (m := MARKER.match(_norm(lines[i][1])))}
+        markers = {}
+        for i in region:
+            if i in heads:
+                continue
+            if m := MARKER.match(_norm(lines[i][1])):
+                markers[i] = m["tok"]
+            elif m := CHAINED.match(_norm(lines[i][1])):
+                markers[i], chained[i] = m["tok"], m["sub"]
     upcoming, nxt = {}, None  # the next marker in the same rule, for "(i)": letter or roman
     for i in reversed(region):
         if i in heads:
@@ -402,8 +421,22 @@ def build_text(text: str, cite_prefix: str, anchor_prefix: str | None = None, st
         parts = [p for p in lv[: k + 1] if p is not None]
         at[k] = (_label(cur["num"], parts), line)
         aid = "-".join([f"{ap}-{cur['num']}"] + parts)
-        body += ["", f'<a id="{aid}"></a>**[{_label(cur["num"], parts)}]** {line}']
-        anchors.append(aid)
+        sub = chained.get(i)
+        k2 = _first_child(sub, k) if sub else None
+        if k2 is not None:
+            # "(A)(i) deliver ...": the item gets a label line of its own and its first child the text
+            lv[k2], ind[k2] = sub, indent
+            kid = parts + [sub]
+            at[k2] = (_label(cur["num"], kid), line)
+            body += ["", f'<a id="{aid}"></a>**[{_label(cur["num"], parts)}]**',
+                     f'<a id="{aid}-{sub}"></a>**[{_label(cur["num"], kid)}]** {line}']
+            anchors += [aid, f"{aid}-{sub}"]
+        else:
+            if sub:
+                notes.append(f"{unit} {cur['num']}: ({tok})({sub}) on page {pno} opens ({tok}), but ({sub}) does "
+                             f"not start a list under it, so only ({tok}) is anchored: {line[:70]!r}")
+            body += ["", f'<a id="{aid}"></a>**[{_label(cur["num"], parts)}]** {line}']
+            anchors.append(aid)
         if others:
             notes.append(f"{unit} {cur['num']}: ({tok}) on page {pno} could be {_label(cur['num'], parts)} or "
                          f"{' or '.join(others)}; indentation does not settle it, so the build guessed "

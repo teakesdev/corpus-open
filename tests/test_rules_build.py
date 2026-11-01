@@ -232,6 +232,41 @@ class TestAnchors(unittest.TestCase):
                                          "frcp-30-b"])
         self.assertTrue(any("indented unlike" in n and "if needed" in n for n in built.notes), built.notes)
 
+    def test_two_markers_that_open_one_line_anchor_both(self):
+        # "(A)(i) deliver ..." opens an item and its first child on one line; without both anchors the list
+        # under it, and the items after it, were left as text
+        text = page("Rule 4.     SUMMONS", "(a)   Contents.", "(b)   Serving an Agency.",
+                    "   (1)   Agency. To serve an agency, a party must:",
+                    "      (A)(i) deliver a copy to the office; or",
+                    "      (ii) send a copy by mail;",
+                    "      (B) send a copy to the head; and",
+                    "      (C) file proof.",
+                    "   (2)   Officer. Serve the officer too.")
+        built = rules.build_text(text, cite_prefix="Fed. R. Civ. P.", anchor_prefix="frcp")
+        self.assertEqual(built.anchors, ["frcp-4", "frcp-4-a", "frcp-4-b", "frcp-4-b-1", "frcp-4-b-1-A",
+                                         "frcp-4-b-1-A-i", "frcp-4-b-1-A-ii", "frcp-4-b-1-B", "frcp-4-b-1-C",
+                                         "frcp-4-b-2"])
+        at = built.body.index('<a id="frcp-4-b-1-A"></a>**[4(b)(1)(A)]**')
+        self.assertEqual(built.body[at + 1],
+                         '<a id="frcp-4-b-1-A-i"></a>**[4(b)(1)(A)(i)]** (A)(i) deliver a copy to the office; or')
+        self.assertEqual(built.notes, [])
+
+    def test_a_second_marker_that_starts_no_list_under_the_first_is_noted(self):
+        text = page("Rule 4.     SUMMONS", "(a)   Contents.", "   (1)   Agency.", "      (A)(ii) deliver a copy.",
+                    "      (B) send a copy.")
+        built = rules.build_text(text, cite_prefix="Fed. R. Civ. P.", anchor_prefix="frcp")
+        self.assertEqual(built.anchors, ["frcp-4", "frcp-4-a", "frcp-4-a-1", "frcp-4-a-1-A", "frcp-4-a-1-B"])
+        self.assertTrue(any("(A)(ii)" in n and "only (A) is anchored" in n for n in built.notes), built.notes)
+
+    def test_a_wrapped_chained_cross_reference_yields_to_the_real_item(self):
+        # "... under Rule 26\n(b)(1) and (2) ..." wraps onto a line that opens with two markers; the real (b)
+        # follows at the list's indentation, so the wrapped line stays text
+        text = page("Rule 30.     DEPOSITIONS", " (a)   DURATION. Time is allowed under Rule 26",
+                    "     (b)(1) and (2) as needed.", " (b)   REVIEW.", "     (1)   Changes.")
+        built = rules.build_text(text, cite_prefix="Fed. R. Civ. P.", anchor_prefix="frcp")
+        self.assertEqual(built.anchors, ["frcp-30", "frcp-30-a", "frcp-30-b", "frcp-30-b-1"])
+        self.assertIn("(b)(1) and (2) as needed.", built.body)
+
     def test_an_item_indented_differently_with_no_later_twin_is_still_anchored(self):
         # uneven indentation alone changes nothing: only a later item with the same marker at the list's
         # indentation shows that this line is a wrapped cross-reference
@@ -353,6 +388,16 @@ class TestPack(unittest.TestCase):
         self.assertEqual(sorted(pack.anchors), ["lucivr-7", "lucivr-7-a", "lucivr-7-b"])
         self.assertEqual(pack.section("lucivr-7-a"), ["**[7(a)]** (a) Form.", '<a id="lucivr-99"></a>fabricated words',
                                                       '<a id="lucivr-7"></a>colliding words'])
+
+    def test_a_chained_item_shows_its_children_and_stops_at_the_next_item(self):
+        with open(self.src, "w", encoding="utf-8") as f:
+            f.write(page("Rule 4.     SUMMONS", "(a)   Agency. A party must:", "      (A)(i) deliver a copy; or",
+                         "      (ii) mail it;", "      (B) file proof."))
+        self.build(start_at=None, stop_at=None)
+        pack = rules.load_pack(self.out)
+        self.assertEqual(pack.section("lucivr-4-a-A"), ["**[4(a)(A)]**", "**[4(a)(A)(i)]** (A)(i) deliver a copy; or",
+                                                        "", "**[4(a)(A)(ii)]** (ii) mail it;"])
+        self.assertEqual(pack.section("lucivr-4-a-A-i"), ["**[4(a)(A)(i)]** (A)(i) deliver a copy; or"])
 
     def test_an_anchor_tag_before_an_unclosed_label_is_not_an_anchor(self):
         # SWE-2 r2: the tag followed by "**[" with no "]**" passed the word check and registered an anchor

@@ -278,7 +278,9 @@ already anchored, the note names the earlier line, which may be a wrapped
 cross-reference holding the anchor. A line that starts with a list's next marker
 but is indented unlike that list stays text when the same marker follows at the
 list's own indentation (a wrapped `Rule 26(b)(1) and` / `(2) if needed`), and is
-listed in `notes`. A page that looks like two columns, a word
+listed in `notes`. A line that opens an item and its first child together
+(`(A)(i) deliver ...`) anchors both: the item gets a label line of its own and
+the child the text. A page that looks like two columns, a word
 that seems to have lost letters, or a page number with no sequence to check it
 against is listed in `warnings`, because the word check cannot see any of them.
 A pack is derived text, not the official copy.
