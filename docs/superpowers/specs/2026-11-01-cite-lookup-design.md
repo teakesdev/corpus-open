@@ -101,3 +101,24 @@ Departures from the approved text:
 - **Rows past `unverified` are not changed at all.** The design said they would get the lookup record. They don't, because their evidence belongs to a person's source check, and adding a record to legacy free-text evidence would mean rewriting it as JSON. `--record` reports "already <status>; nothing written".
 - **The end-to-end test uses a narrower socket harness.** `tests/netblock_sitecustomize` replaces `socket.socket`, which also stops `import ssl`, so urllib cannot load under it. The test writes its own harness that denies name lookups and connections, and checks first that the harness loaded.
 - **Sentence openers are dropped from the local case name.** Brief check's name walk keeps a leading "Again," or "However,"; the lookup drops it. The name is local only.
+
+## 9. Revision 2 (2026-11-01): SWE-2's code review, rounds 1 and 2
+
+The founder assigned the build to SWE-2 (SWE-2 Max, read-only). Round 1 (`f1845e0..e72359d`) returned **APPROVE WITH CHANGES**, recorded in [the review](../reviews/2026-11-01-cite-lookup-code/SWE2-REVIEW.md). Round 2 (`e72359d..69dd62e`) checked the fix for round 1's two P2s and returned **APPROVE**, recorded in [the re-review](../reviews/2026-11-01-cite-lookup-code-r2/SWE2-REVIEW.md). Before any change, every finding was checked against the code with offline probes. The founder approved the P2 fixes first, then "make all of the fixes you found": the remaining P3s from both rounds, plus three things found while checking.
+
+| Finding | Amendment here |
+| --- | --- |
+| **r1 P2** `interpret` placed an answer by `start_index` alone | § 3 "Reading the answer" (new): an answer whose echoed `citation`, or whose `normalized_citations`, names a different cite from the line it points at is set aside. That line is NOT LOOKED UP with its own note. A `start_index` that is not an integer places nothing, and the echoed cite places the answer instead. (`69dd62e`, and the note in this revision's last commit) |
+| **r1 P2, r1 P3, r2 P3, and the looseness found while checking** NAME DIFFERS hid behind prefixes, abbreviations and common words | § 3 table, FOUND / NAME DIFFERS: "shares a significant word" now means three things. (1) One shared **distinctive** word, matched whole. (2) Bluebook T6 and T10 abbreviations ("Nat'l", "Bd.", "Educ.") are expanded from a table, and only they match by prefix. (3) Generic words (institutions, places, stand-in parties such as "Doe", an agency acronym that CourtListener spells out) count only when the draft's name has nothing else. In that case each of the draft's parties must match a whole party. (`bb9ba9f`) |
+| **r1 P3** `\d` read other scripts' digits | § 3 "What leaves the machine": digits are sent as ASCII, and the validator accepts only ASCII digits. |
+| **r1 P3** a request that failed still read as sent | § 3 report: a request that left but got no answer is marked "no answer", and the summary counts it as unanswered. The egress log still records every attempt. |
+| **r1 P3** `--record` stopped on its first failed write | § 3 "Where results land": a cite whose write fails is rolled back and reported "not written", and the others go on. The run exits 2 when nothing else made it exit 1. |
+| **r1 P3** a binary draft gave zero cites and "every case cite found" | § 3 command: a draft holding a NUL byte is refused, whatever its extension. With no case cites, the summary reads "NO CASE CITES IN THE DRAFT" (exit 0). |
+| **r1 P3** lookup flags were accepted, and ignored, on `cite extract` and `cite list` | § 3 command: each `cite` subcommand refuses flags that are not its own. |
+| **r1 P3** `consent.authorize` gave up at the first grant whose budget was spent | § 3 grant: an exhausted grant is a refusal reason, and later human grants for the provider are still tried. This changes `matterkit/consent.py`, so it applies to search grants too. |
+| **r1 P3** the dry-run test's tripwire could never fire | Test only: the dry run now runs again with a grant and a token present. |
+| **Found while checking** `cite list --status` built `... ORDER BY ... WHERE ...` | Outside this design (`cite list` predates it): the query is built in the right order, with a bound parameter. |
+
+The name-matching amendment reverses one round-2 test assertion: "Bd. of Educ. v. Kappa" checked against "Board of Education v. Lambda" was FOUND, and it is now NAME DIFFERS because the parties differ. A full word written with a period ("Marsh.") no longer matches by prefix. An abbreviation missing from the table no longer matches either, which errs toward NAME DIFFERS, the safe direction.
+
+Revision 2 has not been re-reviewed.
