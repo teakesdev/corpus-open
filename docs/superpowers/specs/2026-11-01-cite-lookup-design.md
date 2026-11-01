@@ -122,3 +122,18 @@ The founder assigned the build to SWE-2 (SWE-2 Max, read-only). Round 1 (`f1845e
 The name-matching amendment reverses one round-2 test assertion: "Bd. of Educ. v. Kappa" checked against "Board of Education v. Lambda" was FOUND, and it is now NAME DIFFERS because the parties differ. A full word written with a period ("Marsh.") no longer matches by prefix. An abbreviation missing from the table no longer matches either, which errs toward NAME DIFFERS, the safe direction.
 
 Revision 2 has not been re-reviewed.
+
+## 10. Revision 3 (2026-11-01): SWE-2's round 3 re-review
+
+The founder assigned the revision 2 fixes to SWE-2 (`69dd62e..4f7cb89`, which the second history rewrite renamed `92a3bb3..e66f291`). The verdict was **APPROVE WITH CHANGES**, recorded in [the round 3 review](../reviews/2026-11-01-cite-lookup-code-r3/SWE2-REVIEW.md). Every finding row from rounds 1 and 2 was ADDRESSED, with four new P3s. Each was checked against the code with an offline probe before amending. The founder approved fixing P3-1 to P3-3. P3-4 asked for no fix.
+
+| Finding | Amendment here |
+| --- | --- |
+| **P3-1** a spelled-out suffix ("Limited", "Incorporated") or a trade word ("Trading", "Steel", "Investments") still counted as distinctive, so "Alpha Limited v. Doe" against "Beta Limited v. Roe" was FOUND | § 3 table, FOUND / NAME DIFFERS: spelled-out suffixes are dropped like their abbreviations, and trades, parties' roles ("Trustee", "Plaintiffs") and in-rem words ("Currency", "Vessel") are generic. |
+| **P3-2** `cite extract --status` was still ignored, and a zero value (`--max-requests 0`) slipped past the flag check, so revision 2's "each subcommand refuses flags that are not its own" overstated it | § 3 command: `--status` is refused everywhere but `cite list`, and a flag given as 0 counts as given. Revision 2's sentence is now true. |
+| **P3-3** a found cite `--record` skipped because several store rows answer to it did not make the run exit 2 | § 3 "Where results land": that cite is reported "not written", like a failed write, and the run exits 2 when nothing else made it exit 1. |
+| **P3-4** some true matches give NAME DIFFERS: a spelled-out party against CourtListener's acronym, a capital "V.", and the reverse, swapped parties matching | No change. These err toward a check by hand, the safe direction. |
+
+Two limits found while amending. Brief check's name walk stops at a number, so "Local 100 v. Doe" reaches the lookup as "v. Doe" and "United States v. $10,000 in U.S. Currency" as "Currency". Two in-rem cases that differ only in an amount or a model year therefore still match each other. Also from round 3: when `--record` fails for a cite, the run exits 2 while the summary line still reads "EVERY CASE CITE FOUND", because the summary describes the lookup. The error output and the report's Recorded section show the failure.
+
+Revision 3 has not been re-reviewed.
