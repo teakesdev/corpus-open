@@ -18,7 +18,7 @@ from unittest import mock
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
 
-from matterkit import amendments, facts, store  # noqa: E402
+from matterkit import amendments, facts, store, subcase  # noqa: E402
 
 CLEAN_ENV = {k: v for k, v in os.environ.items() if k not in ("MATTER_AUTHOR", "MATTER_DIRECTED_BY")}
 TABLES = ("amendment_items", "amendment_item_links", "amendment_item_history")
@@ -172,6 +172,14 @@ class TestAdd(AmendBase):
         self.assertEqual(len(r["links"]["facts"]), 1)
         self.assertEqual(sorted((d["locator"] or "") for d in r["links"]["documents"]), ["", "p1"])
         self.assertEqual(self.counts()["amendment_item_links"], 3)
+
+    def test_documents_may_be_typed_like_a_facts_sources(self):
+        r = self.item("Typed", documents=[{"document_id": self.d1, "locator": "p. 3"}, {"document_id": self.d2}])
+        self.assertEqual([(d["id"], d["locator"]) for d in r["links"]["documents"]], [(self.d1, "p. 3"), (self.d2, None)])
+        for bad in ([{"locator": "p1"}], [{"document_id": 5}], [{"document_id": ""}], [{"document_id": self.d1, "locator": 5}]):
+            with self.assertRaises(amendments.AmendmentError, msg=repr(bad)):
+                self.item("Bad typed", documents=bad)
+        self.assertEqual(self.counts()["amendment_items"], 1)
 
     def test_same_document_with_two_locators_is_two_links(self):
         r = self.item("Two pages", documents=[(self.d1, "p1"), (self.d1, "p2")])
@@ -441,6 +449,63 @@ class TestCounts(AmendBase):
         amendments.set_status(self.conn, d, "dropped")
         self.assertEqual(amendments.counts(self.conn), {"proposed": 1, "approved": 1, "incorporated": 1,
                                                         "dropped": 1, "open": 2})
+
+
+class TestParentReference(AmendBase):
+    """F5: in a subcase, a document that is a reference to a parent document is re-hashed against the
+    parent before it is linked, as a fact's source is. Every front door passes the case folder."""
+
+    def setUp(self):
+        super().setUp()
+        run_cli("subcase", "init", self.dir, "kid", "--title", "Kid case")
+        self.kid = os.path.join(self.dir, "Subcases", "kid")
+        run_cli("fact", "add", self.kid, "--text", "child fact", "--status", "documented-fact",
+                "--source", "parent:Evidence/note.txt@p1")  # registers the reference row in the subcase
+        self.kid_conn = store.connect(self.kid)
+        self.addCleanup(self.kid_conn.close)
+        self.ref = self.kid_conn.execute("SELECT id FROM documents WHERE rel_path='parent:Evidence/note.txt'").fetchone()["id"]
+        self.note = os.path.join(self.dir, "Evidence", "note.txt")
+
+    def kid_counts(self):
+        return self.counts(self.kid)
+
+    def change_parent(self):
+        with open(self.note, "a") as f:
+            f.write("changed after it was referenced\n")
+
+    def test_module_rehashes_when_given_the_case_folder(self):
+        r = amendments.add(self.kid_conn, "ok", documents=[(self.ref, "p. 1")], matter_dir=self.kid)
+        self.assertEqual(r["links"]["documents"][0]["rel_path"], "parent:Evidence/note.txt")
+        self.change_parent()
+        before = self.kid_counts()
+        with self.assertRaises(subcase.SubcaseError) as cm:
+            amendments.add(self.kid_conn, "stale", documents=[(self.ref, None)], matter_dir=self.kid)
+        self.assertEqual(cm.exception.kind, "CHANGED")
+        self.assertEqual(self.kid_counts(), before)
+
+    def test_module_without_a_case_folder_does_not_check(self):
+        self.change_parent()
+        self.assertEqual(amendments.add(self.kid_conn, "unchecked", documents=[(self.ref, None)])["status"], "proposed")
+
+    def test_cli(self):
+        ok = run_cli("amend", "add", self.kid, "--text", "fine", "--source", "parent:Evidence/note.txt@p. 2")
+        self.assertEqual(mask(ok.stdout), "am_<ID> [Proposed] by human\n")
+        self.change_parent()
+        before = self.kid_counts()
+        r = run_cli("amend", "add", self.kid, "--text", "stale", "--source", "parent:Evidence/note.txt", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue(r.stderr.startswith("refused:"), r.stderr)
+        self.assertIn("changed", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(self.kid_counts(), before)
+
+    def test_mcp(self):
+        self.change_parent()
+        before = self.kid_counts()
+        res = self.mcp("matter.amend_add", {"text": "stale", "sources": ["parent:Evidence/note.txt"]}, matter=self.kid)
+        self.assertTrue(res.get("isError"))
+        self.assertIn("changed", res["content"][0]["text"])
+        self.assertEqual(self.kid_counts(), before)
 
 
 class TestResolveSource(AmendBase):

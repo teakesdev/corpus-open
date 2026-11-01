@@ -241,15 +241,17 @@ pleading: what to add or fix, which paragraphs it touches, why, and what it
 rests on. `--fact` takes the `a_…` id that `fact add` printed (over MCP,
 `matter.fact_list` lists them). `--source` takes `rel_path@page` for a
 registered document, split on the last `@`; a file name that has an `@` and no
-page ends in `@`. Every item starts as `proposed`. A person moves it to
-`approved`, to `incorporated` (shown as "In the draft", once the change is in
-the new draft) or to `dropped`, and back to `proposed` if they change their
-mind. Each move records who, when and an optional note; nothing is ever
-deleted. `add` and `set` take `--author agent:MODEL [--directed-by PERSON]`
-like `fact add`. `list` shows open changes (proposed and approved) unless
-`--status` asks for `all` or one status, and it never writes to the case. The
-list only records changes: it does not edit a draft, and brief check does not
-read it.
+page ends in `@`. In a subcase, linking a document that is a reference to a
+parent document first re-hashes it against the parent, as `fact add` does, and
+refuses it if the parent's file changed or went missing. Every item starts as
+`proposed`. A person moves it to `approved`, to `incorporated` (shown as "In the
+draft", once the change is in the new draft) or to `dropped`, and back to
+`proposed` if they change their mind. Each move records who, when and an
+optional note; nothing is ever deleted. `add` and `set` take
+`--author agent:MODEL [--directed-by PERSON]` like `fact add`. `list` shows open
+changes (proposed and approved) unless `--status` asks for `all` or one status,
+and it never writes to the case. The list only records changes: it does not
+edit a draft, and brief check does not read it.
 
 ## Court rules attached to a case
 

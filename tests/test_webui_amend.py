@@ -493,6 +493,18 @@ class TestAmendPageFiles(unittest.TestCase):
         self.assertNotRegex(self.section, r"\.setAttribute\(\s*['\"]on")
         self.assertGreater(self.section.count("text:"), 10)  # case text goes through el(..., {text})
 
+    def test_the_fact_finder_list_has_the_control_edge_and_a_hidden_row_stays_hidden(self):
+        # F9: the edge of a control is 3:1 (--control-edge, tested in test_webui_static); a flex row hides only if told to
+        m = re.search(r"(?m)^\.pick-list\s*\{([^}]*)\}", self.css)
+        self.assertIsNotNone(m)
+        self.assertIn("var(--control-edge)", re.search(r"border:\s*([^;]*);", m.group(1)).group(1))
+        self.assertRegex(self.css, r"\.choice\[hidden\]\s*\{\s*display:\s*none")
+
+    def test_a_late_answer_is_ignored_for_a_view_that_is_gone(self):
+        # F6: every write and every load in this tab asks its view whether it is still the one on screen
+        self.assertIn("async function viewAmend(panel, c, alive)", self.js)
+        self.assertGreaterEqual(self.section.count("alive()"), 4)
+
     def test_a_pending_button_cannot_be_double_clicked(self):
         self.assertIn("disabled = true", self.section)
 

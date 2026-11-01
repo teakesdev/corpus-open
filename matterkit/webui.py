@@ -500,15 +500,17 @@ def h_amendment_add(app, req, case):
         raise HttpError(400, "documents must be a list")
     pairs = []
     for d in docs_in:
-        if not isinstance(d, dict) or not isinstance(d.get("id"), str):
-            raise HttpError(400, "each document needs an id")
-        pairs.append((d["id"], d.get("locator")))  # the page or place is checked by amendments.add
+        # named as the fact form names a source: {"document_id", "locator"}; the first spec's "id" still works
+        doc_id = d.get("document_id", d.get("id")) if isinstance(d, dict) else None
+        if not isinstance(doc_id, str) or d.get("document_id", doc_id) != d.get("id", doc_id):
+            raise HttpError(400, "each document needs a document_id")
+        pairs.append((doc_id, d.get("locator")))  # the page or place is checked by amendments.add
     with _store(app, case, write=True) as (conn, pin):
-        try:
+        try:  # a subcase's reference to a parent document is re-hashed against the parent, as a fact's is
             made = amendments.add(conn, body.get("text"), body.get("paragraphs"), body.get("reason"),
                                   body.get("target", amendments.DEFAULT_TARGET), facts_in, pairs,
-                                  by=store.attribution(req.identity.author))
-        except amendments.AmendmentError as e:
+                                  by=store.attribution(req.identity.author), matter_dir=pin.path)
+        except (amendments.AmendmentError, subcase.SubcaseError) as e:
             raise HttpError(400, str(e)) from None
         return {"amendment": made}
 

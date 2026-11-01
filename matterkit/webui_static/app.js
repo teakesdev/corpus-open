@@ -509,30 +509,37 @@ function fmtWhen(iso) {
   return Number.isNaN(d.getTime()) ? (iso || "") : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-async function viewAmend(panel, c) {
+async function viewAmend(panel, c, alive) {
   const [{ facts }, { documents }] = await Promise.all([api("GET", `/cases/${c.id}/facts`), api("GET", `/cases/${c.id}/documents`)]);
   const heading = el("h2", { tabindex: "-1" });
-  const bar = el("div", { class: "segmented", role: "group", "aria-label": "Show" });
+  // built once, so keyboard focus stays on the toggle that was pressed
+  const toggles = AMEND_FILTERS.map(([k, name]) => el("button", { type: "button", text: name, onclick: () => { state.amendFilter = k; draw(false); } }));
+  const bar = el("div", { class: "segmented", role: "group", "aria-label": "Show" }, toggles);
   const list = el("ul", { class: "amend-list" });
+  let latest = 0;  // loads can finish out of order; only the newest request may touch the page
   const draw = async (keepFocus) => {
-    clear(bar).append(...AMEND_FILTERS.map(([k, name]) => el("button", { type: "button", "aria-pressed": String(state.amendFilter === k), text: name,
-      onclick: () => { state.amendFilter = k; draw(true); } })));
+    const mine = ++latest;
+    toggles.forEach((b, i) => b.setAttribute("aria-pressed", String(AMEND_FILTERS[i][0] === state.amendFilter)));
     try {
       const { amendments } = await api("GET", `/cases/${c.id}/amendments?status=${encodeURIComponent(state.amendFilter)}`);
+      if (mine !== latest || !alive()) return;  // a newer load, or this view is gone
       heading.textContent = state.amendFilter === "all" ? `All changes (${amendments.length})` : `Changes still to make (${amendments.length})`;
-      clear(list).append(...(amendments.length ? amendments.map((a) => amendItem(c, a, () => draw(true)))
+      clear(list).append(...(amendments.length ? amendments.map((a) => amendItem(c, a, () => draw(true), alive))
         : [el("li", { class: "muted", text: state.amendFilter === "all" ? "Nothing has been added yet." : "Nothing is waiting. Add a change above, or choose All changes to see finished and dropped ones." })]));
-    } catch (ex) { clear(list).append(el("li", { class: "error", role: "alert", text: ex.message })); }
+    } catch (ex) {
+      if (mine === latest && alive()) clear(list).append(el("li", { class: "error", role: "alert", text: ex.message }));
+      return;
+    }
     if (keepFocus) heading.focus();  // the button that was pressed is gone; keep the keyboard in this part of the page
   };
   panel.append(el("section", {}, el("h2", { text: "Add a change" }),
     el("p", { class: "lede", text: "Keep a list of what you want to change the next time you amend a pleading, for example: “attribute all three ER injuries to the jail beating, ¶¶ 37 and 172.” This only keeps the list. It doesn't change your draft or file anything. When you've made a change in the new draft, mark it “in the draft.”" }),
-    amendForm(c, facts, documents)),
+    amendForm(c, facts, documents, alive)),
   el("section", {}, heading, bar, list));
   await draw(false);
 }
 
-function amendItem(c, a, redraw) {
+function amendItem(c, a, redraw, alive) {
   const textId = `amend-text-${a.id}`;
   const noteId = `amend-note-${a.id}`;
   const note = el("input", { type: "text", id: noteId, maxlength: 500, autocomplete: "off" });
@@ -544,13 +551,16 @@ function amendItem(c, a, redraw) {
       const buttons = [...actions.querySelectorAll("button")];
       buttons.forEach((b) => { b.disabled = true; });  // one click, one change
       err.textContent = "";
+      const label = AMEND_STATUS[to] || to;
       try {
         await api("POST", `/cases/${c.id}/amendments/${a.id}/status`, { status: to, note: note.value.trim() });
-        toast(`Marked ${AMEND_STATUS[to] || to}.`);
-        await redraw();
+        toast(`Marked ${label} in ${c.title}.`);
+        if (alive()) await redraw();  // only if this list is still the one on screen
       } catch (ex) {
-        err.textContent = ex.message;
-        buttons.forEach((b) => { b.disabled = false; });
+        if (alive()) {
+          err.textContent = ex.message;
+          buttons.forEach((b) => { b.disabled = false; });
+        } else toast(`Couldn't mark the change ${label} in ${c.title}: ${ex.message}`);  // this list is gone, so its error line can't be seen
       }
     } })));
   const factLinks = a.links.facts.map((f) => el("li", {}, el("span", { class: "label", text: LABEL_NAME[f.label] || f.label || "Unknown" }), " ", f.text || ""));
@@ -577,7 +587,7 @@ function amendHistoryLine(h) {
   return `${what}, by ${who(h.recorded_by)}, ${fmtWhen(h.created_at)}${h.note ? `. Note: ${h.note}` : ""}`;
 }
 
-function amendForm(c, facts, documents) {
+function amendForm(c, facts, documents, alive) {
   const err = el("p", { class: "error", role: "alert" });
   const text = el("textarea", { id: "amend-text", required: true });
   const paragraphs = el("input", { type: "text", id: "amend-paras", maxlength: 200, autocomplete: "off" });
@@ -601,22 +611,27 @@ function amendForm(c, facts, documents) {
     docs.append(row);
   };
   if (documents.length) addDoc();
+  const submit = el("button", { class: "btn", type: "submit", text: "Add to the list" });
   const form = el("form", { class: "form-panel",
     onsubmit: async (e) => {
       e.preventDefault();
+      if (submit.disabled) return;  // a second Enter or click while the first request is still out
       err.textContent = "";
       if (!text.value.trim()) { err.textContent = "Say what should change."; text.focus(); return; }
-      const submit = form.querySelector("button[type=submit]");
       submit.disabled = true;
       try {
         await api("POST", `/cases/${c.id}/amendments`, {
           text: text.value, paragraphs: paragraphs.value.trim(), reason: reason.value.trim(),
           facts: [...form.querySelectorAll("input[name=amend-fact]:checked")].map((i) => i.value),
           documents: [...docs.querySelectorAll(".source-row")].map((r) => ({
-            id: r.querySelector("select").value, locator: r.querySelector("input").value.trim() })).filter((d) => d.id) });
-        toast("Change added to the list.");
-        render();
-      } catch (ex) { err.textContent = ex.message; submit.disabled = false; }
+            document_id: r.querySelector("select").value, locator: r.querySelector("input").value.trim() })).filter((d) => d.document_id) });
+        toast(`Change added to ${c.title}.`);
+        if (alive()) render();  // only if this form is still the one on screen; otherwise it would wipe whatever the user moved on to
+      } catch (ex) {
+        if (alive()) err.textContent = ex.message;
+        else toast(`Couldn't add the change to ${c.title}: ${ex.message}`);  // this form is gone, so its error line can't be seen
+      }
+      submit.disabled = false;
     } },
   el("div", { class: "field" }, el("label", { for: "amend-text", text: "What should change?" }), text,
     el("p", { class: "hint", text: "Say what to add, fix or take out, in plain words." })),
@@ -630,7 +645,7 @@ function amendForm(c, facts, documents) {
   el("fieldset", {}, el("legend", { text: "Documents behind it (optional)" }),
     documents.length ? docs : el("p", { class: "hint", text: "Add documents to this case first; then you can point to them here." }),
     documents.length ? el("button", { class: "btn quiet", type: "button", text: "Add another document", onclick: addDoc }) : null),
-  err, el("button", { class: "btn", type: "submit", text: "Add to the list" }));
+  err, submit);
   return form;
 }
 

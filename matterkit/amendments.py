@@ -12,6 +12,7 @@ a store opened with `store.connect_readonly` that predates these tables: they re
 """
 from collections.abc import Iterable
 
+from . import subcase
 from .store import new_id, now_iso
 
 STATUSES = ("proposed", "approved", "incorporated", "dropped")
@@ -96,15 +97,21 @@ def _ids(values, what):
 
 
 def _doc_links(documents):
-    """[(document_id, locator)] with locators cleaned and repeats dropped. SQLite lets NULLs repeat
-    in a composite primary key, so a document cited twice without a page would be stored twice."""
+    """[(document_id, locator)] with locators cleaned and repeats dropped. Each entry is a
+    (document id, page or place) pair or a typed {"document_id", "locator"}, the form facts.add
+    takes. SQLite lets NULLs repeat in a composite primary key, so a document cited twice without a
+    page would be stored twice."""
     if isinstance(documents, (str, bytes, dict)) or not isinstance(documents, Iterable):
         raise AmendmentError("documents must be a list of (document id, page or place) pairs")
     out = []
-    for pair in documents:
-        if not isinstance(pair, (tuple, list)) or len(pair) != 2:
-            raise AmendmentError("each document must be a (document id, page or place) pair")
-        doc_id, locator = pair
+    for entry in documents:
+        if isinstance(entry, dict):
+            doc_id, locator = entry.get("document_id"), entry.get("locator")
+        elif isinstance(entry, (tuple, list)) and len(entry) == 2:
+            doc_id, locator = entry
+        else:
+            raise AmendmentError("each document must be a (document id, page or place) pair "
+                                 "or {\"document_id\", \"locator\"}")
         link = (_name(doc_id, "a document id"), _one_line(locator, "a document's page or place"))
         if link not in out:
             out.append(link)
@@ -217,10 +224,15 @@ def _begin(conn):
         conn.execute("BEGIN IMMEDIATE")
 
 
-def add(conn, text, paragraphs=None, reason=None, target=DEFAULT_TARGET, facts=(), documents=(), by="human"):
+def add(conn, text, paragraphs=None, reason=None, target=DEFAULT_TARGET, facts=(), documents=(), by="human",
+        matter_dir=None):
     """Queue a change. `text` is what to add or change, `paragraphs` where ("¶¶ 37, 172"), `reason`
     why, `target` which pleading. `facts` are assertion ids; `documents` are (document id, page or
-    place) pairs. `by` is the caller's store.attribution value.
+    place) pairs or typed {"document_id", "locator"} (as facts.add takes). `by` is the caller's
+    store.attribution value. `matter_dir` is the case folder: given, a document that is a subcase's
+    reference to a parent document is re-hashed against the parent before anything is written, as
+    a fact's source is, and a parent that changed or went missing raises subcase.SubcaseError
+    (propagated). The CLI, the MCP server and the web UI all pass it.
 
     Refuses empty text, an empty target, an unknown fact id, an unknown document id and malformed
     fields (AmendmentError). The item, its links and its first history row (None -> proposed) commit
@@ -236,6 +248,8 @@ def add(conn, text, paragraphs=None, reason=None, target=DEFAULT_TARGET, facts=(
     fact_ids = _ids(facts, "facts")
     doc_links = _doc_links(documents)
     by = _name(by, "who is making this change")
+    if matter_dir is not None and doc_links:  # parents are re-hashed before the write lock is taken
+        subcase.resolve_parent_sources(matter_dir, [{"document_id": d} for d, _ in doc_links], conn)
     item_id, when = new_id("am_"), now_iso()
     with conn:
         _begin(conn)

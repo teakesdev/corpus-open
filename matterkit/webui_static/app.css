@@ -175,7 +175,7 @@ legend { font-weight: 600; margin-bottom: .4rem; padding: 0; }
 .amend .field { margin: .6rem 0; }
 textarea.short { min-height: 3.5rem; }
 .choice[hidden] { display: none; }  /* the fact finder hides rows with the hidden attribute */
-.pick-list { max-height: 14rem; overflow: auto; margin-top: .4rem; padding: .3rem .7rem; max-width: var(--measure); border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+.pick-list { max-height: 14rem; overflow: auto; margin-top: .4rem; padding: .3rem .7rem; max-width: var(--measure); border: 1px solid var(--control-edge); border-radius: 4px; background: var(--paper); }
 
 /* --- documents --- */
 .drop {

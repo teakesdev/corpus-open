@@ -165,15 +165,17 @@ def cmd_amend(args):
         by = store.attribution(args.author, args.directed_by)
     except ValueError as e:
         sys.exit(f"invalid attribution: {e}")
+    from matterkit import subcase
     try:
         if args.sub == "add":
             documents = [amendments.resolve_source(conn, ref) for ref in args.source]
-            r = amendments.add(conn, args.text, args.para, args.reason, args.target, args.fact, documents, by)
+            r = amendments.add(conn, args.text, args.para, args.reason, args.target, args.fact, documents, by,
+                               matter_dir=args.case_dir)  # re-hashes a subcase's parent: references
             print(f"{r['id']} [{r['status_label']}] by {r['created_by']}")
         else:
             r = amendments.set_status(conn, args.item_id, args.status, args.note, by)
             print(f"{r['id']}: {amendments.LABELS[r['from_status']]} -> {r['status_label']} by {r['recorded_by']}")
-    except amendments.AmendmentError as e:
+    except (amendments.AmendmentError, subcase.SubcaseError) as e:
         sys.exit(f"refused: {e}")
 
 

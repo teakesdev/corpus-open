@@ -150,7 +150,8 @@ def call(name: str, args: dict):
             raise ValueError("sources must be a list of 'rel_path@page' strings")
         documents = [amendments.resolve_source(conn, ref) for ref in sources]  # raises -> isError, nothing written
         r = amendments.add(conn, args.get("text"), args.get("paragraphs"), args.get("reason"),
-                           args.get("target", amendments.DEFAULT_TARGET), args.get("facts") or [], documents, by)
+                           args.get("target", amendments.DEFAULT_TARGET), args.get("facts") or [], documents, by,
+                           matter_dir=MATTER_DIR)  # raises SubcaseError (-> isError) if a parent: reference changed
         return f"{r['id']} [{r['status_label']}] by {r['created_by']}"
     if name == "matter.amend_list":
         from matterkit import amendments
