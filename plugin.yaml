@@ -1,0 +1,71 @@
+name: corpus-open
+version: "0.4.0"
+manifest_version: 2
+api_version: 1
+description: >-
+  Corpus Open's matter kit inside Hermes. A citation guard lists every case, statute and
+  code cite under each reply with what CourtListener, Corpus and your case file hold at it
+  (FOUND, NOT FOUND, NAME DIFFERS, IN CORPUS), so a made-up cite is flagged before it reaches
+  a filing. Twelve tools read and keep a local case folder (labeled facts with sources,
+  deadlines and triggers, brief check, counsel packet, court rules, hash verification), a
+  deadline brief opens each session, and /matter shows status, deadlines and the packet.
+  Network calls are only cite checks, carry only the bare cites, and run only after a person
+  grants them in the case folder; nothing is filed, sent or shared.
+author: Corpus (teakesdev)
+license: Apache-2.0
+homepage: https://github.com/teakesdev/corpus-open
+tags: [legal, citations, litigation, pro-se, deadlines, matter]
+requires_hermes: ">=0.21.6"
+provides_tools:
+  - matter_status
+  - matter_fact_add
+  - matter_fact_list
+  - matter_deadline_list
+  - matter_trigger_list
+  - matter_trigger_fire
+  - matter_packet_render
+  - matter_brief_check
+  - matter_rules_show
+  - matter_cite_check
+  - matter_verify
+  - matter_ingest_path
+provides_hooks:
+  - pre_llm_call
+  - transform_llm_output
+requires_env: []
+config_schema:
+  matter_dir:
+    type: str
+    default: ""
+    description: >-
+      Your case folder, made with `python3 matter.py init <folder>`. The tools, the deadline
+      brief and cite-check grants all read it.
+  citation_guard:
+    type: str
+    default: lookup
+    choices: [lookup, local, "off"]
+    description: >-
+      lookup checks cites on CourtListener and Corpus once the case folder holds your grant;
+      local lists cites without any network call; off turns the guard off.
+  caller_id:
+    type: str
+    default: hermes
+    description: The caller name your consent grants authorize (matter.py consent activate --caller).
+  deadline_window_days:
+    type: int
+    default: 14
+    description: How far ahead the session's deadline brief looks.
+  max_statute_checks:
+    type: int
+    default: 5
+    description: Most statute and code cites looked up on Corpus per reply.
+  courtlistener_token:
+    type: secret
+    env: COURTLISTENER_TOKEN
+    required: false
+    description: Free CourtListener API token, needed to look up case cites.
+  corpus_api_key:
+    type: secret
+    env: CORPUS_API_KEY
+    required: false
+    description: Optional Corpus API key (corpuslaw.us/settings); anonymous search works without one.

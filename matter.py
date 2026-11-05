@@ -755,12 +755,14 @@ def cmd_auth_stage(args):
 
 def cmd_consent(args):
     """consent propose|activate. --scope search: the R2 search adapter (query_text to the host);
-    --scope cite-lookup: bare case cites to the citation-lookup URL, and nothing else."""
+    --scope cite-lookup: bare case cites to the citation-lookup URL, and nothing else;
+    --scope corpus-search: query_text (a statute cite, for the Hermes citation guard) to corpuslaw.us."""
     from matterkit import citelookup, consent
     from matterkit.adapters.courtlistener import ENDPOINT_HOST
     provider, endpoints, payloads, budget = {
         "search": ("courtlistener-free", [ENDPOINT_HOST], ["query_text"], 20),
         "cite-lookup": (citelookup.PROVIDER, [citelookup.ENDPOINT], [citelookup.PAYLOAD_TYPE], 10),
+        "corpus-search": ("corpus-search", ["corpuslaw.us"], ["query_text"], 50),
     }[args.scope]
     if args.sub == "propose":
         g = consent.stage_proposal(
@@ -1139,7 +1141,7 @@ def main():
 
     p = sub.add_parser("consent"); p.add_argument("sub", choices=["propose", "activate"])
     p.add_argument("case_dir")
-    p.add_argument("--scope", choices=["search", "cite-lookup"], default="search")
+    p.add_argument("--scope", choices=["search", "cite-lookup", "corpus-search"], default="search")
     p.add_argument("--as-user", dest="as_user", default="agent")
     p.add_argument("--issuer", default=os.environ.get("USER", "human"))
     p.add_argument("--caller", action="append", default=[])

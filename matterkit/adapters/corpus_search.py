@@ -48,17 +48,19 @@ class CorpusSearchAdapter:
     provider = "corpus-search"
     endpoint = HOST
 
-    def __init__(self, matter_dir: str, auth_mode: str = "anonymous"):
+    def __init__(self, matter_dir: str, auth_mode: str = "anonymous", *, api_key: str | None = None):
         mode = (auth_mode or "anonymous").strip().lower()
         if mode not in ("anonymous", "authenticated"):
             raise ConsentError(f"auth_mode must be anonymous|authenticated, not {auth_mode!r}")
         self.matter_dir = matter_dir
         self.auth_mode = mode
+        self._given_key = api_key  # a host that owns credentials passes the key in; None reads CORPUS_API_KEY
 
     def _api_key(self) -> str:
         key = ""
         if self.auth_mode == "authenticated":
-            key = (os.environ.get("CORPUS_API_KEY", "") or "").strip()
+            key = ((os.environ.get("CORPUS_API_KEY", "") if self._given_key is None else self._given_key)
+                   or "").strip()
             if not key:
                 raise ConsentError(
                     "authenticated mode requires CORPUS_API_KEY — refusing "

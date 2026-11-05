@@ -1,0 +1,220 @@
+"""Corpus Open for Hermes Agent: the matter kit as a native Hermes plugin.
+
+What a plugin adds that a skill or an MCP server can't:
+- a citation guard on every reply (transform_llm_output): each case, statute and code cite the
+  agent writes is listed under the reply with what CourtListener, Corpus and the case file say
+  about it, so a fabricated cite is flagged before anyone copies it into a filing;
+- a deadline brief at the start of each session (pre_llm_call on the first turn);
+- /matter, a slash command for the case's status, deadlines, packet and cite checks;
+- the matter tools, reading the case folder chosen in Hermes's own settings form, with tokens
+  read through Hermes's secret store.
+
+Nothing here files, sends or contacts anyone. Network calls happen only for cite checks, only
+with the bare cites, and only after a person grants them in the case folder (RFC 0001).
+"""
+from __future__ import annotations
+
+import datetime as _dt
+
+from . import guard as _guard
+from .tools import SCHEMAS, TOOLSET, MatterError, Tools, resolve_matter
+
+PLUGIN_ID = "corpus-open"
+GUARD_MODES = ("lookup", "local", "off")
+DEFAULTS = {
+    "matter_dir": "",
+    "citation_guard": "lookup",
+    "caller_id": "hermes",
+    "deadline_window_days": 14,
+    "max_statute_checks": 5,
+}
+SECRET_ENV = {"courtlistener_token": "COURTLISTENER_TOKEN", "corpus_api_key": "CORPUS_API_KEY"}
+
+
+def _secret(name: str) -> str | None:
+    """A credential through Hermes's secret store; None outside Hermes or when unset."""
+    try:
+        from agent.secret_scope import get_secret
+    except ImportError:
+        return None
+    try:
+        value = get_secret(name)
+    except Exception:  # noqa: BLE001 - an unscoped read under multiplexing: treat as unset
+        return None
+    return (value or "").strip() or None
+
+
+class Plugin:
+    def __init__(self, ctx, secret=_secret, today=None):
+        self.ctx = ctx
+        self.secret = secret
+        self.today = today or _dt.date.today
+        self.tools = Tools(self.settings, self.run_guard)
+
+    # -- settings -------------------------------------------------------------------------------
+    def settings(self) -> dict:
+        out = dict(DEFAULTS)
+        for key in DEFAULTS:
+            try:
+                value = self.ctx.get_config(key, None)
+            except Exception:  # noqa: BLE001
+                value = None
+            if value is not None and value != "":
+                out[key] = value
+        if out["citation_guard"] not in GUARD_MODES:
+            out["citation_guard"] = "lookup"
+        for key in ("deadline_window_days", "max_statute_checks"):
+            try:
+                out[key] = max(0, int(out[key]))
+            except (TypeError, ValueError):
+                out[key] = DEFAULTS[key]
+        return out
+
+    def _matter_or_none(self) -> str | None:
+        try:
+            return resolve_matter(self.settings().get("matter_dir"))
+        except MatterError:
+            return None
+
+    # -- citation guard -------------------------------------------------------------------------
+    def run_guard(self, text: str, matter_dir: str | None) -> _guard.Check:
+        s = self.settings()
+        return _guard.check_text(
+            text, matter_dir=matter_dir, caller_id=str(s["caller_id"]),
+            lookup=s["citation_guard"] == "lookup",
+            courtlistener_token=self.secret(SECRET_ENV["courtlistener_token"]),
+            corpus_api_key=self.secret(SECRET_ENV["corpus_api_key"]),
+            max_statutes=s["max_statute_checks"])
+
+    def on_reply(self, response_text: str = "", **kwargs) -> str | None:
+        """transform_llm_output: append the citation check under a reply that cites anything."""
+        try:
+            if self.settings()["citation_guard"] == "off" or not response_text:
+                return None
+            if "Citation check" in response_text and "Checked by Corpus Open" in response_text:
+                return None  # already carries one (a resumed or replayed reply)
+            check = self.run_guard(response_text, self._matter_or_none())
+            block = _guard.render(check)
+            return response_text + "\n" + block if block else None
+        except Exception:  # noqa: BLE001 - never hold up a reply; the reply goes out unchanged
+            return None
+
+    # -- deadline brief -------------------------------------------------------------------------
+    def deadline_brief(self) -> str:
+        md = self._matter_or_none()
+        if md is None:
+            return ""
+        from ..matterkit import deadlines as dl
+        from ..matterkit import store, triggers
+        conn = store.connect(md)
+        try:
+            rows, waiting = list(dl.select(conn)), len(triggers.select(conn))
+        finally:
+            conn.close()
+        today = self.today()
+        window = self.settings()["deadline_window_days"]
+        overdue, soon = [], []
+        for r in rows:
+            due = dl.parse_date(r["due_date"])
+            if due is None:
+                continue
+            label = (f"{r['label']}: {due.isoformat()} ({r['confidence'] or 'working-estimate'}, "
+                     f"{r['verification_status'] or 'unverified'})")
+            if due < today:
+                overdue.append(label + f", {(today - due).days} days ago")
+            elif (due - today).days <= window:
+                soon.append(label + f", in {(due - today).days} days")
+        if not (overdue or soon or waiting):
+            return ""
+        lines = [f"[Corpus Open] The user's case folder is {md}. As of {today.isoformat()}:"]
+        if overdue:
+            lines.append("OVERDUE (still open): " + "; ".join(overdue))
+        if soon:
+            lines.append(f"Due within {window} days: " + "; ".join(soon))
+        if waiting:
+            lines.append(f"{waiting} deadline(s) wait on an event that has not been recorded yet "
+                         "(matter_trigger_list).")
+        lines.append("Mention overdue and upcoming deadlines to the user once, briefly, at the start of "
+                     "your reply. Dates marked working-estimate or unverified are not confirmed.")
+        return "\n".join(lines)
+
+    def on_turn(self, is_first_turn: bool = False, **kwargs):
+        """pre_llm_call: on a session's first turn, hand the agent the case's deadlines."""
+        if not is_first_turn:
+            return None
+        try:
+            text = self.deadline_brief()
+        except Exception:  # noqa: BLE001
+            return None
+        return {"context": text} if text else None
+
+    # -- /matter --------------------------------------------------------------------------------
+    def command(self, raw_args: str = "", **kwargs) -> str:
+        parts = (raw_args or "").strip().split(None, 1)
+        sub = parts[0].lower() if parts else ""
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        try:
+            if sub in ("", "status"):
+                return self._unwrap(self.tools.handler("matter_status")({})) + "\n\n" + self._deadline_text()
+            if sub == "deadlines":
+                return self._deadline_text()
+            if sub == "packet":
+                return self._unwrap(self.tools.handler("matter_packet_render")({"layer": rest or "3min"}))
+            if sub == "check":
+                if not rest:
+                    return "Usage: /matter check <draft.md inside the case folder>"
+                res = self.tools.matter_cite_check({"path": rest})
+                return res["report"] or "No citations found."
+            if sub == "grant":
+                caller = self.settings()["caller_id"]
+                md = self.settings()["matter_dir"] or "<case folder>"
+                return ("A person grants cite checks once per case folder, in a terminal (the kit refuses "
+                        "a grant an agent writes):\n"
+                        f"  python3 matter.py consent activate {md} --scope cite-lookup --caller {caller}\n"
+                        f"  python3 matter.py consent activate {md} --scope corpus-search --caller {caller}\n"
+                        "Each asks you to type ACTIVATE. Case cites also need a free CourtListener token "
+                        "in this plugin's settings.")
+            return ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant")
+        except MatterError as e:
+            return str(e)
+        except Exception as e:  # noqa: BLE001
+            return f"/matter failed: {e}"
+
+    def _deadline_text(self) -> str:
+        md = resolve_matter(self.settings().get("matter_dir"))
+        from ..matterkit import deadlines as dl
+        from ..matterkit import store
+        conn = store.connect(md)
+        try:
+            rows = dl.select(conn)
+        finally:
+            conn.close()
+        if not rows:
+            return "No open deadlines."
+        out = ["Open deadlines:"]
+        for r in rows:
+            flag = " **OVERDUE**" if dl.is_overdue(r["due_date"], r["state"], today=self.today()) else ""
+            out.append(f"- {r['due_date']} · {r['label']}{flag} ({r['confidence']}, {r['verification_status']})")
+        return "\n".join(out)
+
+    @staticmethod
+    def _unwrap(payload: str) -> str:
+        import json
+        d = json.loads(payload)
+        if not d.get("ok"):
+            raise MatterError(d.get("error", "failed"))
+        r = d["result"]
+        return r if isinstance(r, str) else json.dumps(r, indent=1)
+
+
+def register(ctx, *, secret=_secret, today=None) -> Plugin:
+    plugin = Plugin(ctx, secret=secret, today=today)
+    for name, schema in SCHEMAS.items():
+        ctx.register_tool(name=name, toolset=TOOLSET, schema=schema, handler=plugin.tools.handler(name),
+                          description=schema["description"].split(". ")[0])
+    ctx.register_hook("transform_llm_output", plugin.on_reply)
+    ctx.register_hook("pre_llm_call", plugin.on_turn)
+    ctx.register_command("matter", plugin.command,
+                         description="Your case: status, deadlines, counsel packet, cite check",
+                         args_hint="[status|deadlines|packet|check|grant]")
+    return plugin

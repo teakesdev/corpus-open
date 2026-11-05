@@ -1,0 +1,269 @@
+"""Matter tools for Hermes: the case folder's store, read-mostly, through the kit's own modules.
+
+Every handler takes (args, **kwargs), returns a JSON string and never raises, as Hermes asks.
+Nothing here files, sends or contacts anyone. The one network path is matter_cite_check, which
+goes through the guard and so through the kit's consent grants.
+"""
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import os
+
+from ..matterkit import ingest as ing
+from ..matterkit import packet as pk
+from ..matterkit import store
+
+TOOLSET = "corpus_open"
+LABELS = ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]
+
+
+class MatterError(ValueError):
+    pass
+
+
+def resolve_matter(raw: str | None) -> str:
+    """The configured case folder, expanded and checked to be a matter."""
+    if not raw or not str(raw).strip():
+        raise MatterError("No case folder is set. Set matter_dir in this plugin's settings "
+                          "(Settings > Plugins > corpus-open) to a folder made with `matter.py init`.")
+    path = os.path.abspath(os.path.expanduser(str(raw).strip()))
+    if not os.path.isdir(os.path.join(path, ".matter")):
+        raise MatterError(f"{path} is not a matter yet (no .matter/ folder). Run: python3 matter.py init {path}")
+    return path
+
+
+def inside(matter_dir: str, path: str) -> str:
+    """Resolve `path` inside the matter; relative paths join the matter root, not the cwd."""
+    if not path:
+        raise MatterError("path required")
+    root = os.path.abspath(matter_dir)
+    cand = os.path.abspath(path if os.path.isabs(path) else os.path.join(root, path))
+    if not ing.is_within_matter(cand, root):
+        raise MatterError("path is outside the case folder")
+    ing.to_rel_path(cand, root)
+    return cand
+
+
+def _schema(name: str, description: str, properties: dict | None = None, required: list | None = None) -> dict:
+    return {"name": name, "description": description,
+            "parameters": {"type": "object", "properties": properties or {}, "required": required or []}}
+
+
+SCHEMAS = {
+    "matter_status": _schema(
+        "matter_status",
+        "Status of the user's case folder (Corpus Open matter): documents by kind, labeled facts, open "
+        "deadlines, unverified authorities. Read-only."),
+    "matter_fact_add": _schema(
+        "matter_fact_add",
+        "Record one assertion about the case with exactly one epistemic label and the documents that "
+        "support it ('rel_path@locator', e.g. 'Evidence/lease.pdf@p. 2'). An assertion with no recognized "
+        "source is stored and shown as UNSUPPORTED. Never upgrade a label without a new source.",
+        {"text": {"type": "string"}, "status": {"type": "string", "enum": LABELS},
+         "sources": {"type": "array", "items": {"type": "string"}},
+         "directed_by": {"type": "string", "description": "who asked for this fact to be recorded"}},
+        ["text", "status"]),
+    "matter_fact_list": _schema(
+        "matter_fact_list", "List the case's assertions with labels and sources, optionally one label only.",
+        {"status": {"type": "string", "enum": LABELS}}),
+    "matter_deadline_list": _schema(
+        "matter_deadline_list",
+        "List the case's deadlines with due date, overdue flag, confidence (hard / working-estimate) and "
+        "verification status. Open ones only unless all is true.",
+        {"all": {"type": "boolean"}}),
+    "matter_trigger_list": _schema(
+        "matter_trigger_list",
+        "List deadlines that wait on an event and have no date yet (for example 'answer due 21 days after "
+        "service').",
+        {"all": {"type": "boolean"}}),
+    "matter_trigger_fire": _schema(
+        "matter_trigger_fire",
+        "Record that the event a waiting trigger waits on happened on a date, and register the computed "
+        "deadline (stored as a working estimate, never as checked). Use dry_run first to show the date.",
+        {"trigger_id": {"type": "string"}, "on": {"type": "string", "description": "YYYY-MM-DD"},
+         "service": {"type": "string", "description": "how the triggering paper was served, if the rule asks"},
+         "sources": {"type": "array", "items": {"type": "string"}},
+         "reason": {"type": "string"}, "dry_run": {"type": "boolean"},
+         "directed_by": {"type": "string"}},
+        ["trigger_id", "on"]),
+    "matter_packet_render": _schema(
+        "matter_packet_render",
+        "Render the counsel packet a lawyer can evaluate quickly: 30s, 3min or 15min layer. Always carries "
+        "adverse facts and a not-legal-advice line. Read-only; returns Markdown.",
+        {"layer": {"type": "string", "enum": ["30s", "3min", "15min"]}}),
+    "matter_brief_check": _schema(
+        "matter_brief_check",
+        "Check a draft brief or complaint inside the case folder (Markdown, text, Word .docx or PDF): every "
+        "record cite, pleading cite, authority, quotation and fact tag is tied to a hash-verified document "
+        "or flagged. Read-only. Tied to a source is not legal correctness.",
+        {"path": {"type": "string"}, "mode": {"type": "string", "enum": ["brief", "complaint"]}},
+        ["path"]),
+    "matter_rules_show": _schema(
+        "matter_rules_show",
+        "Text of a court rule from a rules pack attached to the case (e.g. 'Fed. R. Civ. P. 12(b)(6)', "
+        "'L.U.Civ.R. 7(b)(4)'), with its version date. Derived text, not the official copy. No network.",
+        {"cite": {"type": "string"}, "pack": {"type": "string"}}, ["cite"]),
+    "matter_cite_check": _schema(
+        "matter_cite_check",
+        "Check every citation in a text or in a draft file inside the case folder: case cites against "
+        "CourtListener, statute and code cites against Corpus, plus what the case file's own authority "
+        "ledger says. Sends only the bare cites, and only when the case folder holds a person's grant. "
+        "Run it before any citation goes into a filing or a letter.",
+        {"text": {"type": "string"}, "path": {"type": "string"}}),
+    "matter_verify": _schema(
+        "matter_verify",
+        "Re-hash every registered document in the case folder; report any that changed or went missing."),
+    "matter_ingest_path": _schema(
+        "matter_ingest_path",
+        "Hash and register one file or folder inside the case folder so facts can cite it. Sources are "
+        "never modified.",
+        {"path": {"type": "string"}}, ["path"]),
+}
+
+
+def _ok(result) -> str:
+    return json.dumps({"ok": True, "result": result}, ensure_ascii=False)
+
+
+def _err(e: Exception) -> str:
+    return json.dumps({"ok": False, "error": str(e) or type(e).__name__}, ensure_ascii=False)
+
+
+class Tools:
+    """Handlers bound to a settings reader so each call sees the current case folder."""
+
+    def __init__(self, settings, guard_runner):
+        self.settings = settings  # callable: () -> dict of plugin settings
+        self.guard_runner = guard_runner  # callable: (text, matter_dir) -> guard.Check
+
+    def _dir(self) -> str:
+        return resolve_matter(self.settings().get("matter_dir"))
+
+    def _by(self, args) -> str:
+        # The work is the Hermes agent's; directed_by names the person who asked for it.
+        return store.attribution("agent:hermes", args.get("directed_by"))
+
+    @contextlib.contextmanager
+    def _conn(self):
+        md = self._dir()
+        conn = store.connect(md)
+        try:
+            yield conn, md
+        finally:
+            conn.close()
+
+    def handler(self, name: str):
+        fn = getattr(self, name)
+
+        def run(args: dict | None = None, **kwargs) -> str:
+            try:
+                return _ok(fn(args or {}))
+            except Exception as e:  # noqa: BLE001 - Hermes handlers must never raise
+                return _err(e)
+        run.__name__ = name
+        return run
+
+    # -- read ----------------------------------------------------------------------------------
+    def matter_status(self, args):
+        with self._conn() as (conn, md):
+            return pk.status_report(conn, md)
+
+    def matter_fact_list(self, args):
+        from ..matterkit import facts
+        with self._conn() as (conn, _md):
+            rows = facts.list_(conn, args.get("status"))
+        return [{"id": f["id"], "status": f["status"], "text": f["text"], "supported": not f["unsupported"],
+                 "sources": [x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "") for x in f["sources"]]}
+                for f in rows]
+
+    def matter_deadline_list(self, args):
+        from ..matterkit import deadlines as dl
+        with self._conn() as (conn, _md):
+            return [dict(r, overdue=dl.is_overdue(r["due_date"], r["state"]))
+                    for r in dl.select(conn, include_closed=bool(args.get("all")))]
+
+    def matter_trigger_list(self, args):
+        from ..matterkit import triggers
+        with self._conn() as (conn, _md):
+            return [dict(r) for r in triggers.select(conn, include_closed=bool(args.get("all")))]
+
+    def matter_packet_render(self, args):
+        with self._conn() as (conn, md):
+            return pk.packet(conn, md, layer=args.get("layer") or "3min")
+
+    def matter_brief_check(self, args):
+        from ..matterkit import briefcheck
+        md = self._dir()
+        with contextlib.redirect_stdout(io.StringIO()):
+            report = briefcheck.check(md, inside(md, args.get("path", "")), use_pdftotext=True,
+                                      mode=args.get("mode") or "brief")
+        return {"exit": report.exit_code, "summary": report.summary(), "report": report.render()}
+
+    def matter_rules_show(self, args):
+        from ..matterkit import rules
+        code, text = rules.show(self._dir(), args.get("cite", ""), args.get("pack"))
+        if code == 1:
+            raise MatterError(text)
+        return text
+
+    def matter_verify(self, args):
+        with self._conn() as (conn, md):
+            ok, bad, missing, failures = ing.verify_integrity(conn, md)
+        return {"ok": ok, "changed": bad, "missing": missing, "failures": [list(f) for f in failures]}
+
+    def matter_cite_check(self, args):
+        from . import guard
+        md = None
+        try:
+            md = self._dir()
+        except MatterError:
+            md = None  # a cite check still runs locally without a case folder
+        text = args.get("text") or ""
+        if args.get("path"):
+            if md is None:
+                raise MatterError("path needs a case folder; pass text instead or set matter_dir")
+            p = inside(md, args["path"])
+            if p.lower().endswith((".docx", ".pdf", ".doc")):
+                raise MatterError("cite check reads Markdown or text; pass the .md copy or the text itself")
+            with open(p, "rb") as f:
+                raw = f.read()
+            if b"\0" in raw:
+                raise MatterError("this file has binary content; pass the .md copy or the text itself")
+            text = raw.decode("utf-8", "replace")
+        if not text.strip():
+            raise MatterError("give text or a path")
+        check = self.guard_runner(text, md)
+        return {"problems": len(check.problems), "cites": len(check.rows),
+                "report": guard.render(check, footer=False)}
+
+    # -- write (local store only) ---------------------------------------------------------------
+    def matter_fact_add(self, args):
+        from ..matterkit import facts
+        with self._conn() as (conn, md):
+            r = facts.add(conn, md, args["text"], args.get("status", "UNKNOWN"),
+                          args.get("sources") or [], self._by(args))
+        return {"id": r["id"], "status": r["status"], "unsupported": bool(r["unsupported"]),
+                "unrecognized_sources": r["unrecognized"], "notes": r["notes"]}
+
+    def matter_trigger_fire(self, args):
+        from ..matterkit import triggers
+        md = self._dir()
+        sources = args.get("sources") or []
+        if not isinstance(sources, list):
+            raise MatterError("sources must be a list of 'rel_path@locator' strings")
+        with contextlib.closing(store.connect(md)) as conn:
+            did, due, steps = triggers.fire(conn, md, args.get("trigger_id"), args.get("on"),
+                                            args.get("service"), sources, args.get("reason"), self._by(args),
+                                            dry_run=bool(args.get("dry_run")))
+        return {"deadline_id": did, "due": due.isoformat(), "dry_run": did is None,
+                "note": "computed, not checked: a working estimate until a person confirms it",
+                "steps": steps}
+
+    def matter_ingest_path(self, args):
+        md = self._dir()
+        cand = inside(md, args.get("path", ""))
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.closing(store.connect(md)) as conn:
+            added, skipped, excluded = ing.ingest_paths(conn, md, [cand])
+        return {"added": added, "skipped": skipped, "excluded": excluded}

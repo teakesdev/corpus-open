@@ -76,9 +76,12 @@ class CitationLookupAdapter:
     endpoint = citelookup.ENDPOINT
     payload_type = citelookup.PAYLOAD_TYPE
 
-    def __init__(self, matter_dir: str, caller_id: str, *, post=None, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, matter_dir: str, caller_id: str, *, post=None, clock=time.monotonic, sleep=time.sleep,
+                 token: str | None = None):
         consent.authorize(matter_dir, self.provider, self.endpoint, self.payload_type, caller_id)
-        token = os.environ.get("COURTLISTENER_TOKEN", "").strip()
+        # A host that owns credentials (the Hermes plugin reads them through Hermes) passes the token in;
+        # the CLI leaves it None and reads COURTLISTENER_TOKEN.
+        token = (os.environ.get("COURTLISTENER_TOKEN", "") if token is None else token).strip()
         if not token:
             raise consent.ConsentError(
                 "citation lookup requires COURTLISTENER_TOKEN (CourtListener allows no anonymous lookups) "

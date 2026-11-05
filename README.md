@@ -168,6 +168,54 @@ MCP cannot approve a notice, record mailing, or send it. `matter.amend_add`
 can only propose a change to the amendment list; approving or dropping one is a
 person's step (CLI or browser).
 
+## Hermes plugin (citation guard, deadline brief, /matter)
+
+This repo is also a native [Hermes Agent](https://hermes-agent.nousresearch.com) plugin
+(`plugin.yaml` and `__init__.py` at the root, code in `hermes_plugin/`). It adds what a skill or
+the MCP server above can't:
+
+- **Citation guard.** Under every reply that cites anything, a block lists each case, statute and
+  code cite with what is known about it: `FOUND` or `NOT FOUND` / `NAME DIFFERS` on CourtListener,
+  `IN CORPUS` or `NOT MATCHED IN CORPUS` on [Corpus](https://corpuslaw.us), and what your case
+  file's authority ledger says. Problems come first. Found means a source holds something at that
+  cite, not that it says what the reply says or is still good law.
+- **Deadline brief.** On a session's first turn, overdue deadlines and those due within
+  `deadline_window_days` go to the agent, so it raises them before anything else.
+- **`/matter`** shows status and deadlines; `/matter packet 30s`, `/matter check Drafts/x.md` and
+  `/matter grant` (how to allow cite checks) do what they say.
+- **Twelve tools** in the `corpus_open` toolset: `matter_status`, `matter_fact_add`,
+  `matter_fact_list`, `matter_deadline_list`, `matter_trigger_list`, `matter_trigger_fire`,
+  `matter_packet_render`, `matter_brief_check`, `matter_rules_show`, `matter_cite_check`,
+  `matter_verify`, `matter_ingest_path`.
+
+Install and set it up:
+
+```sh
+hermes plugins install https://github.com/teakesdev/corpus-open
+hermes plugins enable corpus-open
+python3 matter.py init ~/cases/my-case            # then set matter_dir to it in the plugin's settings
+python3 matter.py consent activate ~/cases/my-case --scope cite-lookup --caller hermes
+python3 matter.py consent activate ~/cases/my-case --scope corpus-search --caller hermes
+```
+
+Settings (Desktop: Settings > Plugins > corpus-open): `matter_dir`, `citation_guard`
+(`lookup` / `local` / `off`), `caller_id`, `deadline_window_days`, `max_statute_checks`, and two
+secrets read through Hermes's secret store: `COURTLISTENER_TOKEN` (free, needed for case cites) and
+`CORPUS_API_KEY` (optional).
+
+**Network calls (disclosure).** The plugin makes exactly two kinds of request, both only from the
+citation guard and `matter_cite_check`, and only after a person grants them in the case folder by
+typing `ACTIVATE` in a terminal (a grant an agent writes is refused):
+
+| To | What is sent | Limit |
+|---|---|---|
+| `www.courtlistener.com` citation lookup | the bare case cites (`123 F.4th 456`), up to 60 per reply, with your token | the grant's daily budget (10) |
+| `corpuslaw.us` law search | one statute or code cite per request (`Miss. Code Ann. § 89-7-27`) | `max_statute_checks` per reply, grant budget 50/day |
+
+No reply text, facts, documents or names leave the machine. Every request is logged to
+`.matter/egress.log`. With `citation_guard: local`, nothing is sent and cites are only listed. The
+plugin files, sends and approves nothing, and sends no telemetry.
+
 ## Document extraction and locators (RFC 0004, RFC 0005)
 
 ```bash
