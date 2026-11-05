@@ -795,7 +795,7 @@ class TestCLI(Matter):
         with mock.patch.dict(os.environ, {"COURTLISTENER_TOKEN": TOKEN}), \
                 mock.patch.object(clc, "post_form", side_effect=lambda u, f, t: recorded(f["text"])):
             code, out, _ = run_cli("cite", "lookup", self.dir, self.draft, "--record", "--out", out_path,
-                                   "--author", "agent:test", "--directed-by", "ty")
+                                   "--author", "agent:test", "--directed-by", "ty", "--caller", "ty")
         self.assertEqual(code, 1)
         report = open(out_path).read()
         self.assertIn("NAME DIFFERS", report)
