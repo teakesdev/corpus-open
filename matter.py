@@ -666,6 +666,77 @@ def _write_or_print(text, out, summary):
         print(text)
 
 
+def cmd_pages(args):
+    """pages <dir> [path] — extract document text with source locators.
+
+    Stdlib-only. Scanned/LZW/CID-font PDFs fail honestly per page; nothing is
+    ever silently empty. PDF/text results write to document_pages keyed by
+    sha256+page (RFC 0004).
+
+    DOCX (RFC 0005) is routed to structural locators and written to
+    document_blocks instead. A DOCX never produces a document_pages row: the
+    format carries no rendered page numbers, so one would have to be invented.
+    """
+    conn = store.connect(args.case_dir)
+    from matterkit import extract, ingest
+    import hashlib
+    if args.path:
+        files = [(args.path, ingest.sha256_file(args.path))]
+    else:
+        docs = conn.execute("SELECT id, sha256, rel_path FROM documents").fetchall()
+        files = []
+        for d in docs:
+            # rel_path is relative to the matter root (ingest stores it that way).
+            # Rows written before that fix were relative to the cwd at ingest
+            # time, so fall back to the cwd only when the matter-root path is absent.
+            full = os.path.join(args.case_dir, d["rel_path"])
+            if not os.path.isfile(full):
+                full = os.path.abspath(d["rel_path"])
+            if os.path.isfile(full):
+                files.append((full, d["sha256"]))
+    total_ok = total_fail = 0
+    for path, sha in files:
+        doc = extract.extract_text(path)
+        if doc.locator_scheme == extract.LOCATOR_SCHEME_DOCX:
+            extract.record_blocks(conn, sha, doc)
+            name = os.path.basename(path)
+            if doc.status == "extracted":
+                total_ok += len(doc.blocks)
+                print(f"✓ {name}: {len(doc.blocks)} block(s) "
+                      f"[{doc.locator_scheme}; DOCX carries no page numbers]")
+                if doc.parts and doc.parts.skipped:
+                    print(f"   · skipped by design: "
+                          f"{', '.join(doc.parts.skipped)}")
+                if doc.parts and doc.parts.unhandled:
+                    print(f"   ⚠ not descended into: "
+                          f"{', '.join(doc.parts.unhandled)}")
+            else:
+                total_fail += 1
+                print(f"✗ {name}: extraction failed (0 block(s))")
+                print(f"   ⚠ {doc.reason}")
+            continue
+        for pg in doc.pages:
+            conn.execute(
+                "INSERT OR REPLACE INTO document_pages "
+                "(document_sha256, page_number, text_sha256, text, status) "
+                "VALUES (?,?,?,?,?)",
+                (sha, pg.number, pg.text_sha256, pg.text, pg.status))
+            if pg.status == "extracted":
+                total_ok += 1
+            else:
+                total_fail += 1
+        n = len(doc.pages)
+        mark = "✓" if doc.pages and doc.pages[0].status == "extracted" else "✗"
+        print(f"{mark} {os.path.basename(path)}: {n} page(s) "
+              f"({total_ok} ok / {total_fail} failed so far)")
+        for pg in doc.pages:
+            if pg.status == "extraction-failed":
+                print(f"   ⚠ page {pg.number}: {pg.reason}")
+    conn.commit()
+    print(f"located units: {total_ok} extracted · {total_fail} failed "
+          f"(never silently empty)")
+
+
 def cmd_auth_stage(args):
     """Stage-validated authority status change (RFC 0001 §2.2c)."""
     conn = store.connect(args.case_dir)
@@ -1054,6 +1125,9 @@ def main():
     p.add_argument("--author", help="lookup --record: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
     p.add_argument("--directed-by", help="lookup --record: person who directed an agent; env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_cite)
+
+    p = sub.add_parser("pages"); p.add_argument("case_dir"); p.add_argument("path", nargs="?")
+    p.set_defaults(fn=cmd_pages)
 
     p = sub.add_parser("stage"); p.add_argument("case_dir"); p.add_argument("authority_id"); p.add_argument("status")
     p.add_argument("--via", default=None); p.add_argument("--evidence", default=None)
