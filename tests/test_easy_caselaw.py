@@ -193,6 +193,35 @@ class TestLookupsInProcess(IsolatedConfig):
         self.assertIn("Case law lookups panel", str(ctx.exception))
         self.assertEqual(self.egress_lines(), [])
 
+    def test_cli_search_on_auto_without_a_key_sends_nothing(self):
+        # `matter.py search` defaults to --auth auto. With no key, auto used to fall back to
+        # anonymous: log egress, then send a request CourtListener refuses with 401.
+        from matterkit import search as S
+        from matterkit.adapters import courtlistener as cl
+        caselaw.turn_on(self.dir, "ty", "tty")
+        with mock.patch.object(cl, "get_json") as g:
+            with self.assertRaises(consent.ConsentError) as ctx:
+                S.manual_search(self.dir, "cli", "q", auth_mode="auto")
+        g.assert_not_called()
+        self.assertIn("free CourtListener key", str(ctx.exception))
+        self.assertIn("--auth anonymous", str(ctx.exception))
+        self.assertEqual(self.egress_lines(), [])
+
+    def test_cli_search_on_auto_with_lookups_off_says_turn_on(self):
+        from matterkit import search as S
+        with self.assertRaises(consent.ConsentError) as ctx:
+            S.manual_search(self.dir, "cli", "q", auth_mode="auto")
+        self.assertNotIn("free CourtListener key", str(ctx.exception))
+        self.assertEqual(self.egress_lines(), [])
+
+    def test_explicit_anonymous_is_still_sent(self):
+        from matterkit import search as S
+        from matterkit.adapters import courtlistener as cl
+        caselaw.turn_on(self.dir, "ty", "tty")
+        with mock.patch.object(cl, "get_json", return_value={"results": []}) as g:
+            S.manual_search(self.dir, "cli", "q", auth_mode="anonymous")
+        self.assertEqual(g.call_args.kwargs["auth_mode"], "anonymous")
+
     def test_saved_search_still_answers_without_a_key(self):
         from matterkit.adapters import courtlistener as cl
         caselaw.turn_on(self.dir, "ty", "tty")
