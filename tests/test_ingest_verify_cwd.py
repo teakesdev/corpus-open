@@ -136,7 +136,7 @@ class TestIngestVerifyCwd(unittest.TestCase):
 
     def test_old_cwd_relative_row_missing_until_reingest_no_silent_update(self):
         conn = store.connect(self.dir)
-        bogus = os.path.relpath(self.foo, "/tmp")
+        bogus = os.path.relpath(self.foo, self.foreign)  # a sibling temp dir: "/tmp" holds the matter on Linux
         self.assertIn("..", bogus.split(os.sep) or [bogus])
         conn.execute(
             "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
