@@ -124,6 +124,33 @@ def grant(provider, endpoint, payload_type):
             "daily_budget": 10, "created_by": "ty", "kind": "human", "authorized_callers": ["hermes"]}
 
 
+def read_manifest():
+    """The parts of plugin.yaml these tests check, read without PyYAML (CI installs nothing):
+    top-level lists, and each config_schema entry's scalar fields."""
+    out, key, entry = {}, None, None
+    with open(os.path.join(KIT, "plugin.yaml"), encoding="utf-8") as f:
+        for line in f:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip(" "))
+            text = line.strip()
+            if indent == 0:
+                key, entry = text.split(":", 1)[0], None
+                out.setdefault(key, [] if not text.split(":", 1)[1].strip() else text.split(":", 1)[1].strip())
+            elif text.startswith("- ") and indent == 2 and isinstance(out.get(key), list):
+                out[key].append(text[2:].strip())
+            elif key == "config_schema" and indent == 2 and text.endswith(":"):
+                if isinstance(out[key], list):
+                    out[key] = {}
+                entry = text[:-1]
+                out[key][entry] = {}
+            elif key == "config_schema" and indent == 4 and entry and ":" in text:
+                k, v = (x.strip() for x in text.split(":", 1))
+                if v and not v.startswith(">"):
+                    out[key][entry][k] = v.strip('"')
+    return out
+
+
 class PluginCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -162,10 +189,8 @@ class PluginCase(unittest.TestCase):
 
 class TestRegistration(PluginCase):
     def test_registers_what_the_manifest_declares(self):
-        import yaml
         self.plugin()
-        with open(os.path.join(KIT, "plugin.yaml"), encoding="utf-8") as f:
-            manifest = yaml.safe_load(f)
+        manifest = read_manifest()
         self.assertEqual(sorted(self.ctx.tools), sorted(manifest["provides_tools"]))
         self.assertEqual(sorted(self.ctx.hooks), sorted(manifest["provides_hooks"]))
         self.assertEqual(set(self.ctx.commands), {"matter"})
