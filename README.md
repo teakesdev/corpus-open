@@ -95,8 +95,9 @@ case; after that the agent uses it without asking again.
 **In the browser** (`matter.py ui`): open the case, click **Case law lookups**,
 then **Turn on**. Paste your free CourtListener key in the same place. To get
 one, sign up at CourtListener, then copy the key from
-[your API page](https://www.courtlistener.com/profile/api/). Search works without
-a key; checking citations needs one.
+[your API page](https://www.courtlistener.com/profile/api/). Both search and
+checking citations need the key: CourtListener refuses searches without one.
+Searches and citations saved in the case still answer without it.
 
 **In a terminal**, one command does the same (it asks you to type `yes`, then
 for the key, which isn't shown as you paste it):

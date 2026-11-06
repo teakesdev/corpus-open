@@ -32,11 +32,14 @@ WHAT_IS_SENT = ("Turning this on lets Matter Kit, and the AI agents you use with
                 "CourtListener (a free, nonprofit case law site) for this case. Only search words and case "
                 "citations such as \"550 U.S. 544\" are sent. Your documents, facts and drafts never are. "
                 "Every request is logged in the case's .matter/egress.jsonl.")
+SEARCH_NEEDS_KEY = ("case law search requires a free CourtListener key (CourtListener refuses searches "
+                    f"without one), saved in Matter Kit's Case law lookups panel or set as COURTLISTENER_TOKEN; "
+                    f"get one at {KEY_URL} — refusing egress")
 HOW_TO_TURN_ON = (
     "Case law lookups are off for this case. They need a person to turn them on once, in one of two ways:\n"
     "- In Matter Kit's browser window (`python3 matter.py ui <workspace>`): open the case, then "
     "\"Case law lookups\", then \"Turn on\". Paste a free CourtListener key there too (get one at "
-    f"{KEY_URL}); cite checking needs it.\n"
+    f"{KEY_URL}); search and cite checking need it.\n"
     "- Or in a terminal: `python3 matter.py courtlistener on <case folder>`.\n"
     "After that, lookups work without asking again. " + WHAT_IS_SENT)
 
@@ -109,9 +112,8 @@ def describe(matter_dir: str) -> str:
     if st["key"]:
         lines.append(f"CourtListener key: set ({'COURTLISTENER_TOKEN' if st['key'] == 'environment' else 'saved'}).")
     else:
-        lines.append(f"CourtListener key: not set. Cite checking needs one (free at {KEY_URL}); search works "
-                     "without it at a lower rate. A person saves it in the Case law lookups panel or with "
-                     "`matter.py courtlistener key`.")
+        lines.append(f"CourtListener key: not set. Search and cite checking both need one (free at {KEY_URL}). "
+                     "A person saves it in the Case law lookups panel or with `matter.py courtlistener key`.")
     return "\n".join(lines)
 
 
@@ -126,7 +128,10 @@ def search(matter_dir: str, caller_id: str, query: str, limit: int = 5, fresh: b
         if rows is not None:
             return rows
     consent.authorize(matter_dir, provider, endpoints[0], payloads[0], caller_id)  # before any network code loads
-    return S.manual_search(matter_dir, caller_id, query, limit=limit, auth_mode="auto", fresh=True)
+    if not credentials.courtlistener_token():
+        # CourtListener answers search without a key with 401 (seen 2026-11-06): don't send it.
+        raise consent.ConsentError(SEARCH_NEEDS_KEY)
+    return S.manual_search(matter_dir, caller_id, query, limit=limit, auth_mode="authenticated", fresh=True)
 
 
 def check_draft(matter_dir: str, path: str, raw: bytes, caller_id: str, max_requests: int = 1,

@@ -125,5 +125,10 @@ def get_json(url: str, auth_mode: str = "anonymous", token: str = "") -> dict:
             loc = e.headers.get("Location", "") if e.headers else ""
             raise ConsentError(
                 f"refusing HTTP {e.code} redirect to {loc} — no follow") from e
+        if int(e.code) in (401, 403):
+            raise RuntimeError(
+                f"CourtListener HTTP {e.code}: it refused the request without a valid key. Save a free "
+                "CourtListener key (https://www.courtlistener.com/profile/api/) in Matter Kit's Case law "
+                "lookups panel or set COURTLISTENER_TOKEN") from e
         raise RuntimeError(f"CourtListener HTTP {e.code}: {e.reason}") from e
     return json.loads(raw.decode("utf-8"))

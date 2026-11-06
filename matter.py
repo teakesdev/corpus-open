@@ -757,7 +757,7 @@ def _ask_and_save_key(optional=False):
         key = ""
     if not key.strip():
         if optional:
-            print("No key saved. Search works without one; cite checking needs one "
+            print("No key saved. Search and cite checking both need one "
                   "(`matter.py courtlistener key` adds it later).")
             return
         sys.exit("no key given; nothing saved")

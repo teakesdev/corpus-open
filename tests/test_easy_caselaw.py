@@ -180,12 +180,37 @@ class TestLookupsInProcess(IsolatedConfig):
         self.assertEqual(len(self.egress_lines()), 1)
         self.assertNotIn(KEY, "".join(self.egress_lines()))
 
-    def test_search_without_a_key_is_anonymous(self):
+    def test_search_without_a_key_sends_nothing(self):
+        # CourtListener's search answers 401 to requests without a key (seen 2026-11-06), so
+        # asking without one would only spend a request and log egress for nothing.
         from matterkit.adapters import courtlistener as cl
         caselaw.turn_on(self.dir, "ty", "tty")
-        with mock.patch.object(cl, "get_json", return_value={"results": []}) as g:
+        with mock.patch.object(cl, "get_json") as g:
+            with self.assertRaises(consent.ConsentError) as ctx:
+                caselaw.search(self.dir, "agent", "q")
+        g.assert_not_called()
+        self.assertIn("free CourtListener key", str(ctx.exception))
+        self.assertIn("Case law lookups panel", str(ctx.exception))
+        self.assertEqual(self.egress_lines(), [])
+
+    def test_saved_search_still_answers_without_a_key(self):
+        from matterkit.adapters import courtlistener as cl
+        caselaw.turn_on(self.dir, "ty", "tty")
+        credentials.save_courtlistener_token(KEY)
+        with mock.patch.object(cl, "get_json", return_value={"results": [
+                {"caseName": "A v. B", "citation": ["1 U.S. 1"], "absolute_url": "/o/1/", "cluster_id": 1}]}):
             caselaw.search(self.dir, "agent", "q")
-        self.assertEqual(g.call_args.kwargs["auth_mode"], "anonymous")
+        credentials.forget_courtlistener_token()
+        with mock.patch.object(cl, "get_json") as g:
+            rows = caselaw.search(self.dir, "agent", "q")
+        g.assert_not_called()
+        self.assertEqual(rows[0].citation, "1 U.S. 1")
+
+    def test_status_says_search_needs_the_key(self):
+        caselaw.turn_on(self.dir, "ty", "tty")
+        text = caselaw.describe(self.dir)
+        self.assertIn("Search and cite checking both need one", text)
+        self.assertNotIn("works without", text)
 
     def test_cite_lookup_uses_the_saved_key(self):
         from matterkit.adapters import courtlistener_citations as cc
@@ -264,6 +289,14 @@ class TestMcp(IsolatedConfig):
         self.assertIn("key: not set", self.text(out, 1))
         self.assertIn("Nothing was sent", self.text(out, 2))
         self.assertIn("CourtListener key", self.text(out, 2))
+        self.assertEqual(self.egress_lines(), [])
+
+    def test_on_without_key_search_asks_for_the_key(self):
+        caselaw.turn_on(self.dir, "ty", "tty")
+        out = self.mcp(("matter.search", {"query": "docket control"}))
+        self.assertFalse(out[1]["result"].get("isError"), out[1])
+        self.assertIn("Nothing was sent", self.text(out, 1))
+        self.assertIn("free CourtListener key", self.text(out, 1))
         self.assertEqual(self.egress_lines(), [])
 
     def test_cite_lookup_refuses_a_path_outside_the_matter(self):

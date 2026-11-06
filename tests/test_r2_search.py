@@ -193,6 +193,32 @@ class TestR2Transport(unittest.TestCase):
         self.assertTrue(seen)
         self.assertIsNone(seen[0].get_header("Authorization"))
 
+    def test_401_says_a_key_is_needed(self):
+        # CourtListener answers search without a key with 401 (seen 2026-11-06).
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from matterkit.adapters import courtlistener as cl
+
+        class Refuse(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        srv = HTTPServer(("127.0.0.1", 0), Refuse)
+        t = threading.Thread(target=srv.handle_request, daemon=True)
+        t.start()
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                cl.get_json(f"http://127.0.0.1:{srv.server_port}/search", auth_mode="anonymous")
+        finally:
+            t.join(timeout=2)
+            srv.server_close()
+        self.assertIn("401", str(ctx.exception))
+        self.assertIn("free CourtListener key", str(ctx.exception))
+
     def test_get_json_authenticated_without_token_no_request(self):
         from matterkit.adapters import courtlistener as cl
         with mock.patch.object(cl, "opener", side_effect=AssertionError("egress")):

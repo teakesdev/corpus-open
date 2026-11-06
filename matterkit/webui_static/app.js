@@ -747,7 +747,7 @@ async function viewCaselaw(panel, c, alive) {
       } });
     const keyLine = cl.key === "environment" ? "A key is set in this computer's COURTLISTENER_TOKEN setting, so lookups use that."
       : cl.key ? "Your key is saved on this computer (only your user account can read it, and it is never put in a case folder)."
-      : "No key yet. Search works without one. Citation checks need one: it's free. Sign up or sign in at CourtListener, open the API page, copy the key and paste it here.";
+      : "No key yet. Search and citation checks both need one: it's free. Sign up or sign in at CourtListener, open the API page, copy the key and paste it here.";
     clear(box).append(
       el("section", {}, el("h2", { text: cl.on ? "Case law lookups are on" : "Case law lookups are off" }),
         el("p", { class: "lede", text: cl.what_is_sent }),
