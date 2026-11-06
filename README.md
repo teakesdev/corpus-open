@@ -183,6 +183,14 @@ the MCP server above can't:
   `deadline_window_days` go to the agent, so it raises them before anything else.
 - **`/matter`** shows status and deadlines; `/matter packet 30s`, `/matter check Drafts/x.md` and
   `/matter grant` (how to allow cite checks) do what they say.
+- **Case pane (Hermes Desktop).** A pane beside the chat (`desktop/plugin.js`) shows the case at a
+  glance: open deadlines with passed ones first, a tamper badge that re-hashes every registered
+  file against the hash taken when it was added (Intact / Tampered / Files missing), and how many
+  facts have no source. A status-bar chip shows passed deadlines and a failed check from anywhere.
+  It updates when the agent's `matter_*` tools run. It reads the case through this plugin's own
+  read-only backend (`dashboard/plugin_api.py`, mounted at `/api/plugins/corpus-open/`), which
+  Hermes loads only for plugins in `plugins.enabled` (`hermes plugins enable corpus-open` adds
+  it). It never writes to the case and makes no network calls.
 - **Twelve tools** in the `corpus_open` toolset: `matter_status`, `matter_fact_add`,
   `matter_fact_list`, `matter_deadline_list`, `matter_trigger_list`, `matter_trigger_fire`,
   `matter_packet_render`, `matter_brief_check`, `matter_rules_show`, `matter_cite_check`,
@@ -196,6 +204,14 @@ hermes plugins enable corpus-open
 python3 matter.py init ~/cases/my-case            # then set matter_dir to it in the plugin's settings
 python3 matter.py consent activate ~/cases/my-case --scope cite-lookup --caller hermes
 python3 matter.py consent activate ~/cases/my-case --scope corpus-search --caller hermes
+```
+
+To try the Case pane on synthetic data, make a demo case, set `matter_dir` to it, and edit one of
+its files on cue to watch the badge turn:
+
+```sh
+python3 scripts/panel_demo.py setup ~/cases/panel-demo
+python3 scripts/panel_demo.py tamper ~/cases/panel-demo
 ```
 
 Settings (Desktop: Settings > Plugins > corpus-open): `matter_dir`, `citation_guard`

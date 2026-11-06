@@ -1,5 +1,5 @@
 name: corpus-open
-version: "0.4.0"
+version: "0.5.0"
 manifest_version: 2
 api_version: 1
 description: >-
@@ -8,7 +8,9 @@ description: >-
   (FOUND, NOT FOUND, NAME DIFFERS, IN CORPUS), so a made-up cite is flagged before it reaches
   a filing. Twelve tools read and keep a local case folder (labeled facts with sources,
   deadlines and triggers, brief check, counsel packet, court rules, hash verification), a
-  deadline brief opens each session, and /matter shows status, deadlines and the packet.
+  deadline brief opens each session, /matter shows status, deadlines and the packet, and in
+  Hermes Desktop a Case pane shows deadlines (passed first), a tamper badge for the case's files
+  and how many facts have no source.
   Network calls are only cite checks, carry only the bare cites, and run only after a person
   grants them in the case folder; nothing is filed, sent or shared.
 author: Corpus (teakesdev)
