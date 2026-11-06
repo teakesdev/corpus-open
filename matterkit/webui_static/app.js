@@ -12,7 +12,7 @@ const LABELS = [
 const LABEL_NAME = Object.fromEntries(LABELS.map(([k, name]) => [k, name]));
 const TABS = [
   ["overview", "Overview"], ["documents", "Documents"], ["facts", "Facts"], ["amend", "Next amendment"],
-  ["deadlines", "Deadlines"], ["brief", "Brief check"], ["packet", "Packet"],
+  ["deadlines", "Deadlines"], ["brief", "Brief check"], ["caselaw", "Case law lookups"], ["packet", "Packet"],
 ];
 const LAYER_NAMES = { "30s": "30-second view", "3min": "3-minute view", "15min": "15-minute view" };
 
@@ -266,7 +266,7 @@ async function render() {
   main.append(banner, panel);
   pastDueBanner(banner, c.id);
   const views = { overview: viewOverview, documents: viewDocuments, facts: viewFacts, amend: viewAmend,
-                  deadlines: viewDeadlines, brief: viewBrief, packet: viewPacket };
+                  deadlines: viewDeadlines, brief: viewBrief, caselaw: viewCaselaw, packet: viewPacket };
   try {
     await views[state.tab](panel, c, alive);
   } catch (ex) {
@@ -702,6 +702,68 @@ async function viewBrief(panel, c) {
     form), el("section", {}, out));
 }
 
+// --- case law lookups: the person's one switch, their CourtListener key, and today's use ---
+const SCOPE_NAMES = { "search": "Case law search", "cite-lookup": "Citation checks" };
+
+async function viewCaselaw(panel, c, alive) {
+  const box = el("div");
+  panel.append(box);
+  const draw = (cl) => {
+    if (!alive()) return;
+    const busy = (btn) => { btn.disabled = true; };
+    const sw = el("button", { class: "btn", type: "button", text: cl.on ? "Turn off" : "Turn on",
+      onclick: async () => {
+        busy(sw);
+        try {
+          draw((await api("POST", `/cases/${c.id}/caselaw`, { on: !cl.on })).caselaw);
+          toast(cl.on ? "Case law lookups are off for this case." : "Case law lookups are on for this case.");
+        } catch (ex) { toast(ex.message); sw.disabled = false; }
+      } });
+    const usage = el("ul", {}, Object.entries(cl.scopes).map(([k, s]) => el("li", {
+      text: `${SCOPE_NAMES[k] || k}: ${s.used_today} used today` + (s.daily_limit != null ? ` of ${s.daily_limit} a day` : "") })));
+    const keyInput = el("input", { id: "cl-key", type: "password", autocomplete: "off", spellcheck: "false",
+      placeholder: "Paste your CourtListener key" });
+    const keyForm = el("form", { class: "form-panel",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const btn = keyForm.querySelector("button[type=submit]");
+        busy(btn);
+        try {
+          await api("POST", "/courtlistener-key", { key: keyInput.value });
+          keyInput.value = "";
+          toast("Key saved on this computer.");
+          draw((await api("GET", `/cases/${c.id}/caselaw`)).caselaw);
+        } catch (ex) { toast(ex.message); btn.disabled = false; }
+      } },
+      el("div", { class: "field" }, el("label", { for: "cl-key", text: cl.key ? "Replace your CourtListener key" : "Your CourtListener key" }), keyInput),
+      el("button", { class: "btn", type: "submit", text: "Save key" }));
+    const forget = cl.key === "settings" && el("button", { class: "btn quiet", type: "button", text: "Remove saved key",
+      onclick: async () => {
+        try {
+          await api("POST", "/courtlistener-key", { forget: true });
+          toast("Key removed.");
+          draw((await api("GET", `/cases/${c.id}/caselaw`)).caselaw);
+        } catch (ex) { toast(ex.message); }
+      } });
+    const keyLine = cl.key === "environment" ? "A key is set in this computer's COURTLISTENER_TOKEN setting, so lookups use that."
+      : cl.key ? "Your key is saved on this computer (only your user account can read it, and it is never put in a case folder)."
+      : "No key yet. Search and citation checks both need one: it's free. Sign up or sign in at CourtListener, open the API page, copy the key and paste it here.";
+    clear(box).append(
+      el("section", {}, el("h2", { text: cl.on ? "Case law lookups are on" : "Case law lookups are off" }),
+        el("p", { class: "lede", text: cl.what_is_sent }),
+        el("p", { text: cl.on ? "Your AI agents can search case law and check the citations in your drafts for this case without asking again. Turn it off any time."
+          : "Turn this on once and your AI agents can search case law and check the citations in your drafts for this case." }),
+        sw, cl.on ? usage : null,
+        el("p", { text: `Saved in this case: ${cl.saved.searches} search${cl.saved.searches === 1 ? "" : "es"} and `
+          + `${cl.saved.cites} citation answer${cl.saved.cites === 1 ? "" : "s"}. Asking these again sends nothing, even with lookups off.` })),
+      el("section", {}, el("h2", { text: "CourtListener key" }),
+        el("p", { text: keyLine }),
+        el("p", {}, el("a", { href: cl.key_url, target: "_blank", rel: "noopener noreferrer", text: "Get a free key at CourtListener" })),
+        keyForm, forget || null));
+  };
+  draw((await api("GET", `/cases/${c.id}/caselaw`)).caselaw);
+}
+
 // --- counsel packet ---
 async function viewPacket(panel, c) {
   const out = el("div");
@@ -756,7 +818,7 @@ function noToken(msg) {
   document.body.replaceChildren(el("div", { class: "center" },
     el("h1", { text: "Open Matter Kit from its link" }),
     el("p", { text: msg || "For your privacy, this page only works from the link Matter Kit printed in the terminal window when it started. Copy that whole link into your browser." }),
-    el("p", { class: "muted", text: "Not legal advice. Matter Kit organizes your case. It doesn't file or send anything." })));
+    el("p", { class: "muted", text: "Not legal advice. Matter Kit organizes your case. It doesn't file anything, and sends nothing unless you turn on case law lookups." })));
 }
 
 async function boot() {

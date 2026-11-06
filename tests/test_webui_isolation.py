@@ -21,9 +21,11 @@ from webui_helpers import KIT, build_workspace, cases, webui  # noqa: E402
 HARNESS = os.path.join(KIT, "tests", "loopback_sitecustomize")
 
 
-def harness_env():
-    env = {k: v for k, v in os.environ.items() if k not in ("MATTER_AUTHOR", "MATTER_DIRECTED_BY")}
+def harness_env(config=None):
+    env = {k: v for k, v in os.environ.items() if k not in ("MATTER_AUTHOR", "MATTER_DIRECTED_BY", "COURTLISTENER_TOKEN")}
     env["PYTHONPATH"] = HARNESS
+    if config:
+        env["MATTER_KIT_CONFIG"] = config  # the key route writes here, never to the person's own settings
     return env
 
 
@@ -71,7 +73,7 @@ class TestUiUnderHarness(unittest.TestCase):
         self.alpha, _ = build_workspace(self.ws)
         self.proc = subprocess.Popen(
             [sys.executable, os.path.join(KIT, "matter.py"), "ui", self.ws, "--operator", "Pat Example", "--no-open"],
-            env=harness_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            env=harness_env(os.path.join(self.tmp, "config")), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         line = self.proc.stdout.readline()
         m = re.search(r"http://127\.0\.0\.1:(\d+)/#t=([A-Za-z0-9_-]+)", line)
         if not m:
@@ -127,7 +129,9 @@ class TestUiUnderHarness(unittest.TestCase):
                  ("GET", c + "/packet?layer=15min", None, None),
                  ("GET", c + "/amendments?status=all", None, None),
                  ("POST", c + "/amendments", {"text": "Another synthetic change", "paragraphs": "para 1"}, None),
-                 ("POST", c + f"/amendments/{item}/status", {"status": "approved", "note": "ok"}, None)]
+                 ("POST", c + f"/amendments/{item}/status", {"status": "approved", "note": "ok"}, None),
+                 ("GET", c + "/caselaw", None, None), ("POST", c + "/caselaw", {"on": True}, None),
+                 ("POST", "/courtlistener-key", {"key": "0123456789abcdef0123456789abcdef01234567"}, None)]
         # every route in the table is exercised here
         exercised = {(m, re.sub(r"\?.*$", "", p).replace(c, webui.CASE).replace(item, webui.ITEM))
                      for m, p, _, _ in calls}

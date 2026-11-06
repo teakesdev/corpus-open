@@ -51,7 +51,7 @@ class TestShippedFiles(unittest.TestCase):
 
     def test_page_says_it_is_not_legal_advice(self):
         self.assertIn("Not legal advice", shipped()["index.html"])
-        self.assertIn("doesn't file or send anything", shipped()["index.html"])
+        self.assertIn("sends nothing unless you turn on case law lookups", shipped()["index.html"])
 
     def test_the_five_labels_match_the_store(self):
         from matterkit import store

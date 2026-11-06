@@ -52,11 +52,13 @@ Usage:
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
   matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
-  matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N]
+  matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N] [--fresh]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
-                        # sends the draft's case cites, nothing else, to CourtListener; needs a
-                        # human grant (consent activate --scope cite-lookup) and COURTLISTENER_TOKEN
-  matter.py consent propose|activate <dir> [--scope search|cite-lookup] [--caller ID]...
+                        # sends the draft's case cites, nothing else, to CourtListener; needs case
+                        # law lookups turned on and a CourtListener key
+  matter.py courtlistener on|off|status <dir>   # one switch for search + cite lookup (asks you to type yes)
+  matter.py courtlistener key [--forget]        # save your free CourtListener key (outside every case folder)
+  matter.py consent propose|activate <dir> [--scope search|cite-lookup] [--caller ID]...   # narrower grants
   matter.py docket suggest <dir>
   matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
                         [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]
@@ -429,12 +431,29 @@ def cmd_packet(args):
         print(text)
 
 
+def draft_path(case_dir, path):
+    """A relative draft path names a file in the case folder, as the README shows. One the case
+    folder lacks but the current directory has is read from there; an absolute path is used as is."""
+    if os.path.isabs(path):
+        return path
+    in_case = os.path.join(case_dir, path)
+    return path if not os.path.exists(in_case) and os.path.exists(path) else in_case
+
+
+def existing_draft(case_dir, path):
+    """draft_path, refusing with a message (not a traceback) when there is no such file."""
+    resolved = draft_path(case_dir, path)
+    if not os.path.isfile(resolved):
+        sys.exit(f"no such draft: {path} (looked in {case_dir} and the current directory)")
+    return resolved
+
+
 def cmd_brief(args):
     """brief check: tie every cite, quotation and factual sentence in a draft to the store.
     Read-only. Exit 1 = blocking findings, 2 = items a human must check, 0 = all tied."""
     from matterkit import briefcheck
     try:
-        report = briefcheck.check(args.case_dir, args.draft, use_pdftotext=not args.no_pdftotext,
+        report = briefcheck.check(args.case_dir, draft_path(args.case_dir, args.draft), use_pdftotext=not args.no_pdftotext,
                                   docket_path=args.docket, mode=args.mode)
     except (ValueError, FileNotFoundError) as e:
         sys.exit(f"brief check refused: {e}")
@@ -566,12 +585,13 @@ def cmd_cite(args):
     lookup_only = [flag for flag, value in (
         ("--dry-run", args.dry_run), ("--record", args.record), ("--out", args.out),
         ("--max-requests", args.max_requests), ("--caller", args.caller), ("--author", args.author),
-        ("--directed-by", args.directed_by)) if value is not None and value is not False]  # 0 is given too
+        ("--directed-by", args.directed_by), ("--fresh", args.fresh)) if value is not None and value is not False]  # 0 is given too
     if lookup_only:
         sys.exit(f"{', '.join(lookup_only)} applies to cite lookup, not cite {args.sub}")
     conn = store.connect(args.case_dir)
     from matterkit import citations
     if args.sub == "extract":
+        args.path = existing_draft(args.case_dir, args.path)
         raw = open(args.path, "rb").read()
         text = raw.decode("utf-8", errors="replace")
         import hashlib
@@ -601,13 +621,12 @@ def cmd_cite_lookup(args):
     looked up, or a found cite --record could not write (several store rows answer to it, or the write
     failed), 0 = every case cite found (or the draft has
     none). --dry-run prints the exact payload and sends nothing."""
-    import hashlib
     from matterkit import citelookup
-    from matterkit.citations import now_iso
     if not args.path:
         sys.exit("usage: matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md]")
     if args.path.lower().endswith((".docx", ".pdf", ".doc")):
         sys.exit("cite lookup reads Markdown or plain text; use the .md copy of the draft")
+    args.path = existing_draft(args.case_dir, args.path)
     max_requests = 3 if args.max_requests is None else args.max_requests
     try:
         by = store.attribution(args.author or os.environ.get("MATTER_AUTHOR"),
@@ -628,21 +647,13 @@ def cmd_cite_lookup(args):
         return
     if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
         sys.exit(f"refused: {args.case_dir} is not a matter (no .matter/)")
-    answers, stopped, sent = [], None, 0
-    if payloads:
-        from matterkit.adapters.courtlistener_citations import CitationLookupAdapter
-        from matterkit.consent import ConsentError
-        try:
-            adapter = CitationLookupAdapter(args.case_dir, args.caller or os.environ.get("USER", "human"))
-            answers, stopped = adapter.lookup(payloads[:max_requests])
-        except (ConsentError, ValueError) as e:
-            sys.exit(f"refused: {e}")
-        sent = adapter.sent
-        if stopped is None and len(payloads) > max_requests:
-            stopped = f"over --max-requests {max_requests}; run again in a minute for the rest"
-    report = citelookup.Report(args.path, hashlib.sha256(raw).hexdigest(),
-                               citelookup.interpret(cites, payloads, answers, stopped), payloads, sent, now_iso(),
-                               answered=len(answers))
+    from matterkit import caselaw
+    from matterkit.consent import ConsentError
+    try:
+        report = caselaw.check_draft(args.case_dir, args.path, raw, args.caller or os.environ.get("USER", "human"),
+                                     max_requests=max_requests, fresh=args.fresh, limit_name="--max-requests")
+    except (ConsentError, ValueError) as e:
+        sys.exit(f"refused: {e}")
     code = report.exit_code
     if args.record:
         report.recorded = citelookup.record(store.connect(args.case_dir), report.results, by)
@@ -650,8 +661,8 @@ def cmd_cite_lookup(args):
         if unwritten:
             print(f"{unwritten} found cite(s) could not be recorded; the report says why", file=sys.stderr)
             code = code or 2  # a cite to check by hand (1) still comes first
-    if stopped:
-        print(f"lookup stopped early: {stopped}", file=sys.stderr)
+    if report.stopped:
+        print(f"lookup stopped early: {report.stopped}", file=sys.stderr)
     _write_or_print(report.render(), args.out, report.summary())
     sys.exit(code)
 
@@ -757,13 +768,10 @@ def cmd_consent(args):
     """consent propose|activate. --scope search: the R2 search adapter (query_text to the host);
     --scope cite-lookup: bare case cites to the citation-lookup URL, and nothing else;
     --scope corpus-search: query_text (a statute cite, for the Hermes citation guard) to corpuslaw.us."""
-    from matterkit import citelookup, consent
-    from matterkit.adapters.courtlistener import ENDPOINT_HOST
-    provider, endpoints, payloads, budget = {
-        "search": ("courtlistener-free", [ENDPOINT_HOST], ["query_text"], 20),
-        "cite-lookup": (citelookup.PROVIDER, [citelookup.ENDPOINT], [citelookup.PAYLOAD_TYPE], 10),
-        "corpus-search": ("corpus-search", ["corpuslaw.us"], ["query_text"], 50),
-    }[args.scope]
+    from matterkit import caselaw, consent
+    scopes = dict(caselaw.SCOPES)
+    scopes["corpus-search"] = ("corpus-search", ["corpuslaw.us"], ["query_text"], 50)
+    provider, endpoints, payloads, budget = scopes[args.scope]
     if args.sub == "propose":
         g = consent.stage_proposal(
             args.case_dir, provider, endpoints, payloads, args.as_user, daily_budget=budget)
@@ -780,17 +788,74 @@ def cmd_consent(args):
               f"callers={g['authorized_callers']}")
 
 
+def cmd_courtlistener(args):
+    """courtlistener on|off|status|key: the one switch for case law lookups (search and cite lookup),
+    the same switch as the browser UI's Case law lookups panel."""
+    import getpass
+    from matterkit import caselaw, consent, credentials
+    if args.sub == "key":
+        if args.forget:
+            print("CourtListener key removed." if credentials.forget_courtlistener_token() else "No saved key.")
+            return
+        _ask_and_save_key()
+        return
+    if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
+        sys.exit(f"refused: {args.case_dir} is not a case folder (no .matter/)")
+    if args.sub == "status":
+        print(caselaw.describe(args.case_dir))
+        return
+    if args.sub == "off":
+        n = caselaw.turn_off(args.case_dir)
+        print("Case law lookups are off for this case." if n else "Case law lookups were already off.")
+        return
+    print(caselaw.WHAT_IS_SENT)
+    try:
+        consent.confirm_on_tty(f"Turn on case law lookups for {os.path.abspath(args.case_dir)}?", word="yes")
+    except consent.ConsentError as e:
+        sys.exit(f"refused: {e}")
+    caselaw.turn_on(args.case_dir, args.issuer or getpass.getuser(), "tty")
+    print("Case law lookups are on. Your agents can now search and check citations for this case.")
+    if not credentials.courtlistener_token():
+        _ask_and_save_key(optional=True)
+
+
+def _ask_and_save_key(optional=False):
+    """Read the key from the terminal without echoing it (it never goes in shell history)."""
+    import getpass
+    from matterkit import caselaw, credentials
+    print(f"Paste your free CourtListener key (from {caselaw.KEY_URL})"
+          + (", or press Enter to skip:" if optional else ":"))
+    try:
+        key = getpass.getpass("key: ")
+    except (EOFError, KeyboardInterrupt):
+        key = ""
+    if not key.strip():
+        if optional:
+            print("No key saved. Search and cite checking both need one "
+                  "(`matter.py courtlistener key` adds it later).")
+            return
+        sys.exit("no key given; nothing saved")
+    try:
+        where = credentials.save_courtlistener_token(key)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(f"Key saved in {where} (only you can read it; never in a case folder).")
+
+
 def cmd_search(args):
     from matterkit import search as S
     from matterkit.consent import ConsentError
     try:
         rows = S.manual_search(
             args.case_dir, args.caller, args.query, limit=args.limit,
-            auth_mode=args.auth)
+            auth_mode=args.auth, fresh=args.fresh)
     except (LookupError, ConsentError, RuntimeError, ValueError) as e:
         sys.exit(f"refused: {e}")
+    saved = rows and rows[0].provenance.get("saved")
     print(f"{len(rows)} CourtListener hit(s) for {args.query!r} "
-          "(lookup only — not source-checked, not good law)")
+          "(lookup only — not source-checked, not good law)"
+          + (f"; saved in this case {str(rows[0].provenance.get('retrieved_at'))[:10]}, nothing sent"
+             " (--fresh asks again)" if saved else ""))
     for r in rows:
         print(f"  {r.citation}  {r.name}")
         print(f"    {r.provenance.get('url')}")
@@ -1123,6 +1188,8 @@ def main():
                    help="lookup: move found cites' authorities rows from unverified to resolved")
     # Lookup-only flags default to None, so cmd_cite can refuse them on extract and list.
     p.add_argument("--out"); p.add_argument("--max-requests", type=int, help="lookup: default 3")
+    p.add_argument("--fresh", action="store_true",
+                   help="lookup: ask CourtListener again instead of using this case's saved answers")
     p.add_argument("--caller", help="lookup: grant caller; default $USER")
     p.add_argument("--author", help="lookup --record: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
     p.add_argument("--directed-by", help="lookup --record: person who directed an agent; env MATTER_DIRECTED_BY")
@@ -1147,12 +1214,22 @@ def main():
     p.add_argument("--caller", action="append", default=[])
     p.set_defaults(fn=cmd_consent)
 
+    p = sub.add_parser("courtlistener", help="Turn case law lookups on or off for a case, or save your key")
+    p.add_argument("sub", choices=["on", "off", "status", "key"])
+    p.add_argument("case_dir", nargs="?", default=".")
+    p.add_argument("--issuer", help="on: who is turning it on; default your login name")
+    p.add_argument("--forget", action="store_true", help="key: remove the saved key")
+    p.set_defaults(fn=cmd_courtlistener)
+
     p = sub.add_parser("search"); p.add_argument("case_dir")
     p.add_argument("query")
     p.add_argument("--caller", default=os.environ.get("USER", "human"))
     p.add_argument("--limit", type=int, default=5)
-    p.add_argument("--auth", choices=["anonymous", "authenticated"], default="anonymous")
+    p.add_argument("--auth", choices=["auto", "anonymous", "authenticated"], default="auto",
+                   help="auto: authenticated when a CourtListener key is saved or set")
     p.add_argument("--record-resolved", action="store_true")
+    p.add_argument("--fresh", action="store_true",
+                   help="ask CourtListener again instead of using this case's saved answer")
     p.set_defaults(fn=cmd_search)
 
     p = sub.add_parser("outreach")

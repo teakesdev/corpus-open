@@ -65,6 +65,8 @@ a case, and subcases show under their parent. In the browser you can:
   mark it "in the draft", drop it or reopen it, with a note if you like. The
   overview says how many are still queued;
 - run brief check on a `.md` or `.txt` draft;
+- turn case law lookups on or off for a case, and save your free CourtListener
+  key (the "Case law lookups" tab; see below);
 - read, copy or save the counsel packet.
 
 Everything else, including adding or changing deadlines, stays in the CLI for
@@ -82,6 +84,48 @@ route and also decides which cases a person sees at all; and the allowed
 addresses are settings. That server still needs sign-in, TLS and real per-case
 access rules, and none of that is built yet: see
 [the design](docs/superpowers/specs/2026-10-31-local-frontend-design.md).
+
+## Case law lookups (CourtListener)
+
+Your AI agent can search case law and check that the cases your draft cites
+are real, using [CourtListener](https://www.courtlistener.com/), a free case
+law site run by the nonprofit Free Law Project. A person turns this on once per
+case; after that the agent uses it without asking again.
+
+**In the browser** (`matter.py ui`): open the case, click **Case law lookups**,
+then **Turn on**. Paste your free CourtListener key in the same place. To get
+one, sign up at CourtListener, then copy the key from
+[your API page](https://www.courtlistener.com/profile/api/). Both search and
+checking citations need the key: CourtListener refuses searches without one.
+Searches and citations saved in the case still answer without it.
+
+**In a terminal**, one command does the same (it asks you to type `yes`, then
+for the key, which isn't shown as you paste it):
+
+```bash
+python3 matter.py courtlistener on ~/cases/my-case
+python3 matter.py courtlistener status ~/cases/my-case   # on or off, today's use, whether a key is saved
+python3 matter.py courtlistener off ~/cases/my-case
+python3 matter.py courtlistener key [--forget]           # save, replace or remove the key
+```
+
+- **What is sent:** search words, and case citations such as `550 U.S. 544`.
+  Your documents, facts and drafts are never sent. Every request is logged
+  (hash only) in the case's `.matter/egress.jsonl`.
+- **Who may use it:** any AI agent or command working on that case, once it is
+  on. Only a person can turn it on: the browser button, or typing `yes` at the
+  terminal. No MCP tool can turn it on.
+- **Limits:** 500 searches and 100 citation checks a day per case. CourtListener's
+  free account allows about 125 citation lookups a day and throttles past its own
+  limits; a throttled lookup stops and says so.
+- **Saved in the case:** every answer CourtListener gives is kept in the case's
+  `.matter/caselaw/`. Asking the same search again, or checking a cite that was
+  checked before, reads the saved answer: nothing is sent, nothing counts against
+  the daily limit, and it works even with lookups off. Only new cites in a draft
+  are sent. Add `--fresh` (or `fresh: true` over MCP) to ask CourtListener again.
+- **The key** is saved in your settings folder (`~/.config/matter-kit/`, readable
+  only by your user account), never in a case folder, so sharing a case with a
+  lawyer doesn't share your key. `COURTLISTENER_TOKEN`, if set, is used instead.
 
 ## Capturing a web page
 
@@ -160,7 +204,12 @@ Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.deadline_list` · `matter.trigger_list` · `matter.trigger_fire` ·
 `matter.packet_render` · `matter.cite_extract` ·
 `matter.ingest_path` · `matter.verify` · `matter.hold_render` ·
-`matter.correspondence_list`.
+`matter.correspondence_list` · `matter.caselaw_status` · `matter.search` ·
+`matter.cite_lookup`.
+`matter.search` and `matter.cite_lookup` reach CourtListener once a person has
+turned case law lookups on for the case (see above). When they are off, the
+tools send nothing and reply with the steps to turn them on, for the agent to
+pass on. `matter.caselaw_status` says whether they are on.
 `matter.ingest_path` refuses paths that escape `MATTER_DIR`. `matter.verify`
 prints absolute `root=` and ok/changed/missing; it does not send network.
 `matter.hold_render` takes a `notice_id` and returns a filtered custodian packet.
@@ -275,16 +324,18 @@ Stages: `unverified` → `resolved` → (`research-pending`) → `source-checked
 source, or evidence-free "checked," is refused. These tokens mean *a defined
 source was checked*, never *this is correct law*.
 
-**What reaches the network.** Three commands, and only when you run them:
-`capture` sends one GET to the URL you name; `search` sends your query to
-CourtListener's search API; `cite lookup` sends a draft's case cites, and
-nothing else, to CourtListener's citation-lookup API. `search` and
-`cite lookup` each need their own grant in `.matter/consent.json`, issued by a
-person at the terminal (`consent activate`, `kind: "human"`) and naming its
-authorized callers; agent-authored grants are inert proposals. Each request is
-logged hash-only to `.matter/egress.jsonl`. All outbound code lives in
-`matterkit/adapters/`; everything else, including `brief check`, `verify`, the
-browser UI and the MCP server, makes no outbound calls.
+**What reaches the network.** `capture` sends one GET to the URL you name;
+search sends your query to CourtListener's search API; cite lookup sends a
+draft's case cites, and nothing else, to CourtListener's citation-lookup API.
+Search and cite lookup run from the CLI and from the MCP server's
+`matter.search` and `matter.cite_lookup`, and each needs a grant in
+`.matter/consent.json` that a person turned on (`kind: "human"`): the browser
+UI's Case law lookups switch or `courtlistener on` grant every caller on the
+case; `consent activate` writes a narrower grant naming its callers.
+Agent-authored grants are inert proposals. Each request is logged hash-only to
+`.matter/egress.jsonl`. All outbound code lives in `matterkit/adapters/`;
+everything else, including `brief check`, `verify` and the browser UI, makes no
+outbound calls.
 See `rfcs/0001-provider-neutral-search-adapters.md`.
 
 ## Checking a brief before it is filed
@@ -349,8 +400,7 @@ cannot tell that "Smith v. Jones, 123 F.4th 456" names no real case.
 
 ```bash
 python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --dry-run  # shows exactly what would be sent
-python3 matter.py consent activate ~/cases/my-case --scope cite-lookup                 # a person types ACTIVATE at the terminal
-export COURTLISTENER_TOKEN=…                                                          # your CourtListener API token
+python3 matter.py courtlistener on ~/cases/my-case                                    # once per case; or the browser's Case law lookups tab
 python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --out RESPONSE_v1_LOOKUP.md
 python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --record   # found cites -> resolved
 ```
@@ -361,7 +411,7 @@ python3 matter.py cite lookup ~/cases/my-case Filings/drafts/RESPONSE_v1.md --re
   a check refuses the request if any line is not a bare cite. Short forms,
   `Id.`, statutes and rules are not sent.
 - **Limits:** up to 60 cites a request, at least 61 seconds apart, at most
-  `--max-requests` (default 3) a run and the grant's daily budget (default 10).
+  `--max-requests` (default 3) a run and the grant's daily budget (100).
   A throttled run stops and does not retry.
 - **Results:** FOUND (with the opinion's name, date and CourtListener link),
   NAME DIFFERS (an opinion exists at that cite but its name shares no

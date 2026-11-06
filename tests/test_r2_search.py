@@ -112,7 +112,8 @@ class TestR2Search(unittest.TestCase):
         self.assertNotIn("347 U.S. 483", log)  # hash-only
 
     def test_authenticated_without_token_fails_before_egress(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
+        # no saved key either: an empty settings folder, never the person's own
+        with mock.patch.dict(os.environ, {"MATTER_KIT_CONFIG": os.path.join(self.dir, "no-config")}, clear=False):
             os.environ.pop("COURTLISTENER_TOKEN", None)
             called = []
             with mock.patch("matterkit.adapters.courtlistener.get_json",
@@ -191,6 +192,32 @@ class TestR2Transport(unittest.TestCase):
                 cl.get_json("http://127.0.0.1/x", auth_mode="anonymous", token="")
         self.assertTrue(seen)
         self.assertIsNone(seen[0].get_header("Authorization"))
+
+    def test_401_says_a_key_is_needed(self):
+        # CourtListener answers search without a key with 401 (seen 2026-11-06).
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from matterkit.adapters import courtlistener as cl
+
+        class Refuse(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        srv = HTTPServer(("127.0.0.1", 0), Refuse)
+        t = threading.Thread(target=srv.handle_request, daemon=True)
+        t.start()
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                cl.get_json(f"http://127.0.0.1:{srv.server_port}/search", auth_mode="anonymous")
+        finally:
+            t.join(timeout=2)
+            srv.server_close()
+        self.assertIn("401", str(ctx.exception))
+        self.assertIn("free CourtListener key", str(ctx.exception))
 
     def test_get_json_authenticated_without_token_no_request(self):
         from matterkit.adapters import courtlistener as cl

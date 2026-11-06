@@ -11,7 +11,9 @@ and a TLS proxy:
 Sign-in, TLS, real per-case grants and hosting are that phase's work; none of it is here.
 
 Every API call needs the per-launch token in the X-Matter-Token header. Pages set text with
-textContent under a strict CSP. Nothing here sends, files or contacts anyone.
+textContent under a strict CSP. Nothing here sends, files or contacts anyone. The Case law lookups
+panel is where a person turns CourtListener lookups on for a case and saves their key; the
+lookups themselves run from the CLI and the MCP server, never from this server.
 """
 import hashlib
 import hmac
@@ -30,7 +32,7 @@ from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import parse_qs
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 
-from . import amendments, cases, deadlines, facts, ingest, store, subcase
+from . import amendments, caselaw, cases, credentials, deadlines, facts, ingest, store, subcase
 from . import packet as pk
 
 API = "/api/v0"
@@ -571,6 +573,40 @@ def h_packet(app, req, case):
         return {"layer": layer, "text": pk.packet(conn, pin.path, layer=layer)}
 
 
+def h_caselaw(app, req, case):
+    with _pin(app, case) as pin:
+        pin.check()
+        return {"caselaw": caselaw.state(pin.path)}
+
+
+def h_caselaw_set(app, req, case):
+    """The person's button press: on or off. The server names the issuer; the body can't."""
+    on = req.json().get("on")
+    if not isinstance(on, bool):
+        raise HttpError(400, "Send on: true or on: false.")
+    with _pin(app, case) as pin:
+        pin.check()
+        if on:
+            caselaw.turn_on(pin.path, req.identity.name, "web-ui")
+        else:
+            caselaw.turn_off(pin.path)
+        pin.check()
+        return {"caselaw": caselaw.state(pin.path)}
+
+
+def h_courtlistener_key(app, req, case):
+    """Save or forget the operator's CourtListener key. The key is never sent back."""
+    body = req.json()
+    if body.get("forget") is True:
+        credentials.forget_courtlistener_token()
+    else:
+        try:
+            credentials.save_courtlistener_token(body.get("key"))
+        except ValueError as e:
+            raise HttpError(400, str(e)) from None
+    return {"key": credentials.courtlistener_token_source()}
+
+
 CASE = r"/cases/(?P<case>[0-9a-f]{16})"
 ITEM = r"(?P<item>am_[0-9a-f]{12})"  # an amendment-list item id
 # (method, path under /api/v0, action, handler). Every API route is here, and App.handle runs
@@ -593,6 +629,9 @@ ROUTES = [
     ("GET", CASE + r"/drafts", "read", h_drafts),
     ("POST", CASE + r"/brief-check", "read", h_brief_check),
     ("GET", CASE + r"/packet", "read", h_packet),
+    ("GET", CASE + r"/caselaw", "read", h_caselaw),
+    ("POST", CASE + r"/caselaw", "write", h_caselaw_set),
+    ("POST", r"/courtlistener-key", "account", h_courtlistener_key),
 ]
 
 

@@ -32,6 +32,9 @@ import json
 import os
 
 SENSITIVITY = {"citation_strings": 0, "query_text": 1, "passage_text": 2, "document_text": 3}
+ANY_CALLER = "*"
+TURN_ON_HINT = ("A person turns case law lookups on once per case: in Matter Kit's browser window open the "
+                "case, then Case law lookups, then Turn on; or run `matter.py courtlistener on <case folder>`.")
 
 
 class ConsentError(PermissionError):
@@ -89,12 +92,18 @@ def _identity_ok(g: dict, caller_id: str) -> tuple[bool, str]:
     - kind:"human" grants authorize the issuer and explicitly listed callers.
       Unlisted callers are refused: human authorship neither authorizes every
       agent implicitly nor prevents explicit delegation.
+    - A human grant listing ANY_CALLER ("*") authorizes every caller: the
+      one-switch "turn on case law lookups" grant (RFC 0001 amendment
+      2026-11-06). Caller ids are self-reported, so a list never told agents
+      apart; the person's switch is the control, and only a person sets it.
     Forgeable by a compromised runtime — see module docstring (ii)/(iii).
     """
     if g.get("kind", "agent") != "human":
         return False, "agent-authored grants are inert proposals"
     issuer = g.get("created_by")
     callers = g.get("authorized_callers") or []
+    if ANY_CALLER in callers:
+        return True, ""
     if caller_id != issuer and caller_id not in callers:
         return False, (f"caller {caller_id!r} is neither the issuer nor in "
                        f"authorized_callers")
@@ -137,8 +146,7 @@ def authorize(matter_dir: str, provider: str, endpoint: str, payload_type: str,
     detail = "; ".join(dict.fromkeys(refusals)) if refusals else "no matching grant"
     raise ConsentError(
         f"no valid grant for {provider}/{endpoint}/{payload_type} "
-        f"(caller {caller_id!r}) — {detail}. Write .matter/consent.json per "
-        "RFC 0001 §2.4")
+        f"(caller {caller_id!r}) — {detail}. {TURN_ON_HINT}")
 
 
 def require_escalation(matter_dir: str, provider: str, endpoint: str,
@@ -179,17 +187,9 @@ def stage_proposal(matter_dir: str, provider: str, endpoints: list[str],
     return g
 
 
-def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
-                         payload_types: list[str], issuer: str,
-                         daily_budget: int = 20,
-                         authorized_callers: list[str] | None = None) -> dict:
-    """Human TTY activation. Opens /dev/tty — stdin pipes do not count.
-
-    A confirmation string typed on the controlling terminal is the out-of-band
-    step this kit ships. It is still cooperative (a compromised runtime with
-    TTY access can fake it). kind=human is never written by stage_proposal.
-    """
-    from .citations import now_iso
+def confirm_on_tty(question: str, word: str = "ACTIVATE") -> None:
+    """Ask on the controlling terminal; raise ConsentError unless `word` is typed. Opens /dev/tty —
+    stdin pipes do not count. Still cooperative (a compromised runtime with TTY access can fake it)."""
     # Separate read and write handles: text-mode "r+" needs a seekable file and
     # /dev/tty is not one, so it raised io.UnsupportedOperation (an OSError) on
     # every real terminal and reported it as a missing TTY.
@@ -201,10 +201,7 @@ def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
             f"agent-staged proposals stay inert ({e})") from e
     try:
         with open("/dev/tty", "w", encoding="utf-8") as tty_out:
-            tty_out.write(
-                f"Activate {provider}: send {', '.join(payload_types)} to "
-                f"{', '.join(endpoints)} for {matter_dir!r} as human issuer "
-                f"{issuer!r}? Type ACTIVATE then Enter.\n> ")
+            tty_out.write(f"{question} Type {word} then Enter.\n> ")
             tty_out.flush()
         line = (tty_in.readline() or "").strip()
     except OSError as e:
@@ -213,8 +210,18 @@ def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
             f"agent-staged proposals stay inert ({e})") from e
     finally:
         tty_in.close()
-    if line != "ACTIVATE":
-        raise ConsentError(f"activation aborted (got {line!r}, wanted 'ACTIVATE')")
+    if line != word:
+        raise ConsentError(f"activation aborted (got {line!r}, wanted {word!r})")
+
+
+def write_human_grant(matter_dir: str, provider: str, endpoints: list[str],
+                      payload_types: list[str], issuer: str, activated_via: str,
+                      daily_budget: int | None = 20,
+                      authorized_callers: list[str] | None = None) -> dict:
+    """Record a grant a person has just confirmed (at the terminal or with the browser UI's button).
+    Callers must have confirmed with the person first: this function asks no one. It replaces the
+    provider's staged proposals and earlier human grants, so turning on twice leaves one grant."""
+    from .citations import now_iso
     g = {
         "provider": provider,
         "endpoints": list(endpoints),
@@ -224,12 +231,35 @@ def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
         "kind": "human",
         "authorized_callers": list(authorized_callers or []),
         "created_at": now_iso(),
-        "activated_via": "tty",
+        "activated_via": activated_via,
         "status": "active",
     }
-    grants = [x for x in load_grants(matter_dir)
-              if not (x.get("provider") == provider and x.get("kind") == "agent"
-                      and x.get("status") == "proposal")]
+    grants = [x for x in load_grants(matter_dir) if x.get("provider") != provider
+              or not ((x.get("kind") == "agent" and x.get("status") == "proposal") or x.get("kind") == "human")]
     grants.append(g)
     save_grants(matter_dir, grants)
     return g
+
+
+def revoke(matter_dir: str, providers: list[str]) -> int:
+    """Turn off: drop every grant (human or proposed) for these providers. Returns how many."""
+    grants = load_grants(matter_dir)
+    keep = [g for g in grants if g.get("provider") not in providers]
+    if len(keep) != len(grants):
+        save_grants(matter_dir, keep)
+    return len(grants) - len(keep)
+
+
+def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],
+                         payload_types: list[str], issuer: str,
+                         daily_budget: int = 20,
+                         authorized_callers: list[str] | None = None) -> dict:
+    """Human TTY activation: the person types ACTIVATE on the controlling terminal.
+
+    kind=human is never written by stage_proposal.
+    """
+    confirm_on_tty(
+        f"Activate {provider}: send {', '.join(payload_types)} to "
+        f"{', '.join(endpoints)} for {matter_dir!r} as human issuer {issuer!r}?")
+    return write_human_grant(matter_dir, provider, endpoints, payload_types, issuer, "tty",
+                             daily_budget=daily_budget, authorized_callers=authorized_callers)

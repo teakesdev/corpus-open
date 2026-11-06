@@ -514,7 +514,8 @@ class TestAdapter(Matter):
 
     def test_missing_token_refused_before_egress(self):
         consent.save_grants(self.dir, [grant()])
-        with mock.patch.dict(os.environ, {"COURTLISTENER_TOKEN": ""}):
+        no_config = os.path.join(self.dir, "no-config")  # no saved key either, never the person's own
+        with mock.patch.dict(os.environ, {"COURTLISTENER_TOKEN": "", "MATTER_KIT_CONFIG": no_config}):
             with self.assertRaises(consent.ConsentError) as ctx:
                 self.adapter()
         self.assertIn("COURTLISTENER_TOKEN", str(ctx.exception))
@@ -883,10 +884,12 @@ class TestIsolation(unittest.TestCase):
                 self.assertNotIn(n.split(".")[0], banned)
                 self.assertNotIn("adapters", n)
 
-    def test_mcp_server_has_no_lookup_tool(self):
+    def test_mcp_server_cannot_turn_lookups_on(self):
+        # The MCP server runs lookups (RFC 0001 amendment 2026-11-06) but never writes a grant or a key.
         src = open(os.path.join(KIT, "matter-mcp.py")).read()
-        self.assertNotIn("citelookup", src)
-        self.assertNotIn("courtlistener_citations", src)
+        for name in ("turn_on", "write_human_grant", "activate_human_grant", "save_grants",
+                     "save_courtlistener_token", "courtlistener_citations"):
+            self.assertNotIn(name, src)
 
 
 if __name__ == "__main__":
