@@ -168,7 +168,7 @@ MCP cannot approve a notice, record mailing, or send it. `matter.amend_add`
 can only propose a change to the amendment list; approving or dropping one is a
 person's step (CLI or browser).
 
-## Hermes plugin (citation guard, deadline brief, /matter)
+## Hermes plugin (citation guard, source guard, deadline brief, /matter)
 
 This repo is also a native [Hermes Agent](https://hermes-agent.nousresearch.com) plugin
 (`plugin.yaml` and `__init__.py` at the root, code in `hermes_plugin/`). It adds what a skill or
@@ -179,6 +179,13 @@ the MCP server above can't:
   `IN CORPUS` or `NOT MATCHED IN CORPUS` on [Corpus](https://corpuslaw.us), and what your case
   file's authority ledger says. Problems come first. Found means a source holds something at that
   cite, not that it says what the reply says or is still good law.
+- **Source guard.** Hermes's `write_file` and `patch` can't change a registered source document
+  or anything in the case store (`.matter/`): the call is refused with the file's name and hash,
+  and the agent is told to write a new file instead. A `terminal` command or `execute_code` run
+  that names a source or the store and looks like it changes files (`rm`, `mv`, `sed -i`, `>`,
+  `open(..., 'w')` and the like) goes to your approval first. If the store can't be read, the call
+  goes to approval too. New files and unregistered drafts in the case folder are untouched. This
+  catches an agent's mistakes; it is not a sandbox, and the `source_guard` setting turns it off.
 - **Deadline brief.** On a session's first turn, overdue deadlines and those due within
   `deadline_window_days` go to the agent, so it raises them before anything else.
 - **`/matter`** shows status and deadlines; `/matter packet 30s`, `/matter check Drafts/x.md` and
@@ -215,7 +222,7 @@ python3 scripts/panel_demo.py tamper ~/cases/panel-demo
 ```
 
 Settings (Desktop: Settings > Plugins > corpus-open): `matter_dir`, `citation_guard`
-(`lookup` / `local` / `off`), `caller_id`, `deadline_window_days`, `max_statute_checks`, and two
+(`lookup` / `local` / `off`), `source_guard` (on by default), `caller_id`, `deadline_window_days`, `max_statute_checks`, and two
 secrets read through Hermes's secret store: `COURTLISTENER_TOKEN` (free, needed for case cites) and
 `CORPUS_API_KEY` (optional).
 

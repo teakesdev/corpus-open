@@ -5,6 +5,8 @@ What a plugin adds that a skill or an MCP server can't:
   agent writes is listed under the reply with what CourtListener, Corpus and the case file say
   about it, so a fabricated cite is flagged before anyone copies it into a filing;
 - a deadline brief at the start of each session (pre_llm_call on the first turn);
+- a source guard (pre_tool_call): Hermes's file tools can't change a registered source document
+  or the case store, and a command that looks like it would goes to the person's approval;
 - /matter, a slash command for the case's status, deadlines, packet and cite checks;
 - the matter tools, reading the case folder chosen in Hermes's own settings form, with tokens
   read through Hermes's secret store.
@@ -17,6 +19,7 @@ from __future__ import annotations
 import datetime as _dt
 
 from . import guard as _guard
+from . import source_guard as _source_guard
 from .tools import SCHEMAS, TOOLSET, MatterError, Tools, resolve_matter
 
 PLUGIN_ID = "corpus-open"
@@ -27,7 +30,9 @@ DEFAULTS = {
     "caller_id": "hermes",
     "deadline_window_days": 14,
     "max_statute_checks": 5,
+    "source_guard": True,
 }
+OFF = (False, "off", "false", "no", "0", 0)
 SECRET_ENV = {"courtlistener_token": "COURTLISTENER_TOKEN", "corpus_api_key": "CORPUS_API_KEY"}
 
 
@@ -68,6 +73,8 @@ class Plugin:
                 out[key] = max(0, int(out[key]))
             except (TypeError, ValueError):
                 out[key] = DEFAULTS[key]
+        value = out["source_guard"]
+        out["source_guard"] = (value.strip().lower() if isinstance(value, str) else value) not in OFF
         return out
 
     def _matter_or_none(self) -> str | None:
@@ -75,6 +82,19 @@ class Plugin:
             return resolve_matter(self.settings().get("matter_dir"))
         except MatterError:
             return None
+
+    # -- source guard -------------------------------------------------------------------------------
+    def on_tool_call(self, tool_name: str = "", args=None, task_id: str = "", **kwargs):
+        """pre_tool_call. Never raises: Hermes blocks every tool call when this hook raises."""
+        matter_dir = None
+        try:
+            settings = self.settings()
+            if not settings["source_guard"]:
+                return None
+            matter_dir = settings.get("matter_dir") or None
+            return _source_guard.check(tool_name, args, matter_dir=matter_dir)
+        except Exception:  # noqa: BLE001
+            return _source_guard.fallback(tool_name, args, matter_dir)
 
     # -- citation guard -------------------------------------------------------------------------
     def run_guard(self, text: str, matter_dir: str | None) -> _guard.Check:
@@ -214,6 +234,7 @@ def register(ctx, *, secret=_secret, today=None) -> Plugin:
                           description=schema["description"].split(". ")[0])
     ctx.register_hook("transform_llm_output", plugin.on_reply)
     ctx.register_hook("pre_llm_call", plugin.on_turn)
+    ctx.register_hook("pre_tool_call", plugin.on_tool_call)
     ctx.register_command("matter", plugin.command,
                          description="Your case: status, deadlines, counsel packet, cite check",
                          args_hint="[status|deadlines|packet|check|grant]")

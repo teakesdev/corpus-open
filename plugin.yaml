@@ -34,6 +34,7 @@ provides_tools:
 provides_hooks:
   - pre_llm_call
   - transform_llm_output
+  - pre_tool_call
 requires_env: []
 config_schema:
   matter_dir:
@@ -61,6 +62,12 @@ config_schema:
     type: int
     default: 5
     description: Most statute and code cites looked up on Corpus per reply.
+  source_guard:
+    type: bool
+    default: true
+    description: >-
+      Stop Hermes's file tools from changing a registered source document or the case store
+      (.matter/), and ask you first when a command looks like it would.
   courtlistener_token:
     type: secret
     env: COURTLISTENER_TOKEN
