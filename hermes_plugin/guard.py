@@ -4,7 +4,7 @@ Case cites (volume reporter page) go to CourtListener's citation lookup through 
 adapter; statute and code cites go to Corpus's law search through the kit's Corpus adapter. Both
 adapters refuse to send anything unless the case folder holds a human-issued grant in
 .matter/consent.json naming this caller (RFC 0001), and both log every request to
-.matter/egress.log. Without a grant, a token or a case folder, the guard still lists every cite it
+.matter/egress.jsonl. Without a grant, a token or a case folder, the guard still lists every cite it
 found and says plainly that it was not looked up.
 
 Outcomes say what a source holds at a cite, never that the text says what a reply says or that
@@ -12,7 +12,9 @@ the authority is still good law.
 """
 from __future__ import annotations
 
+import os
 import re
+import shlex
 from dataclasses import dataclass, field
 
 from ..matterkit import authority, citations, citelookup, store
@@ -27,10 +29,22 @@ GOOD = (citelookup.FOUND, IN_CORPUS)
 LIMITS = ("Found means a source holds something at that cite. It does not mean it says what this "
           "reply says, that it is still good law, or that a pin cite is right.")
 
-GRANT_HELP = {
-    "case": "python3 matter.py consent activate <case folder> --scope cite-lookup --caller {caller}",
-    "statute": "python3 matter.py consent activate <case folder> --scope corpus-search --caller {caller}",
-}
+KIT_CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "matter.py")
+
+
+def grant_command(kind: str, matter_dir: str | None, caller: str) -> str:
+    """The terminal command a person runs to allow lookups, with the kit's full path so it works from
+    any folder. kind is "case" (CourtListener, the one switch) or "statute" (Corpus)."""
+    cli = "python3 " + shlex.quote(KIT_CLI)
+    md = shlex.quote(os.path.abspath(os.path.expanduser(matter_dir))) if matter_dir else "<case folder>"
+    if kind == "case":
+        return f"{cli} courtlistener on {md}"
+    return f"{cli} consent activate {md} --scope corpus-search --caller {shlex.quote(str(caller))}"
+
+
+NO_KEY = ("Case cites were not looked up: there is no CourtListener key. Get a free one at "
+          "https://www.courtlistener.com/profile/api/ and save it with `python3 " + shlex.quote(KIT_CLI) +
+          " courtlistener key`, or as COURTLISTENER_TOKEN in this plugin's settings.")
 
 # Code-name prefix -> Corpus jurisdiction code. Unknown codes search every jurisdiction.
 _JURIS = [
@@ -161,8 +175,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
         elif not matter_dir:
             why = "Case cites were not looked up: no case folder is set (matter_dir)."
         elif not courtlistener_token:
-            why = ("Case cites were not looked up: add a free CourtListener API token in this plugin's "
-                   "settings (COURTLISTENER_TOKEN).")
+            why = NO_KEY
         else:
             try:
                 if cl_factory is None:
@@ -178,7 +191,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
             except ConsentError as e:
                 why = (f"Case cites were not looked up: this case folder has no CourtListener grant for "
                        f"'{caller_id}' ({_short(e)}). A person grants it once in a terminal: "
-                       + GRANT_HELP["case"].format(caller=caller_id))
+                       + grant_command("case", matter_dir, caller_id))
             except Exception as e:  # noqa: BLE001
                 why = f"Case cites were not looked up: {_short(e)}"
         if why:
@@ -244,7 +257,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                 except ConsentError as e:
                     why = (f"Statute and code cites were not looked up: this case folder has no Corpus grant "
                            f"for '{caller_id}' ({_short(e)}). A person grants it once in a terminal: "
-                           + GRANT_HELP["statute"].format(caller=caller_id))
+                           + grant_command("statute", matter_dir, caller_id))
                 except Exception as e:  # noqa: BLE001
                     why = f"Statute and code cites were not looked up: {_short(e)}"
             elif adapter is not None and why is None:

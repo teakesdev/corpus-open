@@ -43,6 +43,8 @@ guard = importlib.import_module(PKG + ".hermes_plugin.guard")
 clc = importlib.import_module(PKG + ".matterkit.adapters.courtlistener_citations")
 corpus = importlib.import_module(PKG + ".matterkit.adapters.corpus_search")
 pconsent = importlib.import_module(PKG + ".matterkit.consent")
+pcreds = importlib.import_module(PKG + ".matterkit.credentials")
+SAVED_KEY = "0123456789abcdef0123456789abcdef01234567"  # key-shaped, not a real key
 
 TOKEN = "tok-SECRET-0123456789"
 REPLY = ("You can ask the court to remove a tenant who stays after the lease ends. Under Miss. Code "
@@ -158,8 +160,13 @@ class PluginCase(unittest.TestCase):
         self.dir = os.path.join(self._tmp.name, "matter")
         with redirect_stdout(io.StringIO()):
             cases.init(self.dir)
+        # A settings folder of its own and no COURTLISTENER_TOKEN, so the guard never picks up the
+        # person's real saved key.
+        env = {k: v for k, v in os.environ.items() if k != "COURTLISTENER_TOKEN"}
+        env["MATTER_KIT_CONFIG"] = os.path.join(self._tmp.name, "config", "matter-kit")
         patches = [mock.patch("urllib.request.urlopen", no_network),
-                   mock.patch.object(corpus.CorpusSearchAdapter, "_rpc", fake_rpc)]
+                   mock.patch.object(corpus.CorpusSearchAdapter, "_rpc", fake_rpc),
+                   mock.patch.dict(os.environ, env, clear=True)]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -229,10 +236,33 @@ class TestCitationGuard(PluginCase):
         self.assertTrue(out.startswith(REPLY))
         block = out[len(REPLY):]
         self.assertIn("NOT LOOKED UP", block)
-        self.assertIn("--scope cite-lookup --caller hermes", block)
-        self.assertIn("--scope corpus-search --caller hermes", block)
+        cli = "python3 " + shlex.quote(os.path.join(KIT, "matter.py"))
+        self.assertIn(f"{cli} courtlistener on {shlex.quote(self.dir)}", block)
+        self.assertIn(f"{cli} consent activate {shlex.quote(self.dir)} --scope corpus-search --caller hermes",
+                      block)
+        self.assertNotIn("python3 matter.py", block)
         self.assertEqual(self.posted, [])
         self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
+
+    def test_uses_the_key_matter_kit_saved_when_hermes_has_none(self):
+        # `courtlistener on` saves the key with Matter Kit; the guard must find it there.
+        self.grant_all()
+        pcreds.save_courtlistener_token(SAVED_KEY)
+        self.plugin(secrets={}).on_reply(response_text=REPLY)
+        self.assertEqual([t for _u, _d, t in self.posted], [SAVED_KEY])
+
+    def test_the_hermes_secret_wins_over_the_saved_key(self):
+        self.grant_all()
+        pcreds.save_courtlistener_token(SAVED_KEY)
+        self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}).on_reply(response_text=REPLY)
+        self.assertEqual([t for _u, _d, t in self.posted], [TOKEN])
+
+    def test_no_key_anywhere_says_where_to_put_one(self):
+        self.grant_all()
+        block = self.plugin(secrets={}).on_reply(response_text=REPLY)
+        self.assertIn("courtlistener key", block)
+        self.assertIn("COURTLISTENER_TOKEN", block)
+        self.assertEqual(self.posted, [])
 
     def test_lookup_marks_each_cite(self):
         self.grant_all()

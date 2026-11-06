@@ -20,7 +20,6 @@ import contextlib
 import datetime as _dt
 import io
 import os
-import shlex
 import shutil
 
 from . import guard as _guard
@@ -29,7 +28,6 @@ from .tools import SCHEMAS, TOOLSET, MatterError, Tools, resolve_matter
 
 PLUGIN_ID = "corpus-open"
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KIT_CLI = os.path.join(KIT, "matter.py")
 SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
 DEMO_SOURCE = os.path.join(KIT, "demo-matter")
 DEMO_DIR = "~/cases/corpus-open-demo"
@@ -114,9 +112,18 @@ class Plugin:
         return _guard.check_text(
             text, matter_dir=matter_dir, caller_id=str(s["caller_id"]),
             lookup=s["citation_guard"] == "lookup",
-            courtlistener_token=self.secret(SECRET_ENV["courtlistener_token"]),
+            courtlistener_token=self.courtlistener_token(),
             corpus_api_key=self.secret(SECRET_ENV["corpus_api_key"]),
             max_statutes=s["max_statute_checks"])
+
+    def courtlistener_token(self) -> str | None:
+        """Hermes's secret first; else the key `matter.py courtlistener on` / `courtlistener key` saved
+        (or COURTLISTENER_TOKEN in the environment), so the one switch also works inside Hermes."""
+        token = self.secret(SECRET_ENV["courtlistener_token"])
+        if token:
+            return token
+        from ..matterkit import credentials
+        return credentials.courtlistener_token() or None
 
     def on_reply(self, response_text: str = "", **kwargs) -> str | None:
         """transform_llm_output: append the citation check under a reply that cites anything."""
@@ -210,16 +217,15 @@ class Plugin:
             return f"/matter failed: {e}"
 
     def _grant_text(self) -> str:
-        caller = shlex.quote(str(self.settings()["caller_id"]))
-        md = self.settings()["matter_dir"]
-        md = shlex.quote(os.path.abspath(os.path.expanduser(md))) if md else "<case folder>"
-        cli = "python3 " + shlex.quote(KIT_CLI)
+        s = self.settings()
+        md, caller = s["matter_dir"] or None, s["caller_id"]
         return ("A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
                 "grant an agent writes). These work from any folder:\n"
-                f"  {cli} courtlistener on {md}\n"
-                "    case cites (CourtListener); asks you to type yes, then for your free key\n"
-                f"  {cli} consent activate {md} --scope corpus-search --caller {caller}\n"
-                "    statute and code cites (Corpus); asks you to type ACTIVATE")
+                f"  {_guard.grant_command('case', md, caller)}\n"
+                "    case cites (CourtListener): asks you to type yes, then for your free key, which this "
+                "plugin reads too (a COURTLISTENER_TOKEN in this plugin's settings is used first)\n"
+                f"  {_guard.grant_command('statute', md, caller)}\n"
+                "    statute and code cites (Corpus): asks you to type ACTIVATE")
 
     def _select(self, folder: str) -> str:
         """Point the plugin at folder. Returns a sentence saying whether that happened."""

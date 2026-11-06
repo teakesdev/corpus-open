@@ -263,10 +263,18 @@ Install and set it up:
 ```sh
 hermes plugins install https://github.com/teakesdev/corpus-open
 hermes plugins enable corpus-open
-python3 matter.py init ~/cases/my-case            # then set matter_dir to it in the plugin's settings
-python3 matter.py consent activate ~/cases/my-case --scope cite-lookup --caller hermes
-python3 matter.py consent activate ~/cases/my-case --scope corpus-search --caller hermes
 ```
+
+Then, in Hermes, `/matter init ~/cases/my-case` makes the case folder and points the plugin at it
+(or `/matter demo` for a synthetic one). `/matter grant` prints the two terminal commands that allow
+cite checks, with full paths, so they work from any folder:
+
+```sh
+python3 <kit>/matter.py courtlistener on ~/cases/my-case     # case cites: type yes, paste your free key
+python3 <kit>/matter.py consent activate ~/cases/my-case --scope corpus-search --caller hermes   # statutes: type ACTIVATE
+```
+
+`<kit>` is where Hermes installed the plugin; `/matter grant` prints the real path.
 
 To try the Case pane on synthetic data, make a demo case, set `matter_dir` to it, and edit one of
 its files on cue to watch the badge turn:
@@ -278,20 +286,22 @@ python3 scripts/panel_demo.py tamper ~/cases/panel-demo
 
 Settings (Desktop: Settings > Plugins > corpus-open): `matter_dir`, `citation_guard`
 (`lookup` / `local` / `off`), `source_guard` (on by default), `caller_id`, `deadline_window_days`, `max_statute_checks`, and two
-secrets read through Hermes's secret store: `COURTLISTENER_TOKEN` (free, needed for case cites) and
+secrets read through Hermes's secret store: `COURTLISTENER_TOKEN` (free, for case cites; optional
+when you saved the key with `courtlistener on` or `courtlistener key`, and used first when set) and
 `CORPUS_API_KEY` (optional).
 
 **Network calls (disclosure).** The plugin makes exactly two kinds of request, both only from the
-citation guard and `matter_cite_check`, and only after a person grants them in the case folder by
-typing `ACTIVATE` in a terminal (a grant an agent writes is refused):
+citation guard and `matter_cite_check`, and only after a person allows them in the case folder from
+a terminal: `courtlistener on` (type `yes`) for case cites, `consent activate --scope corpus-search`
+(type `ACTIVATE`) for statutes. A grant an agent writes is refused:
 
 | To | What is sent | Limit |
 |---|---|---|
-| `www.courtlistener.com` citation lookup | the bare case cites (`123 F.4th 456`), up to 60 per reply, with your token | the grant's daily budget (10) |
+| `www.courtlistener.com` citation lookup | the bare case cites (`123 F.4th 456`), up to 60 per reply, with your token | 100 lookups a day per case (the grant's budget; CourtListener's free account allows about 125) |
 | `corpuslaw.us` law search | one statute or code cite per request (`Miss. Code Ann. § 89-7-27`) | `max_statute_checks` per reply, grant budget 50/day |
 
 No reply text, facts, documents or names leave the machine. Every request is logged to
-`.matter/egress.log`. With `citation_guard: local`, nothing is sent and cites are only listed. The
+`.matter/egress.jsonl`. With `citation_guard: local`, nothing is sent and cites are only listed. The
 plugin files, sends and approves nothing, and sends no telemetry.
 
 ## Document extraction and locators (RFC 0004, RFC 0005)

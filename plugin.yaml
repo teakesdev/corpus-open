@@ -72,7 +72,9 @@ config_schema:
     type: secret
     env: COURTLISTENER_TOKEN
     required: false
-    description: Free CourtListener API token, needed to look up case cites.
+    description: >-
+      Free CourtListener API token for case cites. Optional when you saved the key with
+      `matter.py courtlistener on` or `matter.py courtlistener key`; this one is used first.
   corpus_api_key:
     type: secret
     env: CORPUS_API_KEY
