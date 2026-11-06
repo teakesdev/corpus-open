@@ -429,12 +429,29 @@ def cmd_packet(args):
         print(text)
 
 
+def draft_path(case_dir, path):
+    """A relative draft path names a file in the case folder, as the README shows. One the case
+    folder lacks but the current directory has is read from there; an absolute path is used as is."""
+    if os.path.isabs(path):
+        return path
+    in_case = os.path.join(case_dir, path)
+    return path if not os.path.exists(in_case) and os.path.exists(path) else in_case
+
+
+def existing_draft(case_dir, path):
+    """draft_path, refusing with a message (not a traceback) when there is no such file."""
+    resolved = draft_path(case_dir, path)
+    if not os.path.isfile(resolved):
+        sys.exit(f"no such draft: {path} (looked in {case_dir} and the current directory)")
+    return resolved
+
+
 def cmd_brief(args):
     """brief check: tie every cite, quotation and factual sentence in a draft to the store.
     Read-only. Exit 1 = blocking findings, 2 = items a human must check, 0 = all tied."""
     from matterkit import briefcheck
     try:
-        report = briefcheck.check(args.case_dir, args.draft, use_pdftotext=not args.no_pdftotext,
+        report = briefcheck.check(args.case_dir, draft_path(args.case_dir, args.draft), use_pdftotext=not args.no_pdftotext,
                                   docket_path=args.docket, mode=args.mode)
     except (ValueError, FileNotFoundError) as e:
         sys.exit(f"brief check refused: {e}")
@@ -572,6 +589,7 @@ def cmd_cite(args):
     conn = store.connect(args.case_dir)
     from matterkit import citations
     if args.sub == "extract":
+        args.path = existing_draft(args.case_dir, args.path)
         raw = open(args.path, "rb").read()
         text = raw.decode("utf-8", errors="replace")
         import hashlib
@@ -608,6 +626,7 @@ def cmd_cite_lookup(args):
         sys.exit("usage: matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md]")
     if args.path.lower().endswith((".docx", ".pdf", ".doc")):
         sys.exit("cite lookup reads Markdown or plain text; use the .md copy of the draft")
+    args.path = existing_draft(args.case_dir, args.path)
     max_requests = 3 if args.max_requests is None else args.max_requests
     try:
         by = store.attribution(args.author or os.environ.get("MATTER_AUTHOR"),
