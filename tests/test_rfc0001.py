@@ -445,7 +445,7 @@ class TestNetworkIsolation(unittest.TestCase):
         banned = {"socket", "urllib", "http", "requests", "httpx", "ssl",
                   "ftplib", "smtplib", "telnetlib", "xmlrpc", "asyncio"}
         for mod_file in ("matterkit/citations.py", "matterkit/consent.py",
-                         "matterkit/search.py"):
+                         "matterkit/search.py", "matterkit/caselaw.py", "matterkit/credentials.py"):
             tree = ast.parse(open(os.path.join(KIT, mod_file)).read())
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):

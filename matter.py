@@ -54,9 +54,11 @@ Usage:
   matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
   matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
-                        # sends the draft's case cites, nothing else, to CourtListener; needs a
-                        # human grant (consent activate --scope cite-lookup) and COURTLISTENER_TOKEN
-  matter.py consent propose|activate <dir> [--scope search|cite-lookup] [--caller ID]...
+                        # sends the draft's case cites, nothing else, to CourtListener; needs case
+                        # law lookups turned on and a CourtListener key
+  matter.py courtlistener on|off|status <dir>   # one switch for search + cite lookup (asks you to type yes)
+  matter.py courtlistener key [--forget]        # save your free CourtListener key (outside every case folder)
+  matter.py consent propose|activate <dir> [--scope search|cite-lookup] [--caller ID]...   # narrower grants
   matter.py docket suggest <dir>
   matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
                         [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]
@@ -704,12 +706,8 @@ def cmd_auth_stage(args):
 def cmd_consent(args):
     """consent propose|activate. --scope search: the R2 search adapter (query_text to the host);
     --scope cite-lookup: bare case cites to the citation-lookup URL, and nothing else."""
-    from matterkit import citelookup, consent
-    from matterkit.adapters.courtlistener import ENDPOINT_HOST
-    provider, endpoints, payloads, budget = {
-        "search": ("courtlistener-free", [ENDPOINT_HOST], ["query_text"], 20),
-        "cite-lookup": (citelookup.PROVIDER, [citelookup.ENDPOINT], [citelookup.PAYLOAD_TYPE], 10),
-    }[args.scope]
+    from matterkit import caselaw, consent
+    provider, endpoints, payloads, budget = caselaw.SCOPES[args.scope]
     if args.sub == "propose":
         g = consent.stage_proposal(
             args.case_dir, provider, endpoints, payloads, args.as_user, daily_budget=budget)
@@ -724,6 +722,60 @@ def cmd_consent(args):
             sys.exit(f"refused: {e}")
         print(f"activated human grant issuer={g['created_by']!r} "
               f"callers={g['authorized_callers']}")
+
+
+def cmd_courtlistener(args):
+    """courtlistener on|off|status|key: the one switch for case law lookups (search and cite lookup),
+    the same switch as the browser UI's Case law lookups panel."""
+    import getpass
+    from matterkit import caselaw, consent, credentials
+    if args.sub == "key":
+        if args.forget:
+            print("CourtListener key removed." if credentials.forget_courtlistener_token() else "No saved key.")
+            return
+        _ask_and_save_key()
+        return
+    if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
+        sys.exit(f"refused: {args.case_dir} is not a case folder (no .matter/)")
+    if args.sub == "status":
+        print(caselaw.describe(args.case_dir))
+        return
+    if args.sub == "off":
+        n = caselaw.turn_off(args.case_dir)
+        print("Case law lookups are off for this case." if n else "Case law lookups were already off.")
+        return
+    print(caselaw.WHAT_IS_SENT)
+    try:
+        consent.confirm_on_tty(f"Turn on case law lookups for {os.path.abspath(args.case_dir)}?", word="yes")
+    except consent.ConsentError as e:
+        sys.exit(f"refused: {e}")
+    caselaw.turn_on(args.case_dir, args.issuer or getpass.getuser(), "tty")
+    print("Case law lookups are on. Your agents can now search and check citations for this case.")
+    if not credentials.courtlistener_token():
+        _ask_and_save_key(optional=True)
+
+
+def _ask_and_save_key(optional=False):
+    """Read the key from the terminal without echoing it (it never goes in shell history)."""
+    import getpass
+    from matterkit import caselaw, credentials
+    print(f"Paste your free CourtListener key (from {caselaw.KEY_URL})"
+          + (", or press Enter to skip:" if optional else ":"))
+    try:
+        key = getpass.getpass("key: ")
+    except (EOFError, KeyboardInterrupt):
+        key = ""
+    if not key.strip():
+        if optional:
+            print("No key saved. Search works without one; cite checking needs one "
+                  "(`matter.py courtlistener key` adds it later).")
+            return
+        sys.exit("no key given; nothing saved")
+    try:
+        where = credentials.save_courtlistener_token(key)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(f"Key saved in {where} (only you can read it; never in a case folder).")
 
 
 def cmd_search(args):
@@ -1090,11 +1142,19 @@ def main():
     p.add_argument("--caller", action="append", default=[])
     p.set_defaults(fn=cmd_consent)
 
+    p = sub.add_parser("courtlistener", help="Turn case law lookups on or off for a case, or save your key")
+    p.add_argument("sub", choices=["on", "off", "status", "key"])
+    p.add_argument("case_dir", nargs="?", default=".")
+    p.add_argument("--issuer", help="on: who is turning it on; default your login name")
+    p.add_argument("--forget", action="store_true", help="key: remove the saved key")
+    p.set_defaults(fn=cmd_courtlistener)
+
     p = sub.add_parser("search"); p.add_argument("case_dir")
     p.add_argument("query")
     p.add_argument("--caller", default=os.environ.get("USER", "human"))
     p.add_argument("--limit", type=int, default=5)
-    p.add_argument("--auth", choices=["anonymous", "authenticated"], default="anonymous")
+    p.add_argument("--auth", choices=["auto", "anonymous", "authenticated"], default="auto",
+                   help="auto: authenticated when a CourtListener key is saved or set")
     p.add_argument("--record-resolved", action="store_true")
     p.set_defaults(fn=cmd_search)
 

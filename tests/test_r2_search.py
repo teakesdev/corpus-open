@@ -112,7 +112,8 @@ class TestR2Search(unittest.TestCase):
         self.assertNotIn("347 U.S. 483", log)  # hash-only
 
     def test_authenticated_without_token_fails_before_egress(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
+        # no saved key either: an empty settings folder, never the person's own
+        with mock.patch.dict(os.environ, {"MATTER_KIT_CONFIG": os.path.join(self.dir, "no-config")}, clear=False):
             os.environ.pop("COURTLISTENER_TOKEN", None)
             called = []
             with mock.patch("matterkit.adapters.courtlistener.get_json",

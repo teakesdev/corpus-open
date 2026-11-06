@@ -156,6 +156,27 @@ Tools: `matter.status`, `matter.fact_add`, `matter.fact_list`,
 `matter.deadline_list`, `matter.trigger_list`, `matter.trigger_fire`,
 `matter.packet_render`, `matter.cite_extract`,
 `matter.ingest_path`, `matter.verify`, `matter.hold_render`,
-`matter.correspondence_list`. `hold_render` takes a `notice_id` and returns the
+`matter.correspondence_list`, `matter.caselaw_status`, `matter.search`,
+`matter.cite_lookup`. `hold_render` takes a `notice_id` and returns the
 filtered packet without approving or sending it. `ingest_path` refuses path escape.
-Read-mostly plus local ingest/verify; nothing sends.
+Read-mostly plus local ingest/verify; nothing files or contacts anyone.
+
+## Case law lookups
+
+`matter.search` (CourtListener opinion search) and `matter.cite_lookup` (are the
+draft's cited cases real, and do the names match?) are how you keep up with the
+case law. They send only search words and bare citations, never documents.
+
+They work once the person has turned case law lookups on for the case. You
+cannot turn them on, and must not try (no grant files, no `consent` commands).
+If a lookup replies "Nothing was sent" because lookups are off or the key is
+missing, tell the person in plain words, one time, what the reply says:
+
+> To let me look up case law for this case, open Matter Kit in your browser,
+> open the case, click "Case law lookups", then "Turn on". To check citations,
+> also paste your free CourtListener key there (CourtListener's API page has
+> it). Or run `python3 matter.py courtlistener on <case folder>` once.
+
+Then carry on with the work that doesn't need lookups. A search result or a
+FOUND cite is a lead to read, not good law: say so when you use one, and never
+mark an authority `source-checked` from a lookup.

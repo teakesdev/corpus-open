@@ -14,13 +14,12 @@ payload is validated before the first is sent, and a throttled run stops. It nev
 from __future__ import annotations
 
 import json
-import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from .. import citelookup, consent
+from .. import citelookup, consent, credentials
 from ..search import log_egress
 from .courtlistener import UA, opener
 
@@ -78,10 +77,11 @@ class CitationLookupAdapter:
 
     def __init__(self, matter_dir: str, caller_id: str, *, post=None, clock=time.monotonic, sleep=time.sleep):
         consent.authorize(matter_dir, self.provider, self.endpoint, self.payload_type, caller_id)
-        token = os.environ.get("COURTLISTENER_TOKEN", "").strip()
+        token = credentials.courtlistener_token()
         if not token:
             raise consent.ConsentError(
-                "citation lookup requires COURTLISTENER_TOKEN (CourtListener allows no anonymous lookups) "
+                "citation lookup requires a free CourtListener key, saved in Matter Kit's Case law lookups "
+                "panel or set as COURTLISTENER_TOKEN (CourtListener allows no anonymous lookups) "
                 "— refusing egress")
         self.matter_dir, self.caller_id = matter_dir, caller_id
         self._token = token

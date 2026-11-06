@@ -6,18 +6,20 @@ throttle 5/min · 50/hr · 125/day; no extra paid tier in this adapter.
 Lookup never writes source-checked — only resolved with provenance.
 
 Transport (chair 2026-09-09): NO HTTP redirects. A 3xx is ConsentError and
-must not produce a second request. Auth mode is explicit: authenticated
-fails before egress if COURTLISTENER_TOKEN is missing. Anonymous never
-sends Authorization. Mode is recorded; the token is not.
+must not produce a second request. Auth mode: authenticated fails before
+egress if there is no key (COURTLISTENER_TOKEN or the stored one, see
+matterkit.credentials); auto is authenticated when a key exists, else
+anonymous. Anonymous never sends Authorization. Mode is recorded; the token
+is not.
 """
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
 
+from .. import credentials
 from ..citations import now_iso
 from ..consent import ConsentError
 from ..search import SearchQuery, SearchResult, log_egress
@@ -46,8 +48,10 @@ class CourtListenerFreeAdapter:
 
     def __init__(self, matter_dir: str, auth_mode: str = "anonymous"):
         mode = (auth_mode or "anonymous").strip().lower()
+        if mode == "auto":
+            mode = "authenticated" if credentials.courtlistener_token() else "anonymous"
         if mode not in AUTH_MODES:
-            raise ConsentError(f"auth_mode must be anonymous|authenticated, not {auth_mode!r}")
+            raise ConsentError(f"auth_mode must be anonymous|authenticated|auto, not {auth_mode!r}")
         self.matter_dir = matter_dir
         self.auth_mode = mode
 
@@ -58,11 +62,11 @@ class CourtListenerFreeAdapter:
         q = (query.text or "").strip()
         if not q:
             raise ValueError("empty query")
-        token = os.environ.get("COURTLISTENER_TOKEN", "").strip()
+        token = credentials.courtlistener_token() if self.auth_mode == "authenticated" else ""
         if self.auth_mode == "authenticated" and not token:
             raise ConsentError(
-                "authenticated mode requires COURTLISTENER_TOKEN — refusing "
-                "egress (no silent anonymous fallback)")
+                "authenticated mode requires a CourtListener key (COURTLISTENER_TOKEN or one saved "
+                "with Matter Kit) — refusing egress (no silent anonymous fallback)")
         params = {"q": q, "type": "o"}
         if query.limit:
             params["page_size"] = str(min(int(query.limit), 20))
