@@ -8,8 +8,10 @@ Lookup never writes source-checked — only resolved with provenance.
 Transport (chair 2026-09-09): NO HTTP redirects. A 3xx is ConsentError and
 must not produce a second request. Auth mode: authenticated fails before
 egress if there is no key (COURTLISTENER_TOKEN or the stored one, see
-matterkit.credentials); auto is authenticated when a key exists, else
-anonymous. Anonymous never sends Authorization. Mode is recorded; the token
+matterkit.credentials); auto is authenticated, and with no key it refuses
+before egress too (CourtListener answers keyless search with 401, seen
+2026-11-06). Only an explicit anonymous sends without a key. Anonymous never
+sends Authorization. Mode is recorded; the token
 is not.
 """
 from __future__ import annotations
@@ -48,8 +50,12 @@ class CourtListenerFreeAdapter:
 
     def __init__(self, matter_dir: str, auth_mode: str = "anonymous"):
         mode = (auth_mode or "anonymous").strip().lower()
+        # auto means "use the key". CourtListener refuses keyless search (401, seen 2026-11-06), so
+        # auto with no key refuses in search(), after the consent check and before any egress.
+        # Only an explicit "anonymous" sends without one.
+        self._auto = mode == "auto"
         if mode == "auto":
-            mode = "authenticated" if credentials.courtlistener_token() else "anonymous"
+            mode = "authenticated"
         if mode not in AUTH_MODES:
             raise ConsentError(f"auth_mode must be anonymous|authenticated|auto, not {auth_mode!r}")
         self.matter_dir = matter_dir
@@ -63,6 +69,12 @@ class CourtListenerFreeAdapter:
         if not q:
             raise ValueError("empty query")
         token = credentials.courtlistener_token() if self.auth_mode == "authenticated" else ""
+        if self._auto and not token:
+            raise ConsentError(
+                "case law search requires a free CourtListener key (CourtListener refuses searches without "
+                "one), saved in Matter Kit's Case law lookups panel, with `matter.py courtlistener key`, or "
+                "set as COURTLISTENER_TOKEN; get one at https://www.courtlistener.com/profile/api/ — "
+                "refusing egress. (--auth anonymous sends without a key anyway.)")
         if self.auth_mode == "authenticated" and not token:
             raise ConsentError(
                 "authenticated mode requires a CourtListener key (COURTLISTENER_TOKEN or one saved "

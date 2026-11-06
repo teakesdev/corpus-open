@@ -1149,7 +1149,7 @@ def main():
     p.add_argument("--caller", default=os.environ.get("USER", "human"))
     p.add_argument("--limit", type=int, default=5)
     p.add_argument("--auth", choices=["auto", "anonymous", "authenticated"], default="auto",
-                   help="auto: authenticated when a CourtListener key is saved or set")
+                   help="auto (default): use the saved or set CourtListener key; refuses, sending nothing, when there is none. anonymous: send without a key (CourtListener now refuses keyless search)")
     p.add_argument("--record-resolved", action="store_true")
     p.add_argument("--fresh", action="store_true",
                    help="ask CourtListener again instead of using this case's saved answer")
