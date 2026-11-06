@@ -117,6 +117,11 @@ python3 matter.py courtlistener key [--forget]           # save, replace or remo
 - **Limits:** 500 searches and 100 citation checks a day per case. CourtListener's
   free account allows about 125 citation lookups a day and throttles past its own
   limits; a throttled lookup stops and says so.
+- **Saved in the case:** every answer CourtListener gives is kept in the case's
+  `.matter/caselaw/`. Asking the same search again, or checking a cite that was
+  checked before, reads the saved answer: nothing is sent, nothing counts against
+  the daily limit, and it works even with lookups off. Only new cites in a draft
+  are sent. Add `--fresh` (or `fresh: true` over MCP) to ask CourtListener again.
 - **The key** is saved in your settings folder (`~/.config/matter-kit/`, readable
   only by your user account), never in a case folder, so sharing a case with a
   lawyer doesn't share your key. `COURTLISTENER_TOKEN`, if set, is used instead.

@@ -753,7 +753,9 @@ async function viewCaselaw(panel, c, alive) {
         el("p", { class: "lede", text: cl.what_is_sent }),
         el("p", { text: cl.on ? "Your AI agents can search case law and check the citations in your drafts for this case without asking again. Turn it off any time."
           : "Turn this on once and your AI agents can search case law and check the citations in your drafts for this case." }),
-        sw, cl.on ? usage : null),
+        sw, cl.on ? usage : null,
+        el("p", { text: `Saved in this case: ${cl.saved.searches} search${cl.saved.searches === 1 ? "" : "es"} and `
+          + `${cl.saved.cites} citation answer${cl.saved.cites === 1 ? "" : "s"}. Asking these again sends nothing, even with lookups off.` })),
       el("section", {}, el("h2", { text: "CourtListener key" }),
         el("p", { text: keyLine }),
         el("p", {}, el("a", { href: cl.key_url, target: "_blank", rel: "noopener noreferrer", text: "Get a free key at CourtListener" })),

@@ -363,6 +363,42 @@ def _judge(cite: DraftCite, item: dict | None) -> Result:
     return res
 
 
+def _match(lines: list[str], batch) -> tuple[dict, set]:
+    """CourtListener's answer items for one request, by the line each answers, and the lines whose
+    answer was malformed."""
+    starts, pos = {}, 0
+    for line in lines:
+        starts[pos] = line
+        pos += len(line) + 1
+    got: dict[str, dict] = {}
+    dropped: set[str] = set()
+    for item in batch if isinstance(batch, list) else []:
+        if not isinstance(item, dict):
+            continue
+        echo, normalized, at = item.get("citation"), item.get("normalized_citations"), item.get("start_index")
+        line = starts.get(at) if isinstance(at, int) and not isinstance(at, bool) else None
+        if line is None and echo in lines:
+            line = echo
+        if line is None or line in got:
+            continue
+        # CourtListener echoes the cite it read. An answer that names a different cite than the
+        # line it points at is malformed: it is set aside, so that line is NOT LOOKED UP, never misjudged.
+        others = {n for n in (normalized if isinstance(normalized, list) else []) if n in lines} - {line}
+        if (isinstance(echo, str) and echo != line) or others:
+            dropped.add(line)
+            continue
+        got[line] = item
+    return got, dropped
+
+
+def answered(payloads: list[str], batches: list) -> dict[str, dict]:
+    """Each sent cite CourtListener answered cleanly, with its answer item (what is worth keeping)."""
+    out: dict[str, dict] = {}
+    for payload, batch in zip(payloads, batches):
+        out.update(_match(payload.split("\n"), batch)[0])
+    return out
+
+
 def interpret(cites: list[DraftCite], payloads: list[str], batches: list, stopped: str | None = None) -> list[Result]:
     """One Result per cite. `batches[i]` is CourtListener's answer to `payloads[i]`; payloads past the
     last batch were not sent, and `stopped` says why."""
@@ -374,28 +410,7 @@ def interpret(cites: list[DraftCite], payloads: list[str], batches: list, stoppe
             for line in lines:
                 out[line] = Result(by_sent[line], NOT_LOOKED_UP, note=stopped or "not sent")
             continue
-        starts, pos = {}, 0
-        for line in lines:
-            starts[pos] = line
-            pos += len(line) + 1
-        got: dict[str, dict] = {}
-        dropped: set[str] = set()
-        for item in batches[i] if isinstance(batches[i], list) else []:
-            if not isinstance(item, dict):
-                continue
-            echo, normalized, at = item.get("citation"), item.get("normalized_citations"), item.get("start_index")
-            line = starts.get(at) if isinstance(at, int) and not isinstance(at, bool) else None
-            if line is None and echo in lines:
-                line = echo
-            if line is None or line in got:
-                continue
-            # CourtListener echoes the cite it read. An answer that names a different cite than the
-            # line it points at is malformed: it is set aside, so that line is NOT LOOKED UP, never misjudged.
-            others = {n for n in (normalized if isinstance(normalized, list) else []) if n in lines} - {line}
-            if (isinstance(echo, str) and echo != line) or others:
-                dropped.add(line)
-                continue
-            got[line] = item
+        got, dropped = _match(lines, batches[i])
         for line in lines:
             out[line] = (Result(by_sent[line], NOT_LOOKED_UP, note=DROPPED_TEXT) if line in dropped - got.keys()
                          else _judge(by_sent[line], got.get(line)))
@@ -421,6 +436,8 @@ class Report:
         self.results, self.payloads, self.sent, self.retrieved_at = results, payloads, sent, retrieved_at
         self.answered = sent if answered is None else answered  # requests CourtListener answered
         self.recorded: list | None = None  # (cite, action) pairs when --record ran
+        self.saved = 0  # cites answered from the case's saved lookups, not sent this time
+        self.stopped: str | None = None  # why requests stopped early, when they did
 
     def count(self, outcome) -> int:
         return sum(1 for r in self.results if r.outcome == outcome)
@@ -437,7 +454,8 @@ class Report:
         unanswered = self.sent - self.answered
         return (f"{state if self.results else 'NO CASE CITES IN THE DRAFT'}: {counts}; {len(self.results)} case "
                 f"cites, {self.sent} request{'s' if self.sent != 1 else ''} sent"
-                + (f", {unanswered} unanswered" if unanswered else ""))
+                + (f", {unanswered} unanswered" if unanswered else "")
+                + (f", {self.saved} from saved lookups" if self.saved else ""))
 
     def render(self) -> str:
         out = [f"# Cite lookup: {_esc(self.draft_path.rsplit('/', 1)[-1])}", "",
@@ -446,6 +464,9 @@ class Report:
                f"- Sent to `{URL}` at {self.retrieved_at}: only the case cites listed below, as "
                "\"volume reporter page\", one per line. No case names, pins or other draft text."
                if self.sent else "- Nothing was sent to CourtListener.", ""]
+        if self.saved:
+            out.insert(-1, f"- {self.saved} cites answered from this case's saved lookups (.matter/caselaw/): "
+                           "CourtListener's earlier answer, dated in each note; nothing sent for them.")
         for i, p in enumerate(self.payloads[: self.sent], 1):
             out.insert(-1, f"- Request {i}: {len(p.split(chr(10)))} cites · sha256 `{sha256(p)}`"
                        + (" · no answer, so its cites are NOT LOOKED UP" if i > self.answered else ""))

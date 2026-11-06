@@ -52,7 +52,7 @@ Usage:
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
   matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
-  matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N]
+  matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N] [--fresh]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
                         # sends the draft's case cites, nothing else, to CourtListener; needs case
                         # law lookups turned on and a CourtListener key
@@ -585,7 +585,7 @@ def cmd_cite(args):
     lookup_only = [flag for flag, value in (
         ("--dry-run", args.dry_run), ("--record", args.record), ("--out", args.out),
         ("--max-requests", args.max_requests), ("--caller", args.caller), ("--author", args.author),
-        ("--directed-by", args.directed_by)) if value is not None and value is not False]  # 0 is given too
+        ("--directed-by", args.directed_by), ("--fresh", args.fresh)) if value is not None and value is not False]  # 0 is given too
     if lookup_only:
         sys.exit(f"{', '.join(lookup_only)} applies to cite lookup, not cite {args.sub}")
     conn = store.connect(args.case_dir)
@@ -621,9 +621,7 @@ def cmd_cite_lookup(args):
     looked up, or a found cite --record could not write (several store rows answer to it, or the write
     failed), 0 = every case cite found (or the draft has
     none). --dry-run prints the exact payload and sends nothing."""
-    import hashlib
     from matterkit import citelookup
-    from matterkit.citations import now_iso
     if not args.path:
         sys.exit("usage: matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md]")
     if args.path.lower().endswith((".docx", ".pdf", ".doc")):
@@ -649,21 +647,13 @@ def cmd_cite_lookup(args):
         return
     if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
         sys.exit(f"refused: {args.case_dir} is not a matter (no .matter/)")
-    answers, stopped, sent = [], None, 0
-    if payloads:
-        from matterkit.adapters.courtlistener_citations import CitationLookupAdapter
-        from matterkit.consent import ConsentError
-        try:
-            adapter = CitationLookupAdapter(args.case_dir, args.caller or os.environ.get("USER", "human"))
-            answers, stopped = adapter.lookup(payloads[:max_requests])
-        except (ConsentError, ValueError) as e:
-            sys.exit(f"refused: {e}")
-        sent = adapter.sent
-        if stopped is None and len(payloads) > max_requests:
-            stopped = f"over --max-requests {max_requests}; run again in a minute for the rest"
-    report = citelookup.Report(args.path, hashlib.sha256(raw).hexdigest(),
-                               citelookup.interpret(cites, payloads, answers, stopped), payloads, sent, now_iso(),
-                               answered=len(answers))
+    from matterkit import caselaw
+    from matterkit.consent import ConsentError
+    try:
+        report = caselaw.check_draft(args.case_dir, args.path, raw, args.caller or os.environ.get("USER", "human"),
+                                     max_requests=max_requests, fresh=args.fresh, limit_name="--max-requests")
+    except (ConsentError, ValueError) as e:
+        sys.exit(f"refused: {e}")
     code = report.exit_code
     if args.record:
         report.recorded = citelookup.record(store.connect(args.case_dir), report.results, by)
@@ -671,8 +661,8 @@ def cmd_cite_lookup(args):
         if unwritten:
             print(f"{unwritten} found cite(s) could not be recorded; the report says why", file=sys.stderr)
             code = code or 2  # a cite to check by hand (1) still comes first
-    if stopped:
-        print(f"lookup stopped early: {stopped}", file=sys.stderr)
+    if report.stopped:
+        print(f"lookup stopped early: {report.stopped}", file=sys.stderr)
     _write_or_print(report.render(), args.out, report.summary())
     sys.exit(code)
 
@@ -784,11 +774,14 @@ def cmd_search(args):
     try:
         rows = S.manual_search(
             args.case_dir, args.caller, args.query, limit=args.limit,
-            auth_mode=args.auth)
+            auth_mode=args.auth, fresh=args.fresh)
     except (LookupError, ConsentError, RuntimeError, ValueError) as e:
         sys.exit(f"refused: {e}")
+    saved = rows and rows[0].provenance.get("saved")
     print(f"{len(rows)} CourtListener hit(s) for {args.query!r} "
-          "(lookup only — not source-checked, not good law)")
+          "(lookup only — not source-checked, not good law)"
+          + (f"; saved in this case {str(rows[0].provenance.get('retrieved_at'))[:10]}, nothing sent"
+             " (--fresh asks again)" if saved else ""))
     for r in rows:
         print(f"  {r.citation}  {r.name}")
         print(f"    {r.provenance.get('url')}")
@@ -1121,6 +1114,8 @@ def main():
                    help="lookup: move found cites' authorities rows from unverified to resolved")
     # Lookup-only flags default to None, so cmd_cite can refuse them on extract and list.
     p.add_argument("--out"); p.add_argument("--max-requests", type=int, help="lookup: default 3")
+    p.add_argument("--fresh", action="store_true",
+                   help="lookup: ask CourtListener again instead of using this case's saved answers")
     p.add_argument("--caller", help="lookup: grant caller; default $USER")
     p.add_argument("--author", help="lookup --record: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
     p.add_argument("--directed-by", help="lookup --record: person who directed an agent; env MATTER_DIRECTED_BY")
@@ -1156,6 +1151,8 @@ def main():
     p.add_argument("--auth", choices=["auto", "anonymous", "authenticated"], default="auto",
                    help="auto: authenticated when a CourtListener key is saved or set")
     p.add_argument("--record-resolved", action="store_true")
+    p.add_argument("--fresh", action="store_true",
+                   help="ask CourtListener again instead of using this case's saved answer")
     p.set_defaults(fn=cmd_search)
 
     p = sub.add_parser("outreach")

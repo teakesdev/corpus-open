@@ -94,15 +94,17 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "matter.caselaw_status", "description": "Whether case law lookups (CourtListener search and cite checking) are on for this case, today's use against the daily limit, and whether a CourtListener key is saved. When they are off, the text says exactly how the person turns them on: tell them that in plain words. Read-only. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "matter.search", "description": "Search CourtListener's case law (court opinions) for a question or phrase, e.g. 'inherent authority to manage docket'. Sends only the query text; returns case names, citations, CourtListener links and snippets. Results are leads, not good law and not source-checked: read the opinion before relying on one. Needs case law lookups turned on by the person (if off, the reply explains how; pass that on). Uses the saved CourtListener key when there is one.",
+    {"name": "matter.search", "description": "Search CourtListener's case law (court opinions) for a question or phrase, e.g. 'inherent authority to manage docket'. Sends only the query text; returns case names, citations, CourtListener links and snippets. Results are leads, not good law and not source-checked: read the opinion before relying on one. Needs case law lookups turned on by the person (if off, the reply explains how; pass that on). Uses the saved CourtListener key when there is one. A search asked before is answered from the case's saved lookups: nothing is sent and it works even with lookups off.",
      "inputSchema": {"type": "object", "required": ["query"],
                      "properties": {"query": {"type": "string"},
-                                    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "default 5"}}}},
-    {"name": "matter.cite_lookup", "description": "Check every case citation in a Markdown or text draft inside MATTER_DIR against CourtListener: is each cite real, and does the case name match? Sends only the bare citations (e.g. '550 U.S. 544'), never the draft's text. Returns the report; first line gives exit=0 (all found and matching), 1 (a cite not found or a name differs: check by hand), 2 (needs a human). record=true adds found cases to the matter's authorities as 'resolved' (not good law). Needs case law lookups turned on and a CourtListener key (if not, the reply explains how; pass that on). One request covers a whole short draft; max_requests above 1 waits about a minute between requests.",
+                                    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "default 5"},
+                                    "fresh": {"type": "boolean", "description": "ask CourtListener again instead of using the answer saved in this case (default false)"}}}},
+    {"name": "matter.cite_lookup", "description": "Check every case citation in a Markdown or text draft inside MATTER_DIR against CourtListener: is each cite real, and does the case name match? Sends only the bare citations (e.g. '550 U.S. 544'), never the draft's text. Returns the report; first line gives exit=0 (all found and matching), 1 (a cite not found or a name differs: check by hand), 2 (needs a human). record=true adds found cases to the matter's authorities as 'resolved' (not good law). Needs case law lookups turned on and a CourtListener key (if not, the reply explains how; pass that on). One request covers a whole short draft; max_requests above 1 waits about a minute between requests. Cites CourtListener answered before come from the case's saved lookups and are not sent again.",
      "inputSchema": {"type": "object", "required": ["path"],
                      "properties": {"path": {"type": "string"},
                                     "max_requests": {"type": "integer", "minimum": 1, "maximum": 3, "description": "default 1"},
                                     "record": {"type": "boolean"},
+                                    "fresh": {"type": "boolean", "description": "ask CourtListener again instead of using the answer saved in this case (default false)"},
                                     "created_by": {"type": "string"},
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
 ]
@@ -173,10 +175,13 @@ def call(name: str, args: dict):
             raise ValueError("query required")
         limit = max(1, min(int(args.get("limit") or 5), 20))
         try:
-            rows = caselaw.search(MATTER_DIR, "agent", query, limit=limit)
+            rows = caselaw.search(MATTER_DIR, "agent", query, limit=limit, fresh=bool(args.get("fresh")))
         except ConsentError as e:
             return _off_reply(e)
-        out = [f"{len(rows)} CourtListener result(s) for {query!r} (leads only: not source-checked, not good law)"]
+        saved = rows and rows[0].provenance.get("saved")
+        out = [f"{len(rows)} CourtListener result(s) for {query!r} (leads only: not source-checked, not good law)"
+               + (f"; saved in this case {str(rows[0].provenance.get('retrieved_at'))[:10]}, nothing sent"
+                  " (fresh=true asks again)" if saved else "")]
         for r in rows:
             out.append(f"- {r.name}, {r.citation} ({r.effective_date or 'date unknown'}) {r.provenance.get('url')}")
             if r.snippet:
@@ -192,7 +197,8 @@ def call(name: str, args: dict):
         max_requests = max(1, min(int(args.get("max_requests") or 1), 3))
         try:
             with contextlib.redirect_stdout(sys.stderr):
-                report = caselaw.lookup_draft(MATTER_DIR, path, "agent", max_requests=max_requests)
+                report = caselaw.lookup_draft(MATTER_DIR, path, "agent", max_requests=max_requests,
+                                             fresh=bool(args.get("fresh")))
         except ConsentError as e:
             return _off_reply(e)
         if args.get("record"):

@@ -141,3 +141,14 @@ Requested by ty 2026-11-06: the kit is for people who don't use a terminal, and 
 - Unchanged: payload ladder (nothing above `query_text`), hash-only egress log, redirects refused, `source-checked` unreachable from a lookup.
 
 Built 2026-11-06, not independently reviewed. Tests: `tests/test_easy_caselaw.py`.
+
+## 8. Amendment 2026-11-06: saved lookups
+
+Requested by ty 2026-11-06: a lookup made once should not have to be made again. Every CourtListener search result list and every citation answer is appended to the case's `.matter/caselaw/` (`searches.jsonl`, `cites.jsonl`) by `matterkit.saved_lookups`.
+
+- **Reuse.** The same search (whitespace and case folded, same jurisdiction, no more results than were saved, or CourtListener had no more) and any cite answered before are read back. Nothing is sent, no daily allowance is spent, and no grant or key is needed, so saved answers work with lookups off. A cite answer is replayed through `citelookup.interpret`, so today's draft (its case names and years) is judged against it afresh. Only the new cites in a draft are sent.
+- **Fresh.** `--fresh` (CLI) or `fresh: true` (MCP) asks again under the usual grant; the newer answer is read from then on. Reports say which answers were saved and when.
+- **What is kept.** The person's search words, CourtListener's public answers (for cites, only the fields `citelookup` reads), and dates. Never the key. Status 429 and malformed answers are not kept, so they are asked again. Unlike the egress log (§2.4, hash only), search words are stored in clear: they are the case's own research, kept in the case folder they belong to, and are shared with the case.
+- Unchanged: egress logging and grant checks for anything that is sent; lookups are still leads, never `source-checked`.
+
+Built 2026-11-06, not independently reviewed. Tests: `tests/test_saved_lookups.py`.

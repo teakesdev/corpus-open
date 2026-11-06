@@ -4,12 +4,13 @@ R2: courtlistener-free adapter is registered by import path only — urllib
 lives in matterkit.adapters, not this file. Construction still fail-closed
 without a human-activated grant. Results are never source-checked.
 """
+import dataclasses
 import hashlib
 import json
 import os
 from dataclasses import dataclass
 
-from . import consent
+from . import consent, saved_lookups
 from .citations import now_iso
 
 SOURCE_TYPES = {"statute", "regulation", "case", "local", "auto"}
@@ -62,16 +63,49 @@ def build_adapter(provider: str, matter_dir: str, caller_id: str,
     return cls(matter_dir=matter_dir, auth_mode=auth_mode)
 
 
+# Providers whose answers are kept in the case (matterkit.saved_lookups).
+SAVED_PROVIDERS = {"courtlistener-free"}
+
+
+def saved_search(matter_dir: str, provider: str, text: str, limit: int,
+                 jurisdiction: str | None = None) -> list[SearchResult] | None:
+    """The case's saved answer to this search, marked provenance["saved"], or None. Sends nothing."""
+    if provider not in SAVED_PROVIDERS:
+        return None
+    hit = saved_lookups.find_search(matter_dir, provider, text, limit, jurisdiction)
+    if hit is None:
+        return None
+    names = {f.name for f in dataclasses.fields(SearchResult)}
+    out = []
+    for d in hit["results"]:
+        try:
+            r = SearchResult(**{k: v for k, v in d.items() if k in names})
+        except TypeError:  # a damaged record: ask again rather than show half of it
+            return None
+        r.provenance = dict(r.provenance or {}, saved=True)
+        out.append(r)
+    return out
+
+
 def manual_search(matter_dir: str, caller_id: str, text: str,
                   provider: str = "courtlistener-free",
                   limit: int = 5, auth_mode: str = "anonymous",
-                  jurisdiction: str | None = None) -> list[SearchResult]:
+                  jurisdiction: str | None = None, fresh: bool = False) -> list[SearchResult]:
     """Manual query/citation lookup. Results are provenance records only —
-    never written as source-checked."""
+    never written as source-checked. A search asked before is answered from the
+    case's saved lookups, sending nothing, unless `fresh`."""
+    if not fresh:
+        rows = saved_search(matter_dir, provider, text, limit, jurisdiction)
+        if rows is not None:
+            return rows
     adapter = build_adapter(provider, matter_dir, caller_id, auth_mode=auth_mode)
-    return adapter.search(SearchQuery(text=text, source_type="case",
+    rows = adapter.search(SearchQuery(text=text, source_type="case",
                                       jurisdiction=jurisdiction, limit=limit),
                           caller_id=caller_id)
+    if provider in SAVED_PROVIDERS:
+        saved_lookups.save_search(matter_dir, provider, text, limit, jurisdiction,
+                                  [dataclasses.asdict(r) for r in rows])
+    return rows
 
 
 def log_egress(matter_dir: str, provider: str, endpoint: str,

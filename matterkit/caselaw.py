@@ -6,12 +6,14 @@ open to every caller on this computer and with a daily limit well above everyday
 person turns them on: the browser UI's button, or `matter.py courtlistener on`, which asks at the
 terminal. Nothing here is reachable from the MCP server except the read-only status and the
 lookups themselves, which re-check the grant before every request and log each one hash-only.
+Every answer is kept in the case (matterkit.saved_lookups), so asking again sends nothing and
+works even with lookups off; `fresh` asks again.
 """
 import datetime as _dt
 import hashlib
 import os
 
-from . import citelookup, consent, credentials
+from . import citelookup, consent, credentials, saved_lookups
 from .citations import now_iso
 
 SEARCH_PROVIDER = "courtlistener-free"
@@ -86,7 +88,7 @@ def state(matter_dir: str) -> dict:
                         "daily_limit": budget if isinstance(budget, int) else None,
                         "turned_on_by": g.get("created_by") if g else None,
                         "turned_on_at": g.get("created_at") if g else None}
-    return {"on": all(s["on"] for s in scopes.values()), "scopes": scopes,
+    return {"on": all(s["on"] for s in scopes.values()), "scopes": scopes, "saved": saved_lookups.counts(matter_dir),
             "key": credentials.courtlistener_token_source(), "key_url": KEY_URL, "what_is_sent": WHAT_IS_SENT}
 
 
@@ -100,6 +102,10 @@ def describe(matter_dir: str) -> str:
         for name, s in st["scopes"].items():
             limit = s["daily_limit"] if s["daily_limit"] is not None else "no"
             lines.append(f"- {name}: {s['used_today']} used today, {limit} a day allowed")
+    n = st["saved"]
+    lines.append(f"Saved in this case: {n['searches']} search{'es' if n['searches'] != 1 else ''}, "
+                 f"{n['cites']} citation answer{'s' if n['cites'] != 1 else ''}. Asking these again sends nothing, "
+                 "even with lookups off.")
     if st["key"]:
         lines.append(f"CourtListener key: set ({'COURTLISTENER_TOKEN' if st['key'] == 'environment' else 'saved'}).")
     else:
@@ -109,24 +115,29 @@ def describe(matter_dir: str) -> str:
     return "\n".join(lines)
 
 
-def search(matter_dir: str, caller_id: str, query: str, limit: int = 5) -> list:
-    """CourtListener opinion search, authenticated when a key is saved. Raises ConsentError when off."""
+def search(matter_dir: str, caller_id: str, query: str, limit: int = 5, fresh: bool = False) -> list:
+    """CourtListener opinion search, authenticated when a key is saved. A search asked before comes
+    from the case's saved lookups (provenance["saved"]) and sends nothing, on or off. Raises
+    ConsentError when it would have to ask and lookups are off."""
     provider, endpoints, payloads, _ = SCOPES["search"]
-    consent.authorize(matter_dir, provider, endpoints[0], payloads[0], caller_id)  # before any network code loads
     from . import search as S
-    return S.manual_search(matter_dir, caller_id, query, limit=limit, auth_mode="auto")
+    if not fresh:
+        rows = S.saved_search(matter_dir, provider, query, limit)
+        if rows is not None:
+            return rows
+    consent.authorize(matter_dir, provider, endpoints[0], payloads[0], caller_id)  # before any network code loads
+    return S.manual_search(matter_dir, caller_id, query, limit=limit, auth_mode="auto", fresh=True)
 
 
-def lookup_draft(matter_dir: str, path: str, caller_id: str, max_requests: int = 1):
-    """Check a Markdown or text draft's case cites against CourtListener. Returns the report
-    (citelookup.Report). Raises ConsentError when off or without a key, ValueError for a bad file."""
-    with open(path, "rb") as f:
-        raw = f.read()
-    if b"\0" in raw:
-        raise ValueError("cite lookup reads Markdown or plain text, and this file has binary content; "
-                         "use the .md copy of the draft")
+def check_draft(matter_dir: str, path: str, raw: bytes, caller_id: str, max_requests: int = 1,
+                fresh: bool = False, limit_name: str = "max_requests"):
+    """Check a draft's case cites. Cites CourtListener answered before come from the case's saved
+    lookups; only the rest are sent. Returns citelookup.Report (its `saved` counts the former).
+    Raises ConsentError when a cite would have to be sent and lookups are off or there is no key."""
     cites = citelookup.draft_cites(raw.decode("utf-8", "replace"))
-    payloads = citelookup.payloads(cites)
+    saved = {} if fresh else saved_lookups.find_cites(matter_dir, [c.sent for c in cites])
+    todo = [c for c in cites if c.sent not in saved]
+    payloads = citelookup.payloads(todo)
     answers, stopped, sent = [], None, 0
     if payloads:
         consent.authorize(matter_dir, citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE, caller_id)
@@ -137,8 +148,30 @@ def lookup_draft(matter_dir: str, path: str, caller_id: str, max_requests: int =
         adapter = CitationLookupAdapter(matter_dir, caller_id)
         answers, stopped = adapter.lookup(payloads[:max_requests])
         sent = adapter.sent
+        saved_lookups.save_cites(matter_dir, citelookup.answered(payloads, answers))
         if stopped is None and len(payloads) > max_requests:
-            stopped = f"over max_requests {max_requests}; run again in a minute for the rest"
-    return citelookup.Report(path, hashlib.sha256(raw).hexdigest(),
-                             citelookup.interpret(cites, payloads, answers, stopped), payloads, sent, now_iso(),
-                             answered=len(answers))
+            stopped = f"over {limit_name} {max_requests}; run again in a minute for the rest"
+    results = {r.cite.sent: r for r in citelookup.interpret(todo, payloads, answers, stopped)}
+    old = [c for c in cites if c.sent in saved]
+    # Each saved answer is replayed as a one-line request, so today's draft (its case names and
+    # years) is judged against it afresh.
+    replay = [[dict(saved[c.sent]["answer"], start_index=0)] for c in old]
+    for r in citelookup.interpret(old, [c.sent for c in old], replay):
+        when = str(saved[r.cite.sent].get("retrieved_at") or "")[:10] or "an earlier lookup"
+        r.note = "; ".join(filter(None, [f"saved answer from {when}", r.note]))
+        results[r.cite.sent] = r
+    report = citelookup.Report(path, hashlib.sha256(raw).hexdigest(), [results[c.sent] for c in cites],
+                               payloads, sent, now_iso(), answered=len(answers))
+    report.saved, report.stopped = len(old), stopped
+    return report
+
+
+def lookup_draft(matter_dir: str, path: str, caller_id: str, max_requests: int = 1, fresh: bool = False):
+    """Check a Markdown or text draft's case cites against CourtListener. Returns the report
+    (citelookup.Report). Raises ConsentError when off or without a key, ValueError for a bad file."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    if b"\0" in raw:
+        raise ValueError("cite lookup reads Markdown or plain text, and this file has binary content; "
+                         "use the .md copy of the draft")
+    return check_draft(matter_dir, path, raw, caller_id, max_requests=max_requests, fresh=fresh)

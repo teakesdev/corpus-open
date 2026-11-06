@@ -177,6 +177,9 @@ missing, tell the person in plain words, one time, what the reply says:
 > also paste your free CourtListener key there (CourtListener's API page has
 > it). Or run `python3 matter.py courtlistener on <case folder>` once.
 
-Then carry on with the work that doesn't need lookups. A search result or a
+Then carry on with the work that doesn't need lookups. Answers are saved in the
+case: repeating a search or re-checking a draft reads them back without sending
+anything, even with lookups off, so don't avoid repeating a lookup to save the
+daily limit. Pass `fresh: true` only when the person wants a newer answer. A search result or a
 FOUND cite is a lead to read, not good law: say so when you use one, and never
 mark an authority `source-checked` from a lookup.
