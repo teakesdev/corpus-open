@@ -68,9 +68,9 @@ def _plural(n: int, word: str) -> str:
 # --------------------------------------------------------------------------
 # Characters: Word and PDF text carry spaces, hyphens and quotes the cite patterns do not expect
 # --------------------------------------------------------------------------
-_SPACES = "               　"
+_SPACES = "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000"
 _TRANS = {**{ord(c): " " for c in _SPACES},
-          **{ord(c): None for c in "­​‌‍⁠﻿"},   # soft hyphen, zero-width, BOM
+          **{ord(c): None for c in "\u00ad\u200b\u200c\u200d\u2060\ufeff"},   # soft hyphen, zero-width, BOM
           0x2010: "-", 0x2011: "-",                                           # hyphen, non-breaking hyphen
           0x2018: "'", 0x2019: "'", 0x02bc: "'"}                              # curly apostrophes: "Gov't", "App'x"
 _LIGATURES = {ord(c): unicodedata.normalize("NFKC", c) for c in "ﬀﬁﬂﬃﬄﬅﬆ"}

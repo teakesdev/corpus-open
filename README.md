@@ -238,7 +238,13 @@ the MCP server above can't:
 - **Deadline brief.** On a session's first turn, overdue deadlines and those due within
   `deadline_window_days` go to the agent, so it raises them before anything else.
 - **`/matter`** shows status and deadlines; `/matter packet 30s`, `/matter check Drafts/x.md` and
-  `/matter grant` (how to allow cite checks) do what they say.
+  `/matter grant` (the terminal commands, with full paths, that allow cite checks) do what they say.
+  `/matter init <folder>` makes a case folder and points the plugin at it. `/matter demo [folder]`
+  copies a synthetic case there (default `~/cases/corpus-open-demo`), with its files hashed and
+  two made-up deadlines, one overdue, so the deadline brief and Case pane have something to show;
+  it never writes into a folder that already has files.
+- **Skill.** The plugin registers the `matter-kit` skill (`corpus-open:matter-kit`), which teaches
+  the agent the labeling rules for facts and sources.
 - **Case pane (Hermes Desktop).** A pane beside the chat (`desktop/plugin.js`) shows the case at a
   glance: open deadlines with passed ones first, a tamper badge that re-hashes every registered
   file against the hash taken when it was added (Intact / Tampered / Files missing), and how many

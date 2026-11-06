@@ -16,13 +16,25 @@ with the bare cites, and only after a person grants them in the case folder (RFC
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
+import io
+import os
+import shlex
+import shutil
 
 from . import guard as _guard
 from . import source_guard as _source_guard
 from .tools import SCHEMAS, TOOLSET, MatterError, Tools, resolve_matter
 
 PLUGIN_ID = "corpus-open"
+KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KIT_CLI = os.path.join(KIT, "matter.py")
+SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
+DEMO_SOURCE = os.path.join(KIT, "demo-matter")
+DEMO_DIR = "~/cases/corpus-open-demo"
+USAGE = ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant | "
+         "init <folder> | demo [folder]")
 GUARD_MODES = ("lookup", "local", "off")
 DEFAULTS = {
     "matter_dir": "",
@@ -186,19 +198,69 @@ class Plugin:
                 res = self.tools.matter_cite_check({"path": rest})
                 return res["report"] or "No citations found."
             if sub == "grant":
-                caller = self.settings()["caller_id"]
-                md = self.settings()["matter_dir"] or "<case folder>"
-                return ("A person grants cite checks once per case folder, in a terminal (the kit refuses "
-                        "a grant an agent writes):\n"
-                        f"  python3 matter.py consent activate {md} --scope cite-lookup --caller {caller}\n"
-                        f"  python3 matter.py consent activate {md} --scope corpus-search --caller {caller}\n"
-                        "Each asks you to type ACTIVATE. Case cites also need a free CourtListener token "
-                        "in this plugin's settings.")
-            return ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant")
+                return self._grant_text()
+            if sub == "init":
+                return self._init(rest)
+            if sub == "demo":
+                return self._demo(rest or DEMO_DIR)
+            return USAGE
         except MatterError as e:
             return str(e)
         except Exception as e:  # noqa: BLE001
             return f"/matter failed: {e}"
+
+    def _grant_text(self) -> str:
+        caller = shlex.quote(str(self.settings()["caller_id"]))
+        md = self.settings()["matter_dir"]
+        md = shlex.quote(os.path.abspath(os.path.expanduser(md))) if md else "<case folder>"
+        cli = "python3 " + shlex.quote(KIT_CLI)
+        return ("A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
+                "grant an agent writes). These work from any folder:\n"
+                f"  {cli} courtlistener on {md}\n"
+                "    case cites (CourtListener); asks you to type yes, then for your free key\n"
+                f"  {cli} consent activate {md} --scope corpus-search --caller {caller}\n"
+                "    statute and code cites (Corpus); asks you to type ACTIVATE")
+
+    def _select(self, folder: str) -> str:
+        """Point the plugin at folder. Returns a sentence saying whether that happened."""
+        setter = getattr(self.ctx, "set_config", None)
+        if callable(setter):
+            setter("matter_dir", folder)
+            return f"The plugin now uses {folder} as your case folder."
+        return (f"Set the case folder to {folder} in Settings > Plugins > corpus-open "
+                "(this Hermes can't save it from here).")
+
+    def _init(self, rest: str) -> str:
+        if not rest:
+            return "Usage: /matter init <folder> (made if missing; files already there are kept)"
+        from ..matterkit import cases
+        folder = os.path.abspath(os.path.expanduser(rest))
+        with contextlib.redirect_stdout(io.StringIO()):
+            docs = cases.init(folder)
+        return (f"Case folder ready: {folder} ({docs} documents registered). " + self._select(folder) +
+                " Put files in its folders, then ask me to register them (matter_ingest_path).")
+
+    def _demo(self, rest: str) -> str:
+        from ..matterkit import cases, store
+        from ..matterkit import deadlines as dl
+        from ..matterkit import ingest as ing
+        folder = os.path.abspath(os.path.expanduser(rest))
+        if os.path.exists(folder) and (not os.path.isdir(folder) or os.listdir(folder)):
+            return (f"{folder} already has files, so the demo won't write there. "
+                    "Pick another folder: /matter demo <new folder>")
+        shutil.copytree(DEMO_SOURCE, folder, dirs_exist_ok=True)
+        today = self.today()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cases.init(folder)
+            with contextlib.closing(store.connect(folder)) as conn:
+                ing.ingest_paths(conn, folder, [folder])
+                dl.add(conn, "Answer to complaint (demo)", (today - _dt.timedelta(days=3)).isoformat(),
+                       "plugin:corpus-open-demo", rule="synthetic demo date")
+                dl.add(conn, "Initial disclosures (demo)", (today + _dt.timedelta(days=7)).isoformat(),
+                       "plugin:corpus-open-demo", rule="synthetic demo date")
+        return (f"Made a synthetic demo case at {folder}: a made-up complaint and evidence memo, "
+                "registered and hashed, and two made-up deadlines (one overdue). Nothing in it is real. "
+                + self._select(folder) + " Try /matter, or ask me what's due.")
 
     def _deadline_text(self) -> str:
         md = resolve_matter(self.settings().get("matter_dir"))
@@ -235,7 +297,15 @@ def register(ctx, *, secret=_secret, today=None) -> Plugin:
     ctx.register_hook("transform_llm_output", plugin.on_reply)
     ctx.register_hook("pre_llm_call", plugin.on_turn)
     ctx.register_hook("pre_tool_call", plugin.on_tool_call)
+    skill = getattr(ctx, "register_skill", None)
+    if callable(skill) and os.path.isfile(SKILL_PATH):
+        try:
+            skill("matter-kit", SKILL_PATH,
+                  description="How to keep a case folder: hashed sources, labeled facts with sources, "
+                              "deadlines, counsel packets")
+        except Exception:  # noqa: BLE001 - a skill that won't register must not stop the tools loading
+            pass
     ctx.register_command("matter", plugin.command,
-                         description="Your case: status, deadlines, counsel packet, cite check",
-                         args_hint="[status|deadlines|packet|check|grant]")
+                         description="Your case: status, deadlines, counsel packet, cite check, new case, demo",
+                         args_hint="[status|deadlines|packet|check|grant|init|demo]")
     return plugin

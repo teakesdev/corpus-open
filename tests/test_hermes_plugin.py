@@ -10,6 +10,7 @@ import datetime as dt
 import importlib.util
 import io
 import json
+import shlex
 import os
 import sys
 import tempfile
@@ -109,6 +110,13 @@ class Ctx:
 
     def get_config(self, key, default=None):
         return self.settings.get(key, default)
+
+    def set_config(self, key, value):
+        self.settings[key] = value
+
+    def register_skill(self, name, path, description="", frontmatter=None):
+        self.skills = getattr(self, "skills", {})
+        self.skills[name] = (str(path), description)
 
 
 def grant(provider, endpoint, payload_type):
@@ -324,7 +332,7 @@ class TestCommand(PluginCase):
         self.assertIn("Open deadlines:", p.command("deadlines"))
 
     def test_grant_help_usage_and_missing_folder(self):
-        self.assertIn("--scope cite-lookup --caller hermes", self.plugin().command("grant"))
+        self.assertIn("courtlistener on", self.plugin().command("grant"))
         self.assertIn("Usage: /matter", self.plugin().command("frobnicate"))
         self.assertIn("No case folder is set", self.plugin(matter_dir="").command("status"))
 
@@ -393,3 +401,90 @@ class TestGuardParsing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFirstRun(PluginCase):
+    """A person who just enabled the plugin gets to a working case from inside Hermes."""
+
+    def test_registers_the_matter_kit_skill(self):
+        self.plugin()
+        path, _ = self.ctx.skills["matter-kit"]
+        self.assertTrue(path.endswith(os.path.join("skills", "matter-kit", "SKILL.md")))
+        self.assertTrue(os.path.isfile(path))
+
+    def test_a_host_without_skills_still_loads(self):
+        class Older(Ctx):
+            register_skill = None
+        ctx = Older({"matter_dir": self.dir})
+        hp.register(ctx, secret=lambda n: None)
+        self.assertIn("matter", ctx.commands)
+
+    def test_grant_prints_commands_that_run_from_any_folder(self):
+        spaced = os.path.join(self._tmp.name, "my case")
+        with redirect_stdout(io.StringIO()):
+            cases.init(spaced)
+        out = self.plugin(matter_dir=spaced).command("grant")
+        kit_cli = shlex.quote(os.path.join(KIT, "matter.py"))
+        self.assertIn(f"python3 {kit_cli} courtlistener on {shlex.quote(spaced)}", out)
+        self.assertIn(f"python3 {kit_cli} consent activate {shlex.quote(spaced)} --scope corpus-search "
+                      "--caller hermes", out)
+        self.assertNotIn("python3 matter.py", out)
+
+    def test_init_makes_the_case_and_selects_it(self):
+        target = os.path.join(self._tmp.name, "new case")
+        p = self.plugin(matter_dir="")
+        out = p.command(f"init {target}")
+        self.assertTrue(os.path.isdir(os.path.join(target, ".matter")))
+        self.assertEqual(self.ctx.settings["matter_dir"], target)
+        self.assertIn(target, out)
+        self.assertNotIn("No case folder is set", p.command("status"))
+
+    def test_init_expands_home_and_needs_a_folder(self):
+        self.assertIn("Usage: /matter init", self.plugin().command("init"))
+        with mock.patch.dict(os.environ, {"HOME": self._tmp.name}):
+            self.plugin(matter_dir="").command("init ~/c2")
+        self.assertTrue(os.path.isdir(os.path.join(self._tmp.name, "c2", ".matter")))
+
+    def test_init_without_set_config_says_where_to_set_it(self):
+        class NoWrite(Ctx):
+            set_config = None
+        ctx = NoWrite({})
+        p = hp.register(ctx, secret=lambda n: None)
+        target = os.path.join(self._tmp.name, "c3")
+        out = p.command(f"init {target}")
+        self.assertTrue(os.path.isdir(os.path.join(target, ".matter")))
+        self.assertIn("Settings", out)
+
+    def test_demo_builds_a_synthetic_case_with_deadlines(self):
+        target = os.path.join(self._tmp.name, "demo")
+        p = self.plugin(matter_dir="")
+        out = p.command(f"demo {target}")
+        self.assertIn("synthetic", out.lower())
+        self.assertEqual(self.ctx.settings["matter_dir"], target)
+        self.assertTrue(os.path.isfile(os.path.join(target, "Filings", "complaint_synthetic.md")))
+        conn = store.connect(target)
+        try:
+            docs = conn.execute("SELECT COUNT(*) c FROM documents").fetchone()["c"]
+            labels = [r["label"] for r in conn.execute("SELECT label FROM deadlines")]
+        finally:
+            conn.close()
+        self.assertGreaterEqual(docs, 3)
+        self.assertEqual(len(labels), 2)
+        brief = p.on_turn(is_first_turn=True)["context"]
+        self.assertIn("OVERDUE", brief)
+        self.assertIn("Due within 14 days", brief)
+
+    def test_demo_never_writes_into_a_folder_that_has_files(self):
+        target = os.path.join(self._tmp.name, "busy")
+        os.makedirs(target)
+        with open(os.path.join(target, "mine.txt"), "w") as f:
+            f.write("keep")
+        out = self.plugin(matter_dir="").command(f"demo {target}")
+        self.assertIn("already has files", out)
+        self.assertEqual(os.listdir(target), ["mine.txt"])
+        self.assertEqual(self.ctx.settings["matter_dir"], "")
+
+    def test_usage_lists_the_new_commands(self):
+        out = self.plugin().command("frobnicate")
+        self.assertIn("init <folder>", out)
+        self.assertIn("demo", out)
