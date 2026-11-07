@@ -42,7 +42,7 @@ FIXTURE = {
         ["ZZ", "Zed Court of Appeals", "appellate", "official_ZZ_courts", 2010, None, "n", "blocked", "inferred",
          None, "Probe blocked.", CHECKED],
         ["ZZ", "Zed Supreme Court", "supreme", "courtlistener_bulk", None, None, "y", "accessible", "unknown",
-         "https://www.courtlistener.com/?type=o&court=zz", "", CHECKED],
+         "https://www.courtlistener.com/?q=&type=o&court=zz", "", CHECKED],
         ["ZZ", "Old Zed Court", "appellate", "courtlistener_bulk", None, 1969, "y", "unknown", "unknown",
          None, "ended", CHECKED],
         ["ZZ", "Zed - state courts (published)", "other", "google_scholar_case_law", 1950, None, "y", "accessible",
@@ -405,7 +405,7 @@ class TestPackagedSurvey(unittest.TestCase):
         quiet = [r for r in cl if r["note"].startswith("collected historically; not currently scraped")]
         self.assertGreater(len(quiet), 0)
         self.assertTrue(all(r["status"] == "unknown" for r in quiet))
-        self.assertTrue(all(r["url"].startswith("https://www.courtlistener.com/?type=o&court=") for r in cl))
+        self.assertTrue(all(r["url"].startswith("https://www.courtlistener.com/?q=&type=o&court=") for r in cl))
 
     def test_one_google_scholar_row_per_jurisdiction(self):
         scholar = [r["jurisdiction"] for r in self.data["rows"] if r["source_id"] == "google_scholar_case_law"]
@@ -488,7 +488,7 @@ class TestBuildScript(unittest.TestCase):
         rows = {(r[0], r[1], r[3]): dict(zip(data["columns"], r)) for r in data["rows"]}
         self.assertEqual(len(rows), 5)  # the second Scholar row for AL was dropped
         live = rows[("AL", "Alabama Supreme Court", "courtlistener_bulk")]
-        self.assertEqual((live["status"], live["url"]), ("accessible", "https://www.courtlistener.com/?type=o&court=ala"))
+        self.assertEqual((live["status"], live["url"]), ("accessible", "https://www.courtlistener.com/?q=&type=o&court=ala"))
         old = rows[("AL", "Old Alabama Court", "courtlistener_bulk")]
         self.assertEqual(old["status"], "unknown")
         self.assertTrue(old["note"].startswith("collected historically; not currently scraped"))

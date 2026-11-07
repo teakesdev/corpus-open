@@ -42,7 +42,8 @@ STATUSES = {"accessible", "partial", "blocked", "unknown"}
 ONE_PER_JURISDICTION = {"google_scholar_case_law"}  # the survey already has one a state; keep it so
 SURVEY_TOOLING = {"courtlistener_courts_api"}  # how the survey listed CourtListener's courts, not a place to read opinions
 COURTLISTENER = "courtlistener_bulk"
-CL_SEARCH = "https://www.courtlistener.com/?type=o&court="
+CL_SEARCH = "https://www.courtlistener.com/?q=&type=o&court="
+CAP_BROWSE = "https://case.law/caselaw/"  # the project's own browse page (opened 2026-11-07)
 NOT_SCRAPED = "collected historically; not currently scraped (years of coverage not measured)"
 # The row links go to CourtListener's website search, not to its bulk files, so name it for that.
 DISPLAY_NAMES = {COURTLISTENER: "CourtListener (free case law search)"}
@@ -141,6 +142,8 @@ def build_rows(path: str, sources: dict) -> list[list]:
                 note = official_note(note)
             if sid == "govinfo_uscourts" or sid in ONE_PER_JURISDICTION:
                 url = ""  # the evidence is an XML sitemap or a help page; the source's own page is the link
+            if sid == "cap_static":
+                url = CAP_BROWSE  # the survey's evidence was a metadata JSON file, no use to a reader
             if r["http_status"].strip() == "404":
                 url = ""  # the survey found nothing at that address
         if url == sources[sid]["url"]:
