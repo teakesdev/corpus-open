@@ -26,9 +26,11 @@ CHECKED = "2026-11-07"
 
 # A small survey of an invented state, ZZ, in the packaged file's shape.
 COLUMNS = ["jurisdiction", "court", "level", "source", "year_from", "year_to", "fulltext", "status", "basis",
-           "url", "note", "checked_at"]
+           "url", "note", "checked_at", "facts", "cl"]
+SNAPSHOT = {"date": "2026-09-30", "source": "CourtListener bulk data, Public Domain Mark"}
 FIXTURE = {
-    "schema_version": 1, "checked_at": CHECKED, "source_files": "test", "legend": {"CAP": "Harvard bulk"},
+    "schema_version": 2, "checked_at": CHECKED, "source_files": "test", "legend": {"CAP": "Harvard bulk"},
+    "cl_snapshot": SNAPSHOT, "gap_flags": {"ZZ": ["needs-script"]},
     "sources": [{"id": i, "name": n, "url": u, "access_method": "web", "auth": "none", "cost": "free",
                  "terms_url": None, "commercial_use_allowed": "unclear"} for i, n, u in [
         ("official_ZZ_courts", "Zed judiciary", "https://courts.zz.example/"),
@@ -50,6 +52,18 @@ FIXTURE = {
         ["ZZ", "Zed - all reported decisions", "other", "cap_static", 1800, 2005, "n", "accessible", "observed",
          None, "Ends 2005.", CHECKED],
         ["YY", "Why Court", "supreme", "official_ZZ_courts", 2001, None, "y", "accessible", "observed", None, "", CHECKED],
+        # XX: CourtListener rows measured from its bulk files. The first had a mistyped 1665 opinion, raised to the
+        # court's own start; the second holds nothing in the files.
+        ["XX", "Ex Supreme Court", "supreme", "courtlistener_bulk", 1858, 2026, "y", "accessible", "observed",
+         "https://www.courtlistener.com/?q=&type=o&court=xx",
+         "CourtListener collects this court's new opinions automatically; its bulk files (2026-09-30) hold 43,427 opinions",
+         CHECKED, None, {"id": "xx", "since": 1858, "ended": None, "count": 43427, "approximate": 120,
+                         "earliest": "1665-01-02", "latest": "2026-09-02",
+                         "clamp": {"from": 1665, "to": 1858, "floor": "court-start"}}],
+        ["XX", "Ex Court of Appeals", "appellate", "courtlistener_bulk", None, None, "y", "unknown", "unknown",
+         "https://www.courtlistener.com/?q=&type=o&court=xxa", "collected historically; not currently scraped", CHECKED,
+         ["cl-not-in-use"], {"id": "xxa", "since": None, "ended": None, "count": 0, "approximate": 0, "earliest": None,
+                             "latest": None}],
     ],
     "gaps": {"ZZ": ["Official site covers 1995 on; nothing earlier."]},
     "general_gaps": ["Trial courts: nothing free anywhere."],
@@ -327,6 +341,58 @@ class TestWhere(Case):
             with self.subTest(year=bad), self.assertRaises(ValueError):
                 self.where("ZZ", year=bad)
 
+    def test_courtlistener_rows_carry_their_bulk_years_and_newest_date(self):
+        res = self.where("XX")
+        self.assertEqual((res["total"], res["cl_snapshot"]), (2, "2026-09-30"))
+        by = {r["court"]: r for r in res["rows"]}
+        sup = by["Ex Supreme Court"]
+        self.assertEqual((sup["year_from"], sup["year_to"], sup["basis"]), (1858, 2026, "observed"))
+        self.assertEqual({k: sup["cl"][k] for k in ("id", "since", "count", "approximate", "earliest", "latest")},
+                         {"id": "xx", "since": 1858, "count": 43427, "approximate": 120, "earliest": "1665-01-02",
+                          "latest": "2026-09-02"})
+        self.assertEqual(sup["cl"]["clamp"], {"from": 1665, "to": 1858, "floor": "court-start"})
+        self.assertEqual(by["Ex Court of Appeals"]["facts"], ["cl-not-in-use"])
+        text = rl.render_where(res)
+        self.assertIn("years 1858-2026 (observed)", text)
+        self.assertIn("CourtListener holds 43,427 opinions (bulk files of 2026-09-30); newest opinion 2026-09-02; "
+                      "start year raised from 1665 to 1858, the court's own start", text)
+        self.assertIn("CourtListener holds no opinions from this court (bulk files of 2026-09-30)", text)
+        # a row measured from the bulk files says so once, in that line, not again in its note
+        self.assertNotIn("collects this court's new opinions automatically", text)
+
+    def test_the_raised_start_year_is_what_a_year_search_sees(self):
+        def mark(year):
+            return {r["court"]: r["covers"] for r in self.where("XX", year=year)["rows"]}["Ex Supreme Court"]
+        self.assertEqual(mark(1700), "does-not-cover")  # the 1665 date was a typo, not coverage
+        self.assertEqual(mark(1858), "covers")
+        self.assertEqual(mark("1800-1900"), "partly")
+        self.assertEqual(mark(2026), "covers")
+
+    def test_rows_without_bulk_years_have_no_cl_record_and_no_cl_line(self):
+        res = self.where("ZZ")
+        self.assertIsNone(next(r for r in res["rows"] if r["source_id"] == "courtlistener_bulk")["cl"])
+        self.assertNotIn("CourtListener holds", rl.render_where(res))
+        self.assertEqual(self.survey["gap_flags"], {"ZZ": ["needs-script"]})
+
+    def test_a_version_1_file_still_reads_and_a_newer_one_is_refused(self):
+        old = {k: v for k, v in FIXTURE.items() if k not in ("cl_snapshot", "gap_flags")}
+        old["schema_version"] = 1
+        old["columns"] = COLUMNS[:12]
+        old["rows"] = [r[:12] for r in FIXTURE["rows"]]
+        path = os.path.join(self._tmp.name, "v1.json")
+        with open(path, "w") as f:
+            json.dump(old, f)
+        data = rl.load_coverage(path)
+        self.assertIsNone(data["cl_snapshot"])
+        self.assertTrue(all(r["cl"] is None and r["facts"] == [] for r in data["rows"]))
+        self.assertIsNone(rl.where("ZZ", data=data)["cl_snapshot"])
+        new = dict(FIXTURE, schema_version=3)
+        path3 = os.path.join(self._tmp.name, "v3.json")
+        with open(path3, "w") as f:
+            json.dump(new, f)
+        with self.assertRaisesRegex(ValueError, "unknown coverage file version 3"):
+            rl.load_coverage(path3)
+
     def test_limit_keeps_the_total(self):
         res = self.where("ZZ", limit=2)
         self.assertEqual((len(res["rows"]), res["total"]), (2, 6))
@@ -371,12 +437,71 @@ class TestPackagedSurvey(unittest.TestCase):
 
     def test_shape_and_size(self):
         raw = json.loads(self.raw)
-        self.assertEqual(raw["schema_version"], 1)
+        self.assertEqual(raw["schema_version"], 2)
         self.assertRegex(raw["checked_at"], r"^\d{4}-\d\d-\d\d$")
         self.assertEqual(raw["checked_at"], max(r[11] for r in raw["rows"]))
-        self.assertLess(len(self.raw.encode()), 400_000)
+        self.assertLess(len(self.raw.encode()), 600_000)
         self.assertNotIn("\n  ", self.raw)  # compact
         self.assertEqual(set(raw["columns"]), set(FIXTURE["columns"]))
+
+    def test_schema_2_names_the_bulk_snapshot_and_its_license(self):
+        snap = json.loads(self.raw)["cl_snapshot"]
+        self.assertEqual(set(snap), {"date", "source"})
+        self.assertRegex(snap["date"], r"^\d{4}-\d\d-\d\d$")
+        self.assertEqual(snap["source"], "CourtListener bulk data, Public Domain Mark")
+        self.assertEqual(self.data["cl_snapshot"], snap)
+        self.assertIn(snap["date"], json.loads(self.raw)["source_files"])
+
+    def test_every_row_fact_is_in_the_legend_and_every_courtlistener_row_has_its_court_record(self):
+        legend = json.loads(self.raw)["legend"]["facts"]
+        seen = set()
+        for r in self.data["rows"]:
+            seen.update(r["facts"])
+            self.assertTrue(set(r["facts"]) <= set(legend), r)
+            if r["source_id"] == "courtlistener_bulk":
+                cl = r["cl"]
+                self.assertRegex(cl["id"], r"^[\w-]+$")
+                self.assertTrue(r["url"].endswith("court=" + cl["id"]), r)
+                for k in ("count", "approximate"):
+                    self.assertIsInstance(cl[k], int)
+            else:
+                self.assertIsNone(r["cl"])
+        for fact in ("robots-txt", "needs-script", "cl-not-in-use", "cl-historical", "cl-no-new-intake", "govinfo-absent",
+                     "govinfo-stale", "govinfo-elective"):
+            self.assertIn(fact, seen)
+        self.assertTrue(all(set(v) <= {"needs-script"} for v in self.data["gap_flags"].values()))
+        self.assertIn("PA", self.data["gap_flags"])
+
+    def test_courtlistener_years_never_start_before_the_courts_own_start(self):
+        raised = []
+        for r in self.data["rows"]:
+            cl = r["cl"]
+            if not cl or not cl.get("earliest") or not r["year_from"]:
+                continue
+            if cl.get("since"):
+                self.assertGreaterEqual(r["year_from"], cl["since"], r)
+            self.assertGreaterEqual(r["year_from"], int(cl["earliest"][:4]))
+            if cl.get("clamp"):
+                raised.append((r["jurisdiction"], r["court"]))
+                self.assertEqual(r["year_from"], cl["clamp"]["to"])
+                self.assertLess(cl["clamp"]["from"], cl["clamp"]["to"])
+                self.assertEqual(cl["clamp"]["from"], int(cl["earliest"][:4]))
+                self.assertIn("raised from", r["note"])
+        self.assertGreater(len(raised), 10)
+
+    def test_the_bad_early_dates_are_fixed_in_the_data(self):
+        def cl(j, cid):
+            return next(r for r in self.data["rows"] if r["jurisdiction"] == j and r["cl"] and r["cl"]["id"] == cid)
+        mn = cl("MN", "minn")  # an opinion dated 1665 in a court that began in 1858
+        self.assertEqual((mn["year_from"], mn["cl"]["earliest"], mn["cl"]["clamp"]),
+                         (1858, "1665-01-02", {"from": 1665, "to": 1858, "floor": "court-start"}))
+        pa = cl("PA", "pa")
+        self.assertEqual((pa["year_from"], pa["cl"]["clamp"]["from"]), (1722, 1702))
+        nh = cl("NH", "nh")  # the bulk summary had lost the zeros of "0019-01-31" and read "1901-31-"
+        self.assertEqual((nh["cl"]["earliest"], nh["year_from"], nh["cl"]["clamp"]["from"]), ("0019-01-31", 1776, 19))
+        mo = cl("MO", "mo")  # not raised: 1852 is after the court began in 1821
+        self.assertEqual((mo["year_from"], mo["year_to"], mo["cl"]["latest"], "clamp" in mo["cl"]), (1852, 2025, "2025-08-12", False))
+        self.assertIn("cl-no-new-intake", mo["facts"])
 
     def test_every_row_names_a_listed_source_and_stays_short(self):
         sources = self.data["sources"]
@@ -439,53 +564,71 @@ class TestBuildScript(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
 
-    def survey(self):
-        import csv
-        d = self._tmp.name
-        head = ["jurisdiction", "court_name", "court_level", "source_id", "year_from", "year_to", "fulltext_search",
-                "status", "evidence_url", "note", "year_from_basis", "http_status", "checked_at"]
-        cl = "CL id={id}; has_opinion_scraper={s}; in_use=True; court existed since 1800 (court start_date, NOT corpus coverage)."
-        long_note = "yr:observed: " + " ".join(["word"] * 80) + " | ft:observed: search box"
-        rows = [
-            ["AL", "Alabama Supreme Court", "supreme", "courtlistener_bulk", "", "", "y", "accessible", "https://api.example/x/", cl.format(id="ala", s="True"), "unknown", "200", "2026-11-05"],
-            ["AL", "Old Alabama Court", "appellate", "courtlistener_bulk", "", "1969", "y", "accessible", "https://api.example/y/", cl.format(id="alaold", s="False"), "unknown", "200", "2026-11-06"],
+    HEAD = ["jurisdiction", "court_name", "court_level", "source_id", "year_from", "year_to", "fulltext_search",
+            "status", "evidence_url", "note", "year_from_basis", "http_status", "checked_at"]
+    CL = "CL id={id}; has_opinion_scraper={s}; in_use={u}; court existed since {since} (court start_date, NOT corpus coverage)."
+
+    def rows(self):
+        cl, long_note = self.CL, "yr:observed: " + " ".join(["word"] * 80) + " | ft:observed: search box"
+        return [
+            ["AL", "Alabama Supreme Court", "supreme", "courtlistener_bulk", "", "", "y", "accessible", "https://api.example/x/", cl.format(id="ala", s="True", u="True", since="1800"), "unknown", "200", "2026-11-05"],
+            ["AL", "Old Alabama Court", "appellate", "courtlistener_bulk", "", "1969", "y", "accessible", "https://api.example/y/", cl.format(id="alaold", s="False", u="True", since="1800"), "unknown", "200", "2026-11-06"],
             ["AL", "Alabama Supreme Court", "supreme", "official_AL_x", "2013", "", "n", "accessible", "https://courts.al.example/opinions (404 observed; none)", long_note, "observed", "404", "2026-11-04"],
             ["AL", "Alabama - all", "other", "google_scholar_case_law", "1950", "", "y", "accessible", "https://scholar.example/help", "Scholar note", "observed", "200", "2026-11-03"],
             ["AL", "Alabama - again", "other", "google_scholar_case_law", "1951", "", "y", "accessible", "https://scholar.example/help", "dupe", "observed", "200", "2026-11-03"],
             ["US", "District Court, D. Md.", "federal-district", "govinfo_uscourts", "2005", "", "y", "accessible", "https://gov.example/sitemap/mdd_2026.xml", "GovInfo code mdd", "observed", "200", "2026-11-01"],
         ]
+
+    def survey(self, extra=(), gaps_extra=""):
+        import csv
+        d = self._tmp.name
         with open(os.path.join(d, "coverage.csv"), "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(head)
-            w.writerows(rows)
+            w.writerow(self.HEAD)
+            w.writerows(self.rows() + list(extra))
         src = [{"source_id": i, "name": i.upper(), "url": u, "access_method": "web", "auth": "none", "cost": "free",
                 "terms_url": None, "commercial_use_allowed": "unclear", "automated_access": "x", "notes": "secret survey notes"}
                for i, u in [("courtlistener_bulk", "https://cl.example/"), ("official_AL_x", "https://courts.al.example/"),
                             ("google_scholar_case_law", "https://scholar.example/"), ("govinfo_uscourts", "https://gov.example/c"),
+                            ("cap_static", "https://cap.example/"), ("official_MN_x", "https://courts.mn.example/"),
                             ("courtlistener_courts_api", "https://cl.example/api/")]]
         with open(os.path.join(d, "sources.json"), "w") as f:
             json.dump(src, f)
         gaps = "# Gaps\n\nHeader paragraph.\n\n"
-        gaps += " ".join(f"{c} OFF text for {c}; IN OR ME words, and a state-like OR here." for c in self.build.STATE_ORDER)
+        gaps += " ".join(f"{c} OFF text for {c}; IN OR ME words, and a state-like OR here." + (gaps_extra if c == "AZ" else "")
+                         for c in self.build.STATE_ORDER)
         gaps += "\n\nTrial courts: none anywhere. 16 states post some.\n\n## Findings\n1. GovInfo USCOURTS lacks 36 courts.\n"
         with open(os.path.join(d, "gaps_by_state.md"), "w") as f:
             f.write(gaps)
         return (os.path.join(d, "coverage.csv"), os.path.join(d, "sources.json"), os.path.join(d, "gaps_by_state.md"),
                 os.path.join(d, "out", "coverage.json"))
 
-    def run_build(self):
-        cov, src, gaps, out = self.survey()
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(self.build.main(["--coverage", cov, "--sources", src, "--gaps", gaps, "--out", out]), 0)
+    def years(self, courts, source="CourtListener bulk data 2026-09-30 (opinion-clusters + dockets), Public Domain Mark", **top):
+        path = os.path.join(self._tmp.name, "cl_bulk_years.json")
+        with open(path, "w") as f:
+            json.dump(dict({"source": source, "courts": courts}, **top), f)
+        return path
+
+    def run_build(self, extra=(), years=None, gaps_extra=""):
+        cov, src, gaps, out = self.survey(extra, gaps_extra)
+        args = ["--coverage", cov, "--sources", src, "--gaps", gaps, "--out", out]
+        if years:
+            args += ["--cl-years", years]
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(self.build.main(args), 0)
         with open(out, encoding="utf-8") as f:
             text = f.read()
-        return json.loads(text), text
+        self.printed = printed.getvalue()
+        data = json.loads(text)
+        data["by"] = {(r[0], r[1], r[3]): dict(zip(data["columns"], r)) for r in data["rows"]}
+        return data, text
 
     def test_builds_the_shape_the_module_reads(self):
         data, text = self.run_build()
-        self.assertEqual((data["schema_version"], data["checked_at"]), (1, "2026-11-06"))  # the newest row date
+        self.assertEqual((data["schema_version"], data["checked_at"]), (2, "2026-11-06"))  # the newest row date
+        self.assertIsNone(data["cl_snapshot"])  # no --cl-years
         self.assertNotIn("\n  ", text)
-        rows = {(r[0], r[1], r[3]): dict(zip(data["columns"], r)) for r in data["rows"]}
+        rows = data["by"]
         self.assertEqual(len(rows), 5)  # the second Scholar row for AL was dropped
         live = rows[("AL", "Alabama Supreme Court", "courtlistener_bulk")]
         self.assertEqual((live["status"], live["url"]), ("accessible", "https://www.courtlistener.com/?q=&type=o&court=ala"))
@@ -499,9 +642,120 @@ class TestBuildScript(unittest.TestCase):
         self.assertTrue(official["note"].endswith("…"))
         self.assertNotIn(" wo…", official["note"])  # cut at a word boundary
         self.assertIsNone(rows[("US", "District Court, D. Md.", "govinfo_uscourts")]["url"])  # a sitemap is not a page to open
-        self.assertEqual({s["id"] for s in data["sources"]}, {"courtlistener_bulk", "official_AL_x", "google_scholar_case_law", "govinfo_uscourts"})
+        self.assertEqual({s["id"] for s in data["sources"]}, {"courtlistener_bulk", "official_AL_x", "google_scholar_case_law", "govinfo_uscourts", "cap_static", "official_MN_x"})
         self.assertEqual(set(data["sources"][0]), {"id", "name", "url", "access_method", "auth", "cost", "terms_url", "commercial_use_allowed"})
         self.assertNotIn("secret survey notes", text)
+
+    def test_courtlistener_rows_carry_their_court_record_and_facts(self):
+        data, _ = self.run_build()
+        live = data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]
+        self.assertEqual((live["facts"], live["cl"]), (None, {"id": "ala", "since": 1800, "ended": None}))
+        old = data["by"][("AL", "Old Alabama Court", "courtlistener_bulk")]
+        self.assertEqual((old["facts"], old["cl"]["id"]), (["cl-no-new-intake"], "alaold"))
+        self.assertIsNone(data["by"][("AL", "Alabama Supreme Court", "official_AL_x")]["cl"])
+        self.assertEqual(live["year_from"], None)  # years are measured only when --cl-years is given
+
+    def test_row_facts_are_read_off_the_notes_and_the_notes_do_not_ship(self):
+        cl = self.CL
+        extra = [
+            ["MN", "Minnesota Supreme Court", "supreme", "official_MN_x", "", "", "unknown", "blocked", "https://courts.mn.example/", "Not fetched (robots disallow). Cloudflare challenge.", "unknown", "blocked_by_robots", "2026-11-04"],
+            ["MN", "Minnesota Court of Appeals", "appellate", "official_MN_x", "", "", "unknown", "partial", "https://courts.mn.example/coa", "yr:unknown: listing is JS-rendered | ft:js_rendered: shell", "unknown", "200", "2026-11-04"],
+            ["MN", "Gone Court", "other", "courtlistener_bulk", "", "1900", "y", "unknown", "https://api.example/g/", cl.format(id="gone", s="False", u="False", since="1850") + " Historical court (ended 1900).", "unknown", "200", "2026-11-04"],
+            ["MN", "Quiet Court", "other", "courtlistener_bulk", "", "", "y", "unknown", "https://api.example/q/", cl.format(id="quiet", s="True", u="False", since="n/a"), "unknown", "200", "2026-11-04"],
+            ["US", "United States Bankruptcy Court, D. Guam", "bankruptcy", "govinfo_uscourts", "", "", "unknown", "unknown", "https://gov.example/s.xml", "observed: no sitemap for CL court id gub - this court's opinions are NOT in GovInfo", "observed", "200", "2026-11-04"],
+            ["US", "United States Bankruptcy Court, D. Wyoming", "bankruptcy", "govinfo_uscourts", "2020", "2022", "y", "partial", "https://gov.example/w.xml", "GovInfo code wyb; Only opinions the court elects to send (not all). STALE: no packages after 2022.", "observed", "200", "2026-11-04"],
+        ]
+        data, text = self.run_build(extra)
+        facts = {k[1]: v["facts"] for k, v in data["by"].items()}
+        self.assertEqual(facts["Minnesota Supreme Court"], ["robots-txt"])
+        self.assertEqual(facts["Minnesota Court of Appeals"], ["needs-script"])
+        self.assertEqual(data["by"][("MN", "Gone Court", "courtlistener_bulk")]["facts"], ["cl-not-in-use", "cl-historical"])
+        self.assertEqual(data["by"][("MN", "Gone Court", "courtlistener_bulk")]["cl"], {"id": "gone", "since": 1850, "ended": 1900})
+        self.assertEqual(data["by"][("MN", "Quiet Court", "courtlistener_bulk")]["facts"], ["cl-not-in-use"])
+        self.assertIsNone(data["by"][("MN", "Quiet Court", "courtlistener_bulk")]["cl"]["since"])  # "n/a" is no start year
+        self.assertEqual(facts["United States Bankruptcy Court, D. Guam"], ["govinfo-absent"])
+        self.assertEqual(facts["United States Bankruptcy Court, D. Wyoming"], ["govinfo-stale", "govinfo-elective"])
+        produced = {f for row in data["by"].values() for f in (row["facts"] or [])}
+        self.assertEqual(produced, {"robots-txt", "needs-script", "cl-not-in-use", "cl-historical", "cl-no-new-intake",
+                                    "govinfo-absent", "govinfo-stale", "govinfo-elective"})
+        self.assertEqual(produced, set(data["legend"]["facts"]))  # every code the builder writes is explained
+        self.assertNotIn("NOT corpus coverage", text)
+
+    def test_gap_flags_come_from_the_gap_notes(self):
+        data, _ = self.run_build(gaps_extra=" Some listing is a JS portal we could not read.")
+        self.assertEqual(data["gap_flags"], {"AZ": ["needs-script"]})
+        data, _ = self.run_build(gaps_extra=" A JS bot-validation page was served.")  # a challenge page, not a script list
+        self.assertEqual(data["gap_flags"], {})
+
+    def test_court_names_lose_the_surveys_working_remarks(self):
+        c = self.build.clean_court_name
+        self.assertEqual(c("U.S. Court of Appeals for the Federal Circuit (GovInfo code ca13 - inferred from FedCir-style docket numbers)"),
+                         "U.S. Court of Appeals for the Federal Circuit")
+        self.assertEqual(c("(name not in fetched CL list) jpml"), "Court code jpml")
+        self.assertEqual(c("Texas Court of Appeals, 1st District (Houston)"), "Texas Court of Appeals, 1st District (Houston)")
+        self.assertEqual(c("  Spaced   name "), "Spaced name")
+
+    def test_courtlistener_years_fill_a_row_and_raise_an_earlier_start_to_the_courts_start(self):
+        years = self.years({"ala": {"count": 1000, "approximate": 5, "earliest": "1750-03-01", "latest": "2026-09-01"}})
+        data, _ = self.run_build(years=years)
+        self.assertEqual(data["cl_snapshot"], SNAPSHOT)
+        self.assertIn("2026-09-30", data["source_files"])
+        live = data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]
+        self.assertEqual((live["year_from"], live["year_to"], live["basis"]), (1800, 2026, "observed"))
+        self.assertEqual(live["cl"], {"id": "ala", "since": 1800, "ended": None, "count": 1000, "approximate": 5,
+                                      "earliest": "1750-03-01", "latest": "2026-09-01",
+                                      "clamp": {"from": 1750, "to": 1800, "floor": "court-start"}})
+        self.assertIn("1,000 opinions, newest 2026-09-01", live["note"])
+        self.assertIn("Start year raised from 1750 to 1800 (the court's own start)", live["note"])
+        # a court the summary does not list has no opinions in the bulk files
+        old = data["by"][("AL", "Old Alabama Court", "courtlistener_bulk")]
+        self.assertEqual((old["cl"]["count"], old["cl"]["latest"], old["year_from"], old["year_to"]), (0, None, None, 1969))
+        self.assertIn("no opinions from it", old["note"])
+        self.assertIn("1 start years raised", self.printed)
+        self.assertIn("raised AL Alabama Supreme Court (ala): 1750 -> 1800 (court-start)", self.printed)
+
+    def test_the_caselaw_access_projects_earliest_year_is_the_floor_when_the_court_has_no_start(self):
+        cl = self.CL
+        extra = [
+            ["MN", "Minnesota Supreme Court", "supreme", "courtlistener_bulk", "", "", "y", "accessible", "https://api.example/m/", cl.format(id="minn", s="True", u="True", since="n/a"), "unknown", "200", "2026-11-04"],
+            ["MN", "Minnesota - all reported decisions in CAP reporters", "other", "cap_static", "1830", "2019", "n", "accessible", "https://static.example/meta.json", "CAP: 1 case", "observed", "200", "2026-11-04"],
+        ]
+        years = self.years({"minn": {"count": 43427, "approximate": 1, "earliest": "1665-01-02", "latest": "2026-09-02"},
+                            "ala": {"count": 5, "approximate": 0, "earliest": "1900-01-01", "latest": "2026-09-01"}})
+        data, _ = self.run_build(extra, years)
+        mn = data["by"][("MN", "Minnesota Supreme Court", "courtlistener_bulk")]
+        self.assertEqual((mn["year_from"], mn["cl"]["clamp"]), (1830, {"from": 1665, "to": 1830, "floor": "cap-start"}))
+        self.assertIn("(the Caselaw Access Project's start)", mn["note"])
+        # a start after the floor is left alone
+        self.assertNotIn("clamp", data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]["cl"])
+        self.assertEqual(data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]["year_from"], 1900)
+
+    def test_a_bulk_date_that_lost_its_leading_zeros_is_read_back_and_a_bad_one_is_not_trusted(self):
+        rd = self.build.read_date
+        self.assertEqual(rd("2026-09-30"), "2026-09-30")
+        self.assertEqual(rd("1901-31-"), "0019-01-31")  # "0019-01-31" as the summary once wrote it
+        self.assertEqual(rd("0019-01-31"), "0019-01-31")
+        for bad in (None, "", "garbage", "2026-13-40", "2026-02-30", "123456789", "1-2-3"):
+            self.assertIsNone(rd(bad), bad)
+        years = self.years({"ala": {"count": 10, "approximate": 0, "earliest": "1801-31-", "latest": "2026-09-01"}})
+        data, _ = self.run_build(years=years)
+        live = data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]
+        self.assertEqual((live["cl"]["earliest"], live["year_from"], live["cl"]["clamp"]["from"]), ("0018-01-31", 1800, 18))
+
+    def test_the_years_file_needs_the_shape_the_counts_and_a_snapshot_date(self):
+        cov, src, gaps, out = self.survey()
+        base = ["--coverage", cov, "--sources", src, "--gaps", gaps, "--out", out]
+        for body, message in (({"courts": {"ala": {"count": -1, "approximate": 0}}}, "non-negative"),
+                              ({"courts": []}, "must look like"),
+                              ({"source": "no date here", "courts": {}}, "snapshot date")):
+            path = os.path.join(self._tmp.name, "y.json")
+            with open(path, "w") as f:
+                json.dump(body, f)
+            with self.assertRaises(SystemExit) as ctx:
+                self.build.main(base + ["--cl-years", path])
+            self.assertIn(message, str(ctx.exception))
+        self.assertFalse(os.path.exists(out))
+        self.assertEqual(self.build.read_cl_years(self.years({}, source="x", snapshot="2026-06-30"))[1], "2026-06-30")
 
     def test_gaps_are_split_by_state_in_order_not_at_every_state_like_word(self):
         data, _ = self.run_build()
@@ -517,12 +771,17 @@ class TestBuildScript(unittest.TestCase):
         self.assertEqual(cut, "alpha beta…")
         self.assertLessEqual(len(cut), 12)
 
-    def test_a_file_from_the_api_key_is_refused(self):
+    def test_a_file_from_the_api_key_is_refused_for_every_argument(self):
         cov, src, gaps, out = self.survey()
-        with self.assertRaises(SystemExit) as ctx:
-            self.build.main(["--coverage", cov, "--sources", src, "--gaps", os.path.join(self._tmp.name, "cl_ranges.jsonl"), "--out", out])
-        self.assertIn("API key", str(ctx.exception))
-        self.assertFalse(os.path.exists(out))
+        keyed = os.path.join(self._tmp.name, "cl_ranges.jsonl")
+        for field in ("--gaps", "--cl-years", "--coverage", "--sources"):
+            args = {"--coverage": cov, "--sources": src, "--gaps": gaps, "--out": out}
+            args[field] = keyed
+            argv = [x for kv in args.items() for x in kv]
+            with self.subTest(field=field), self.assertRaises(SystemExit) as ctx:
+                self.build.main(argv)
+            self.assertIn("API key", str(ctx.exception))
+            self.assertFalse(os.path.exists(out))
 
 
 def run_cli(*args, cwd=None):
@@ -632,6 +891,18 @@ class TestCli(Case):
         self.assertGreater(json.loads(self.cli("where", "US", "--json").stdout)["total"], 100)
 
 
+    def test_where_shows_courtlistener_years_and_the_newest_opinion(self):
+        out = self.cli("where", "MN", "--level", "supreme")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("years 1858-2026 (observed)", out.stdout)
+        self.assertIn("CourtListener holds 43,427 opinions (bulk files of 2026-09-30); newest opinion 2026-09-02; "
+                      "start year raised from 1665 to 1858, the court's own start", out.stdout)
+        res = json.loads(self.cli("where", "MN", "--level", "supreme", "--json").stdout)
+        self.assertEqual(res["cl_snapshot"], "2026-09-30")
+        cl = next(r for r in res["rows"] if r["source_id"] == "courtlistener_bulk")
+        self.assertEqual((cl["cl"]["latest"], cl["cl"]["count"], cl["year_from"], cl["year_to"]), ("2026-09-02", 43427, 1858, 2026))
+
+
 class TestMcp(Case):
     def mcp(self, *calls):
         msgs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize",
@@ -692,6 +963,17 @@ class TestMcp(Case):
         self.assertEqual((where["jurisdiction"], len(where["rows"]), where["checked_at"]),
                          ("OH", 3, rl.load_coverage()["checked_at"]))
         self.assertEqual(len(self.lines()), 2)
+
+    def test_where_carries_courtlistener_years_and_the_snapshot(self):
+        out = self.mcp(("matter.research_where", {"jurisdiction": "MN", "level": "supreme"}))
+        self.assertFalse(out[1]["result"].get("isError"), out[1])
+        res = json.loads(self.text(out, 1))
+        self.assertEqual(res["cl_snapshot"], "2026-09-30")
+        cl = next(r for r in res["rows"] if r["source_id"] == "courtlistener_bulk")
+        self.assertEqual((cl["year_from"], cl["year_to"], cl["cl"]["latest"], cl["facts"]), (1858, 2026, "2026-09-02", []))
+        self.assertEqual(cl["cl"]["clamp"], {"from": 1665, "to": 1858, "floor": "court-start"})
+        tools = {t["name"]: t for t in out[99]["result"]["tools"]}
+        self.assertIn("newest opinion", tools["matter.research_where"]["description"])
 
     def test_refusals_are_errors_and_write_nothing(self):
         out = self.mcp(("matter.research_log", {"source": "", "query": "q", "outcome": "found"}),

@@ -10,7 +10,9 @@ Scholar, a court's own website, a law library. This module keeps three things in
   leads     cases that may matter later, each with a reason and, if you like, a date to look again.
   where     for a state (or DC, or US for the federal courts), the places a court's opinions can be
             read for free and from what year, from a dated survey packaged with the kit
-            (matterkit/data/caselaw_coverage.json).
+            (matterkit/data/caselaw_coverage.json, schema 2: the same file is the public dataset other
+            projects read). A CourtListener row carries the years, the opinion count and the newest
+            opinion's date measured from CourtListener's public bulk files, when the file has them.
 
 Changing a record never rewrites the file: the change is appended with the same id, and the
 newest record for an id is the one read. A line cut short by a crash is skipped, and the next
@@ -29,6 +31,7 @@ from .citations import now_iso
 
 LOG = "research.jsonl"
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "caselaw_coverage.json")
+SCHEMAS = (1, 2)  # the file's schema_version: 2 adds the per-row facts and CourtListener's bulk years
 
 OUTCOMES = ("found", "nothing", "blocked", "not-online", "paywalled", "error")
 MISSES = ("nothing", "blocked", "not-online", "paywalled")  # after these, "where else to look" helps
@@ -340,8 +343,9 @@ _loaded: dict = {}
 
 
 def load_coverage(path: str | None = None) -> dict:
-    """The survey: rows as dicts (with source name and link filled in), the sources by id, and
-    the gap sentences by state. Read once per file."""
+    """The survey: rows as dicts (with source name and link filled in, and for schema 2 each row's
+    facts and CourtListener record), the sources by id, the gap sentences by state, and the
+    CourtListener bulk snapshot the years came from (None when the file has none). Read once per file."""
     path = path or DATA
     if path in _loaded:
         return _loaded[path]
@@ -350,8 +354,9 @@ def load_coverage(path: str | None = None) -> dict:
             raw = json.load(f)
     except (OSError, ValueError) as e:
         raise ValueError(f"the case law coverage survey could not be read ({path}): {e}") from None
-    if raw.get("schema_version") != 1:
-        raise ValueError(f"unknown coverage file version {raw.get('schema_version')!r}; this kit reads version 1")
+    if raw.get("schema_version") not in SCHEMAS:
+        raise ValueError(f"unknown coverage file version {raw.get('schema_version')!r}; this kit reads versions "
+                         f"{', '.join(map(str, SCHEMAS))}")
     sources = {s["id"]: s for s in raw["sources"]}
     rows = []
     for values in raw["rows"]:
@@ -361,9 +366,11 @@ def load_coverage(path: str | None = None) -> dict:
                      "url": row.get("url") or src.get("url"), "court": row["court"], "level": row["level"],
                      "jurisdiction": row["jurisdiction"], "year_from": row["year_from"], "year_to": row["year_to"],
                      "fulltext": row["fulltext"], "status": row["status"], "basis": row["basis"],
-                     "checked_at": row["checked_at"], "note": row["note"]})
+                     "checked_at": row["checked_at"], "note": row["note"], "facts": list(row.get("facts") or []),
+                     "cl": row.get("cl")})
     data = {"checked_at": raw["checked_at"], "legend": raw.get("legend", {}), "sources": sources, "rows": rows,
-            "gaps": raw.get("gaps", {}), "general_gaps": raw.get("general_gaps", []),
+            "gaps": raw.get("gaps", {}), "gap_flags": raw.get("gap_flags", {}),
+            "general_gaps": raw.get("general_gaps", []), "cl_snapshot": raw.get("cl_snapshot"),
             "jurisdictions": sorted({r["jurisdiction"] for r in rows})}
     _loaded[path] = data
     return data
@@ -429,7 +436,7 @@ def where(jurisdiction: str, court_level: str | None = None, year=None, court: s
     return {"jurisdiction": j, "level": court_level, "year": _years_text(span), "court": words or None,
             "checked_at": data["checked_at"], "note": DATED.format(date=data["checked_at"]), "total": total,
             "rows": rows, "gaps": list(data["gaps"].get(j, [])), "general_gaps": list(data["general_gaps"]),
-            "legend": data["legend"]}
+            "cl_snapshot": (data.get("cl_snapshot") or {}).get("date"), "legend": data["legend"]}
 
 
 def _norm(text) -> str:
@@ -466,7 +473,22 @@ def hints(jurisdiction: str, tried_source: str | None = None, court_level: str |
 
 # ---------------------------------------------------------------- plain text for the CLI and MCP
 
-def _where_row(r: dict) -> str:
+def _cl_line(r: dict, snapshot: str | None) -> str | None:
+    """For a CourtListener row measured from its bulk files: how many opinions and the newest one's date."""
+    cl = r.get("cl") or {}
+    if not isinstance(cl.get("count"), int):
+        return None
+    when = f" (bulk files of {snapshot})" if snapshot else " (bulk files)"
+    if cl["count"] == 0:
+        return f"CourtListener holds no opinions from this court{when}"
+    newest = f"; newest opinion {cl['latest']}" if cl.get("latest") else ""
+    clamp = cl.get("clamp")
+    raised = (f"; start year raised from {clamp['from']} to {clamp['to']}, the court's "
+              + ("own start" if clamp.get("floor") == "court-start" else "start in the Caselaw Access Project")) if clamp else ""
+    return f"CourtListener holds {cl['count']:,} opinions{when}{newest}{raised}"
+
+
+def _where_row(r: dict, snapshot: str | None = None) -> str:
     start, end = r["year_from"], r["year_to"]
     years = ("years " + (f"{start}-{end}" if end else f"{start} on") + f" ({r['basis']})") if start else \
         (f"through {end}" if end else "years not known")
@@ -476,7 +498,10 @@ def _where_row(r: dict) -> str:
         lines.append(f"    {r['url']}")
     lines.append(f"    {years}; full-text search: {({'y': 'yes', 'n': 'no'}).get(r['fulltext'], 'not known')}; "
                  f"status: {r['status']}")
-    if r["note"]:
+    cl_line = _cl_line(r, snapshot)
+    if cl_line:
+        lines.append(f"    {cl_line}")
+    if r["note"] and not cl_line:  # a measured CourtListener row says the same in its note
         lines.append(f"    {r['note']}")
     return "\n".join(lines)
 
@@ -495,7 +520,7 @@ def render_where(res: dict) -> str:
         + ([f"courts named like {res['court']!r}"] if res.get("court") else [])
     lines = [f"Where to find case law for {res['jurisdiction']}" + (f" ({', '.join(quals)})" if quals else "")
              + f": {res['total']} place{'s' if res['total'] != 1 else ''}. " + res["note"]]
-    lines += [_where_row(r) for r in res["rows"]]
+    lines += [_where_row(r, res.get("cl_snapshot")) for r in res["rows"]]
     if res["total"] > len(res["rows"]):
         lines.append(f"... {res['total'] - len(res['rows'])} more; narrow it with --level, --court or --year, "
                      "or raise --limit.")
@@ -522,7 +547,7 @@ def render_hints(res: dict, outcome: str) -> str:
         return head + f"The survey lists no other place for {res['jurisdiction']} to try."
     lines = [head + f"Other places to look in {res['jurisdiction']}"
              + (f" for {res['year']}" if res.get("year") else "") + f" (survey checked {res['checked_at']}; court sites change):"]
-    lines += [_where_row(r) for r in res["rows"]]
+    lines += [_where_row(r, res.get("cl_snapshot")) for r in res["rows"]]
     if res["gaps"]:
         lines.append(f"Known gap: {res['gaps'][0]}")
     lines.append(f"More: python3 matter.py research where {res['jurisdiction']}")

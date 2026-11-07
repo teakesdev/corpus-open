@@ -166,8 +166,14 @@ what year, whether it has full-text search, and whether the survey's own check
 could open the page); it logged in nowhere and needed no CourtListener key.
 Court websites change: every answer says when it was checked,
 and "blocked" means only that the survey's automated check was refused, so the
-page may still open in your browser. The data is `matterkit/data/caselaw_coverage.json`;
-`scripts/build_caselaw_coverage.py` rebuilds it from a newer survey.
+page may still open in your browser. The data is `matterkit/data/caselaw_coverage.json`
+(schema 2, public: other projects read the same file, among them the case-law map on corpuslaw.us);
+`scripts/build_caselaw_coverage.py` rebuilds it from a newer survey. For CourtListener it carries
+the years, the opinion count and the newest opinion's date, counted from CourtListener's public bulk
+files (Public Domain Mark, no key): `scripts/cl_bulk_years.py <snapshot>` streams two of them, saves
+nothing, and writes the per-court summary that `build_caselaw_coverage.py --cl-years` folds in. A start
+year earlier than the court's own start is raised to it, so a mistyped date in the files never reads
+as the court's history.
 
 ## Capturing a web page
 
