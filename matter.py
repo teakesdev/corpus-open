@@ -59,6 +59,19 @@ Usage:
   matter.py courtlistener on|off|status <dir>   # one switch for search + cite lookup (asks you to type yes)
   matter.py courtlistener key [--forget]        # save your free CourtListener key (outside every case folder)
   matter.py consent propose|activate <dir> [--scope search|cite-lookup] [--caller ID]...   # narrower grants
+  matter.py research log <dir> --source S --query Q --outcome found|nothing|blocked|not-online|paywalled|error
+                       [--jurisdiction XX] [--court C] [--years 1990-2005] [--url U] [--note N] [--by NAME]
+                       # a search you did anywhere (Google Scholar, a court's site, a law library); after a
+                       # miss with --jurisdiction it says where else to look
+  matter.py research list <dir> [--outcome O] [--jurisdiction XX] [--json]   # also the searches the kit sent
+  matter.py research save <dir> "TITLE" --why REASON [--revisit YYYY-MM-DD] [--citation C] [--url U]
+                       [--jurisdiction XX] [--by NAME]      # a case that may matter later (a lead, not good law)
+  matter.py research leads <dir> [--status open|all|saved|revisited|dropped|used] [--json]
+  matter.py research due <dir> [--as-of YYYY-MM-DD] [--json]   # leads whose revisit date has come
+  matter.py research set <dir> LEAD_ID [--status S] [--revisit D] [--note N] [--by NAME]
+  matter.py research where XX [--level supreme|appellate|trial|federal-appellate|federal-district|bankruptcy]
+                       [--year 2003|1990-2005] [--court WORDS] [--limit N] [--json]
+                       # where a state's (or DC's, or US federal) opinions can be read free; a dated survey
   matter.py docket suggest <dir>
   matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
                         [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]
@@ -878,6 +891,55 @@ def cmd_search(args):
         print(f"recorded {len(rows)} authorities as resolved (not source-checked)")
 
 
+def _research_case(args):
+    if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
+        sys.exit(f"refused: {args.case_dir} is not a case folder (no .matter/)")
+
+
+def cmd_research(args):
+    """research log|list|save|leads|due|set|where: the case law research log (matterkit.research_log)."""
+    from matterkit import research_log as rl
+    try:
+        if args.sub == "where":
+            res = rl.where(args.jurisdiction, args.level, args.year, args.court,
+                           limit=args.limit if args.limit is not None else (None if args.json else 25))
+            print(json.dumps(res, indent=1) if args.json else rl.render_where(res))
+            return
+        _research_case(args)
+        if args.sub in ("log", "save", "set"):
+            try:
+                by = store.attribution(args.by or os.environ.get("USER"))
+            except ValueError as e:
+                sys.exit(f"invalid attribution: {e}")
+        if args.sub == "log":
+            r = rl.log_search(args.case_dir, by, args.source, args.query, args.outcome, args.jurisdiction,
+                              args.court, args.years, args.url, args.note)
+            print(f"{r['id']} [{r['outcome']}] {r['source']}: {r['query']}")
+            if r["outcome"] in rl.MISSES and r["jurisdiction"]:
+                print(rl.render_hints(rl.hints(r["jurisdiction"], r["source"], years=r["years"], court=r["court"]),
+                                      r["outcome"]))
+            elif r["outcome"] in rl.MISSES:
+                print("Add --jurisdiction XX (a state code, DC, or US) and this says where else to look.")
+        elif args.sub == "list":
+            rows = rl.list_searches(args.case_dir, args.outcome, args.jurisdiction)
+            print(json.dumps(rows, indent=1) if args.json else rl.render_searches(rows))
+        elif args.sub == "save":
+            r = rl.save_lead(args.case_dir, by, args.title, args.why, args.revisit, args.citation, args.url,
+                             args.jurisdiction)
+            print(f"{r['id']} [{r['status']}] {r['title']}" + (f" (look again {r['revisit']})" if r["revisit"] else ""))
+        elif args.sub == "leads":
+            rows = rl.leads(args.case_dir, args.status)
+            print(json.dumps(rows, indent=1) if args.json else rl.render_leads(rows))
+        elif args.sub == "due":
+            res = rl.due(args.case_dir, args.as_of)
+            print(json.dumps(res, indent=1) if args.json else rl.render_due(res))
+        else:
+            r = rl.update_lead(args.case_dir, by, args.lead_id, args.status, args.revisit, args.note)
+            print(f"{r['id']} [{r['status']}] {r['title']}" + (f" (look again {r['revisit']})" if r["revisit"] else ""))
+    except ValueError as e:
+        sys.exit(f"refused: {e}")
+
+
 def cmd_ui(args):
     """ui: a browser UI over a workspace of cases, served to this computer only (127.0.0.1)."""
     from matterkit import webui
@@ -1194,6 +1256,62 @@ def main():
     p.add_argument("--author", help="lookup --record: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
     p.add_argument("--directed-by", help="lookup --record: person who directed an agent; env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_cite)
+
+    p = sub.add_parser("research", help="Case law research log: what you searched, leads to revisit, where else to look")
+    commands = p.add_subparsers(dest="sub", required=True)
+    from matterkit import research_log as rlog
+    by_help = "who is recording this (default: your login name)"
+    c = commands.add_parser("log", help="Record a search you did by hand, and what came of it")
+    c.add_argument("case_dir")
+    c.add_argument("--source", required=True,
+                   help='where you looked, e.g. "google scholar", courtlistener, "court website", "law library"; '
+                        "the ids `research where` prints work best")
+    c.add_argument("--query", required=True, help="the words or citation you searched for")
+    c.add_argument("--outcome", required=True, choices=rlog.OUTCOMES,
+                   help="found, nothing, blocked (the site refused you), not-online, paywalled or error")
+    c.add_argument("--jurisdiction", help="state code, DC, or US (federal); after a miss this shows where else to look")
+    c.add_argument("--court", help="which court, in words")
+    c.add_argument("--years", help="the years searched: 2003 or 1990-2005")
+    c.add_argument("--url", help="the page you searched or found")
+    c.add_argument("--note", default="", help="anything you want to remember")
+    c.add_argument("--by", help=by_help)
+    c = commands.add_parser("list", help="Searches logged by hand plus the ones the kit sent to CourtListener")
+    c.add_argument("case_dir")
+    c.add_argument("--outcome", choices=rlog.OUTCOMES)
+    c.add_argument("--jurisdiction", help="only searches scoped to this state code, DC, or US")
+    c.add_argument("--json", action="store_true")
+    c = commands.add_parser("save", help="Keep a case that may matter later (a lead, not good law)")
+    c.add_argument("case_dir"); c.add_argument("title", help="the case, in your words")
+    c.add_argument("--why", required=True, help="why it may matter (required: you will not remember)")
+    c.add_argument("--revisit", help="YYYY-MM-DD to look at it again")
+    c.add_argument("--citation"); c.add_argument("--url")
+    c.add_argument("--jurisdiction", help="state code, DC, or US")
+    c.add_argument("--by", help=by_help)
+    c = commands.add_parser("leads", help="List saved leads, soonest revisit date first")
+    c.add_argument("case_dir")
+    c.add_argument("--status", default="open", choices=["open", "all", *rlog.LEAD_STATUSES],
+                   help="open = still saved (default)")
+    c.add_argument("--json", action="store_true")
+    c = commands.add_parser("due", help="Leads whose revisit date has come, and the ones with no date")
+    c.add_argument("case_dir")
+    c.add_argument("--as-of", help="YYYY-MM-DD to count from (default: today)")
+    c.add_argument("--json", action="store_true")
+    c = commands.add_parser("set", help="Mark a lead revisited, dropped or used, or move its revisit date")
+    c.add_argument("case_dir"); c.add_argument("lead_id", help="the rl_... id from `research leads`")
+    c.add_argument("--status", choices=rlog.LEAD_STATUSES)
+    c.add_argument("--revisit", help="YYYY-MM-DD")
+    c.add_argument("--note", default="", help="what happened (kept with the lead)")
+    c.add_argument("--by", help=by_help)
+    c = commands.add_parser("where", help="Where a state's (or DC's, or the federal) opinions can be read for free, "
+                                          "from a dated survey; needs no case folder")
+    c.add_argument("jurisdiction", help="two-letter state code, DC, or US for the federal courts")
+    c.add_argument("--level", choices=rlog.LEVELS, help="only this kind of court")
+    c.add_argument("--year", help="a year (2003) or a range (1990-2005): marks which places cover it")
+    c.add_argument("--court", help="only courts whose name has these words, e.g. Maryland (federal courts are many)")
+    c.add_argument("--limit", type=int, help="most places to show (default 25; --json shows all)")
+    c.add_argument("--json", action="store_true")
+    for c in commands.choices.values():
+        c.set_defaults(fn=cmd_research)
 
     p = sub.add_parser("pages"); p.add_argument("case_dir"); p.add_argument("path", nargs="?")
     p.set_defaults(fn=cmd_pages)

@@ -2,10 +2,10 @@
 """matter-mcp — zero-dependency stdio MCP server exposing a matter store to any MCP client.
 
 Set MATTER_DIR to the case workspace root before launching. Tools are deliberately
-read-mostly: agents can register facts and render packets, but nothing here files or
-contacts anyone. The one thing that leaves the machine is a case law lookup
-(matter.search, matter.cite_lookup) to CourtListener, and only after a person has turned
-lookups on for the case; no tool here can turn them on.
+read-mostly: agents can register facts, keep a case law research log and render packets,
+but nothing here files or contacts anyone. The one thing that leaves the machine is a
+case law lookup (matter.search, matter.cite_lookup) to CourtListener, and only after a
+person has turned lookups on for the case; no tool here can turn them on.
 """
 import contextlib
 import json
@@ -107,6 +107,38 @@ TOOLS = [
                                     "fresh": {"type": "boolean", "description": "ask CourtListener again instead of using the answer saved in this case (default false)"},
                                     "created_by": {"type": "string"},
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+    {"name": "matter.research_list", "description": "The case law searches recorded in this case: ones logged by hand (Google Scholar, a court's website, a law library, ...) with the outcome of each (found, nothing, blocked, not-online, paywalled, error), plus the CourtListener searches the kit sent (source 'courtlistener'), oldest first. outcome and jurisdiction narrow the list. Read-only. No network.",
+     "inputSchema": {"type": "object", "properties": {"outcome": {"enum": ["found", "nothing", "blocked", "not-online", "paywalled", "error"]},
+                                                      "jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US"}}}},
+    {"name": "matter.research_leads", "description": "Cases saved as leads to look at again, each with the reason it was kept, its revisit date (soonest first, undated last) and status. status: 'open' (still saved, default), 'all', or one of saved|revisited|dropped|used. A lead is a note to self: it is not source-checked and not good law. Read-only. No network.",
+     "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}}}},
+    {"name": "matter.research_due", "description": "Leads whose revisit date has come (on or before as_of, default today), with how many days ago, and separately the open leads that have no revisit date. A lead is a note to self, not good law. Read-only. No network.",
+     "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string", "description": "YYYY-MM-DD, default today"}}}},
+    {"name": "matter.research_where", "description": "Where else to look for case law: for a state (two-letter code), DC, or US (federal), the places a court's opinions can be read for free, each with its link, the years it covers, whether it has full-text search, whether the survey could open it (status accessible|partial|blocked|unknown; blocked means the survey's automated check was refused and the page may still open in a browser) and whether that was observed or inferred. With year (2003 or 1990-2005) each place is marked covers|partly|does-not-cover|unknown and covering places come first. level and court narrow it; there are many federal courts, so give court for US. The data is a dated survey (see checked_at in the reply) and court websites change: check the page itself. A place listed is a lead, not good law. Read-only. No network.",
+     "inputSchema": {"type": "object", "required": ["jurisdiction"],
+                     "properties": {"jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US for the federal courts"},
+                                    "level": {"enum": ["supreme", "appellate", "trial", "federal-appellate", "federal-district", "bankruptcy", "other"]},
+                                    "year": {"type": "string", "description": "2003 or 1990-2005"},
+                                    "court": {"type": "string", "description": "only courts whose name has these words, e.g. 'Maryland'"},
+                                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "default 20"}}}},
+    {"name": "matter.research_log", "description": "Record a case law search done anywhere (Google Scholar, a court's website, a law library, CourtListener by hand) and what came of it: found, nothing, blocked (the site refused), not-online, paywalled or error. Writes one line to this case's .matter/caselaw/research.jsonl and nothing else; no network, nothing is searched. Refuses an empty source or query, an unknown outcome or malformed years (YYYY or YYYY-YYYY), and writes nothing then. When the outcome is nothing, blocked, not-online or paywalled and a jurisdiction is given, the reply also lists other places to look from a dated survey (court websites change; check the page). Searches the kit sends to CourtListener are recorded already.",
+     "inputSchema": {"type": "object", "required": ["source", "query", "outcome"],
+                     "properties": {"source": {"type": "string", "description": "where you looked, e.g. 'google scholar', 'court website', 'law library'"},
+                                    "query": {"type": "string"},
+                                    "outcome": {"enum": ["found", "nothing", "blocked", "not-online", "paywalled", "error"]},
+                                    "jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US"},
+                                    "court": {"type": "string"}, "years": {"type": "string", "description": "2003 or 1990-2005"},
+                                    "url": {"type": "string"}, "note": {"type": "string"}, "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+    {"name": "matter.research_save", "description": "Keep a case that may matter later as a lead, with the reason (required: a lead without one is useless later) and optionally a revisit date (YYYY-MM-DD), citation, link and jurisdiction. Writes one line to this case's .matter/caselaw/research.jsonl and nothing else; no network. A lead is a note to self: it is not source-checked and not good law. Agents save leads; marking one revisited, dropped or used is a person's decision, made with `matter.py research set`. Refuses an empty title or reason and a bad date, and writes nothing then.",
+     "inputSchema": {"type": "object", "required": ["title", "why"],
+                     "properties": {"title": {"type": "string", "description": "the case, in plain words"},
+                                    "why": {"type": "string", "description": "why it may matter"},
+                                    "revisit": {"type": "string", "description": "YYYY-MM-DD"},
+                                    "citation": {"type": "string"}, "url": {"type": "string"},
+                                    "jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US"},
+                                    "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
 ]
 
 
@@ -135,7 +167,39 @@ def _off_reply(err) -> str:
     return f"Nothing was sent.{why}\n\n{caselaw.describe(MATTER_DIR)}"
 
 
+def _research(name: str, args: dict):
+    """The case law research log (matterkit.research_log). Local only: it reads and appends to the
+    case's .matter/caselaw/research.jsonl and reads the packaged survey; nothing is sent anywhere."""
+    from matterkit import research_log as rl
+    if name == "matter.research_list":
+        return json.dumps(rl.list_searches(MATTER_DIR, args.get("outcome"), args.get("jurisdiction")), indent=1)
+    if name == "matter.research_leads":
+        return json.dumps(rl.leads(MATTER_DIR, args.get("status") or "open"), indent=1)
+    if name == "matter.research_due":
+        return json.dumps(rl.due(MATTER_DIR, args.get("as_of")), indent=1)
+    if name == "matter.research_where":
+        limit = max(1, min(int(args.get("limit") or 20), 100))
+        return json.dumps(rl.where(args.get("jurisdiction"), args.get("level"), args.get("year"), args.get("court"),
+                                   limit=limit), indent=1)
+    by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
+    if name == "matter.research_log":
+        r = rl.log_search(MATTER_DIR, by, args.get("source"), args.get("query"), args.get("outcome"),
+                          args.get("jurisdiction"), args.get("court"), args.get("years"), args.get("url"),
+                          args.get("note") or "")  # raises ValueError -> isError, nothing written
+        text = f"{r['id']} [{r['outcome']}] {r['source']}: {r['query']} (recorded by {by})"
+        if r["outcome"] in rl.MISSES and r["jurisdiction"]:
+            text += "\n\n" + rl.render_hints(rl.hints(r["jurisdiction"], r["source"], years=r["years"], court=r["court"]),
+                                              r["outcome"])
+        return text
+    r = rl.save_lead(MATTER_DIR, by, args.get("title"), args.get("why"), args.get("revisit"), args.get("citation"),
+                     args.get("url"), args.get("jurisdiction"))  # raises ValueError -> isError, nothing written
+    return f"{r['id']} [{r['status']}] {r['title']} (saved by {by}; a lead, not good law)" + \
+        (f"; look again {r['revisit']}" if r["revisit"] else "")
+
+
 def call(name: str, args: dict):
+    if name.startswith("matter.research_"):
+        return _research(name, args)
     if name == "matter.verify":
         abs_matter = os.path.abspath(MATTER_DIR)
         if not os.path.isdir(abs_matter):
