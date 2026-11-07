@@ -34,12 +34,17 @@ Shape of the output (compact JSON, no indentation):
                   {"id": CourtListener's court id, "since": year the court began (CourtListener's
                    court record) or null, "ended": year it ended or null, and, with --cl-years,
                    "count", "approximate", "earliest", "latest" (dates, from the bulk files) and,
-                   when the earliest year had to be raised, "clamp": {"from", "to", "floor"}}.
-                  With --cl-years a CourtListener row's year_from and year_to are those years,
-                  and year_from is never earlier than the court's own start (or, when CourtListener
-                  has none, the Caselaw Access Project's earliest year for the jurisdiction):
-                  bulk dates include a few mistyped ones (a Minnesota supreme court opinion dated
-                  1665), so an earlier year is raised to that floor and the original is kept in clamp.
+                   when the earliest year had to be corrected, "clamp": {"from", "to", "floor"}}.
+                  With --cl-years a CourtListener row's year_from and year_to are those years.
+                  Bulk dates include a few mistyped ones (a Minnesota supreme court opinion dated
+                  1665, a New Hampshire one in year 19), so an earliest year is corrected, and only
+                  then, when it falls before BOTH the court's own start and the Caselaw Access
+                  Project's earliest year for the jurisdiction: it is raised to the Caselaw Access
+                  Project's earliest year (floor "cap-start"). An earlier year that is still after
+                  the project's start is kept: a Kentucky opinion from 1881 is a predecessor court's
+                  real history. When the jurisdiction has no Caselaw Access Project year, only a year
+                  below 1600 is corrected: year_from becomes null, "earliest year not found"
+                  (floor "typo", clamp.to null). The original year is always kept in clamp.from.
   gaps            {"AL": ["plain sentence", ...], ..., "US": [...]},
   gap_flags       {"AL": ["needs-script"], ...}  structured facts read from the survey's gap notes,
   general_gaps    [sentences that hold for every state].
@@ -69,6 +74,7 @@ CAP_BROWSE = "https://case.law/caselaw/"  # the project's own browse page (opene
 NOT_SCRAPED = "collected historically; not currently scraped (years of coverage not measured)"
 NOT_SCRAPED_MEASURED = "collected historically; not currently scraped"
 CL_SNAPSHOT_SOURCE = "CourtListener bulk data, Public Domain Mark"
+OBVIOUS_TYPO = 1600  # an earliest year below this is not a real year, whatever else is known
 NAME_NOTE = re.compile(r"\s*\((?:GovInfo code|[^)]*\binferred\b)[^)]*\)", re.I)
 JS_NOTE = re.compile(r"js_render|JS shell|JS-rendered|Angular|Vue shell", re.I)
 JS_GAP = re.compile(r"\bJS\b(?!\s+bot-validation)|JS-rendered|JS shell|script-driven|script-loaded|\bAngular\b")
@@ -114,7 +120,9 @@ LEGEND = {
     },
     "cl": "CourtListener rows: id (its court id), since and ended (years, from its court record), and with "
           "bulk years count, approximate (opinions with approximate dates), earliest and latest (dates, "
-          "approximate ones left out) and clamp (an earliest year raised to the court's start)",
+          "approximate ones left out) and clamp (an earliest year that fell before both the court's start and "
+          "the Caselaw Access Project's earliest year, raised to the latter; or, with no such project year, "
+          "a year below 1600 marked as not found)",
 }
 
 
@@ -249,9 +257,13 @@ def courtlistener_row(note: str, year_to: str) -> tuple[dict, list[str], bool]:
 
 
 def apply_cl_years(rows: list[dict], years: dict, snapshot: str) -> list[dict]:
-    """Fill every CourtListener row from the bulk summary. A row's start year is raised to the court's own
-    start (CourtListener's court record) or, when it has none, to the Caselaw Access Project's earliest year for
-    the jurisdiction, so a mistyped early date never reads as the court's history. Returns what was raised."""
+    """Fill every CourtListener row from the bulk summary and correct a mistyped earliest year.
+
+    An earliest year is corrected only when it falls before BOTH the court's own start (CourtListener's court
+    record) and the Caselaw Access Project's earliest year for the jurisdiction, and then it is raised to the
+    project's year. A year that predates the court but not the project is a predecessor court's history and
+    stays (Kentucky 1881 for a court that began in 1976). Where the jurisdiction has no project year, only a
+    year below 1600 is corrected, to "not found". Returns what was corrected."""
     cap_from = {r["jurisdiction"]: r["year_from"] for r in rows if r["source"] == "cap_static" and r["year_from"]}
     raised = []
     for r in rows:
@@ -263,12 +275,18 @@ def apply_cl_years(rows: list[dict], years: dict, snapshot: str) -> list[dict]:
         count, approx = (got["count"], got["approximate"]) if got else (0, 0)
         cl.update({"count": count, "approximate": approx, "earliest": earliest, "latest": latest})
         year_from = int(earliest[:4]) if earliest else None
-        floor, why = (cl["since"], "court-start") if cl["since"] else (cap_from.get(r["jurisdiction"]), "cap-start")
-        if year_from is not None and floor and year_from < floor:
-            cl["clamp"] = {"from": year_from, "to": floor, "floor": why}
-            raised.append({"jurisdiction": r["jurisdiction"], "court": r["court"], "id": cl["id"], "from": year_from,
-                           "to": floor, "floor": why})
-            year_from = floor
+        cap = cap_from.get(r["jurisdiction"])
+        if year_from is not None:
+            if cap:
+                if year_from < cap and (cl["since"] is None or year_from < cl["since"]):
+                    cl["clamp"] = {"from": year_from, "to": cap, "floor": "cap-start"}
+                    year_from = cap
+            elif year_from < OBVIOUS_TYPO:
+                cl["clamp"] = {"from": year_from, "to": None, "floor": "typo"}
+                year_from = None
+            if cl.get("clamp"):
+                raised.append({"jurisdiction": r["jurisdiction"], "court": r["court"], "id": cl["id"],
+                               "from": cl["clamp"]["from"], "to": cl["clamp"]["to"], "floor": cl["clamp"]["floor"]})
         year_to = int(latest[:4]) if latest else r["year_to"]
         r["year_from"], r["year_to"] = year_from, year_to
         if year_from or latest:
@@ -287,8 +305,8 @@ def cl_note(r: dict, cl: dict, snapshot: str) -> str:
         text += f"{cl['count']:,} opinions" + (f", newest {cl['latest']}" if cl["latest"] else "")
     if cl.get("clamp"):
         c = cl["clamp"]
-        text += (f". Start year raised from {c['from']} to {c['to']} ("
-                 + ("the court's own start)" if c["floor"] == "court-start" else "the Caselaw Access Project's start)"))
+        text += (f". Start year raised from {c['from']} to {c['to']} (the Caselaw Access Project's start)"
+                 if c["floor"] == "cap-start" else f". Earliest year not found: its earliest date is year {c['from']}")
     if not collects and cl.get("ended"):
         text += f"; the court itself ended in {cl['ended']}"
     return text
@@ -439,9 +457,9 @@ def main(argv=None) -> int:
     size = os.path.getsize(args.out)
     print(f"{args.out}: {size:,} bytes, {len(rows)} rows, {len(sources)} sources, "
           f"{len(gaps)} states with gap notes, checked_at {checked}"
-          + (f", CourtListener bulk snapshot {snapshot}, {len(raised)} start years raised" if snapshot else ""))
+          + (f", CourtListener bulk snapshot {snapshot}, {len(raised)} start years corrected" if snapshot else ""))
     for c in raised:
-        print(f"  raised {c['jurisdiction']} {c['court']} ({c['id']}): {c['from']} -> {c['to']} ({c['floor']})")
+        print(f"  raised {c['jurisdiction']} {c['court']} ({c['id']}): {c['from']} -> {c['to'] or 'not found'} ({c['floor']})")
     return 0
 
 

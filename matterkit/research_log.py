@@ -483,8 +483,11 @@ def _cl_line(r: dict, snapshot: str | None) -> str | None:
         return f"CourtListener holds no opinions from this court{when}"
     newest = f"; newest opinion {cl['latest']}" if cl.get("latest") else ""
     clamp = cl.get("clamp")
-    raised = (f"; start year raised from {clamp['from']} to {clamp['to']}, the court's "
-              + ("own start" if clamp.get("floor") == "court-start" else "start in the Caselaw Access Project")) if clamp else ""
+    raised = ""
+    if clamp and clamp.get("floor") == "typo":
+        raised = f"; earliest year not found (its earliest date is year {clamp['from']})"
+    elif clamp:
+        raised = f"; start year raised from {clamp['from']} to {clamp['to']}, the Caselaw Access Project's start"
     return f"CourtListener holds {cl['count']:,} opinions{when}{newest}{raised}"
 
 

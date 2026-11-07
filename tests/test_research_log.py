@@ -52,14 +52,19 @@ FIXTURE = {
         ["ZZ", "Zed - all reported decisions", "other", "cap_static", 1800, 2005, "n", "accessible", "observed",
          None, "Ends 2005.", CHECKED],
         ["YY", "Why Court", "supreme", "official_ZZ_courts", 2001, None, "y", "accessible", "observed", None, "", CHECKED],
-        # XX: CourtListener rows measured from its bulk files. The first had a mistyped 1665 opinion, raised to the
-        # court's own start; the second holds nothing in the files.
-        ["XX", "Ex Supreme Court", "supreme", "courtlistener_bulk", 1858, 2026, "y", "accessible", "observed",
+        # XX: CourtListener rows measured from its bulk files. The first had a mistyped 1665 opinion, before both the
+        # court's start (1858) and the Caselaw Access Project's (1830), so raised to 1830; the second holds nothing in the
+        # files; the third has an earliest date in year 19 and no project year to raise it to: "earliest year not found".
+        ["XX", "Ex Supreme Court", "supreme", "courtlistener_bulk", 1830, 2026, "y", "accessible", "observed",
          "https://www.courtlistener.com/?q=&type=o&court=xx",
          "CourtListener collects this court's new opinions automatically; its bulk files (2026-09-30) hold 43,427 opinions",
          CHECKED, None, {"id": "xx", "since": 1858, "ended": None, "count": 43427, "approximate": 120,
                          "earliest": "1665-01-02", "latest": "2026-09-02",
-                         "clamp": {"from": 1665, "to": 1858, "floor": "court-start"}}],
+                         "clamp": {"from": 1665, "to": 1830, "floor": "cap-start"}}],
+        ["XX", "Ex Old Court", "other", "courtlistener_bulk", None, 1900, "y", "accessible", "observed",
+         "https://www.courtlistener.com/?q=&type=o&court=xxold", "collected historically; not currently scraped", CHECKED,
+         None, {"id": "xxold", "since": None, "ended": None, "count": 7, "approximate": 0, "earliest": "0019-01-31",
+                "latest": "1900-05-05", "clamp": {"from": 19, "to": None, "floor": "typo"}}],
         ["XX", "Ex Court of Appeals", "appellate", "courtlistener_bulk", None, None, "y", "unknown", "unknown",
          "https://www.courtlistener.com/?q=&type=o&court=xxa", "collected historically; not currently scraped", CHECKED,
          ["cl-not-in-use"], {"id": "xxa", "since": None, "ended": None, "count": 0, "approximate": 0, "earliest": None,
@@ -343,19 +348,23 @@ class TestWhere(Case):
 
     def test_courtlistener_rows_carry_their_bulk_years_and_newest_date(self):
         res = self.where("XX")
-        self.assertEqual((res["total"], res["cl_snapshot"]), (2, "2026-09-30"))
+        self.assertEqual((res["total"], res["cl_snapshot"]), (3, "2026-09-30"))
         by = {r["court"]: r for r in res["rows"]}
         sup = by["Ex Supreme Court"]
-        self.assertEqual((sup["year_from"], sup["year_to"], sup["basis"]), (1858, 2026, "observed"))
+        self.assertEqual((sup["year_from"], sup["year_to"], sup["basis"]), (1830, 2026, "observed"))
         self.assertEqual({k: sup["cl"][k] for k in ("id", "since", "count", "approximate", "earliest", "latest")},
                          {"id": "xx", "since": 1858, "count": 43427, "approximate": 120, "earliest": "1665-01-02",
                           "latest": "2026-09-02"})
-        self.assertEqual(sup["cl"]["clamp"], {"from": 1665, "to": 1858, "floor": "court-start"})
+        self.assertEqual(sup["cl"]["clamp"], {"from": 1665, "to": 1830, "floor": "cap-start"})
         self.assertEqual(by["Ex Court of Appeals"]["facts"], ["cl-not-in-use"])
+        old = by["Ex Old Court"]
+        self.assertEqual((old["year_from"], old["year_to"], old["cl"]["clamp"]), (None, 1900, {"from": 19, "to": None, "floor": "typo"}))
         text = rl.render_where(res)
-        self.assertIn("years 1858-2026 (observed)", text)
+        self.assertIn("years 1830-2026 (observed)", text)
         self.assertIn("CourtListener holds 43,427 opinions (bulk files of 2026-09-30); newest opinion 2026-09-02; "
-                      "start year raised from 1665 to 1858, the court's own start", text)
+                      "start year raised from 1665 to 1830, the Caselaw Access Project's start", text)
+        self.assertIn("CourtListener holds 7 opinions (bulk files of 2026-09-30); newest opinion 1900-05-05; "
+                      "earliest year not found (its earliest date is year 19)", text)
         self.assertIn("CourtListener holds no opinions from this court (bulk files of 2026-09-30)", text)
         # a row measured from the bulk files says so once, in that line, not again in its note
         self.assertNotIn("collects this court's new opinions automatically", text)
@@ -364,7 +373,7 @@ class TestWhere(Case):
         def mark(year):
             return {r["court"]: r["covers"] for r in self.where("XX", year=year)["rows"]}["Ex Supreme Court"]
         self.assertEqual(mark(1700), "does-not-cover")  # the 1665 date was a typo, not coverage
-        self.assertEqual(mark(1858), "covers")
+        self.assertEqual(mark(1830), "covers")
         self.assertEqual(mark("1800-1900"), "partly")
         self.assertEqual(mark(2026), "covers")
 
@@ -472,34 +481,49 @@ class TestPackagedSurvey(unittest.TestCase):
         self.assertTrue(all(set(v) <= {"needs-script"} for v in self.data["gap_flags"].values()))
         self.assertIn("PA", self.data["gap_flags"])
 
-    def test_courtlistener_years_never_start_before_the_courts_own_start(self):
-        raised = []
+    def test_only_a_year_before_both_the_courts_start_and_the_projects_is_corrected(self):
+        cap = {r["jurisdiction"]: r["year_from"] for r in self.data["rows"] if r["source_id"] == "cap_static" and r["year_from"]}
+        corrected = []
         for r in self.data["rows"]:
             cl = r["cl"]
-            if not cl or not cl.get("earliest") or not r["year_from"]:
+            if not cl or not cl.get("earliest"):
                 continue
-            if cl.get("since"):
-                self.assertGreaterEqual(r["year_from"], cl["since"], r)
-            self.assertGreaterEqual(r["year_from"], int(cl["earliest"][:4]))
-            if cl.get("clamp"):
-                raised.append((r["jurisdiction"], r["court"]))
-                self.assertEqual(r["year_from"], cl["clamp"]["to"])
-                self.assertLess(cl["clamp"]["from"], cl["clamp"]["to"])
-                self.assertEqual(cl["clamp"]["from"], int(cl["earliest"][:4]))
+            j, raised = r["jurisdiction"], cl.get("clamp")
+            if not raised:
+                self.assertEqual(r["year_from"], int(cl["earliest"][:4]), r)  # an uncorrected year is the measured one
+                continue
+            corrected.append((j, cl["id"]))
+            self.assertEqual(raised["from"], int(cl["earliest"][:4]))
+            if raised["floor"] == "cap-start":
+                self.assertEqual((r["year_from"], raised["to"]), (cap[j], cap[j]))
+                self.assertLess(raised["from"], cap[j])
+                if cl["since"]:
+                    self.assertLess(raised["from"], cl["since"])  # before the court began as well
                 self.assertIn("raised from", r["note"])
-        self.assertGreater(len(raised), 10)
+            else:  # no project year for the jurisdiction, and not a real year
+                self.assertEqual(raised["floor"], "typo")
+                self.assertNotIn(j, cap)
+                self.assertLess(raised["from"], 1600)
+                self.assertIsNone(r["year_from"])
+                self.assertIsNone(raised["to"])
+        self.assertGreaterEqual(len(corrected), 3)
+        self.assertNotIn(("KY", "ky"), corrected)  # a predecessor court's real history stays
 
-    def test_the_bad_early_dates_are_fixed_in_the_data(self):
+    def test_the_bad_early_dates_are_fixed_in_the_data_and_real_history_is_kept(self):
         def cl(j, cid):
             return next(r for r in self.data["rows"] if r["jurisdiction"] == j and r["cl"] and r["cl"]["id"] == cid)
-        mn = cl("MN", "minn")  # an opinion dated 1665 in a court that began in 1858
+        mn = cl("MN", "minn")  # an opinion dated 1665 in a court that began in 1858; the project starts in 1830
         self.assertEqual((mn["year_from"], mn["cl"]["earliest"], mn["cl"]["clamp"]),
-                         (1858, "1665-01-02", {"from": 1665, "to": 1858, "floor": "court-start"}))
+                         (1830, "1665-01-02", {"from": 1665, "to": 1830, "floor": "cap-start"}))
         pa = cl("PA", "pa")
-        self.assertEqual((pa["year_from"], pa["cl"]["clamp"]["from"]), (1722, 1702))
+        self.assertEqual((pa["year_from"], pa["cl"]["clamp"]["from"]), (1759, 1702))
         nh = cl("NH", "nh")  # the bulk summary had lost the zeros of "0019-01-31" and read "1901-31-"
-        self.assertEqual((nh["cl"]["earliest"], nh["year_from"], nh["cl"]["clamp"]["from"]), ("0019-01-31", 1776, 19))
-        mo = cl("MO", "mo")  # not raised: 1852 is after the court began in 1821
+        self.assertEqual((nh["cl"]["earliest"], nh["year_from"], nh["cl"]["clamp"]["from"]), ("0019-01-31", 1796, 19))
+        ky = cl("KY", "ky")  # the court began in 1976 but CourtListener holds its predecessor's opinions from 1881
+        self.assertEqual((ky["year_from"], ky["cl"]["since"], "clamp" in ky["cl"]), (1881, 1976, False))
+        for j, cid, year in (("FL", "fla", 1825), ("AZ", "ariz", 1817), ("SC", "sc", 1812)):
+            self.assertEqual(cl(j, cid)["year_from"], year, j)
+        mo = cl("MO", "mo")  # not corrected: 1852 is after the court began in 1821
         self.assertEqual((mo["year_from"], mo["year_to"], mo["cl"]["latest"], "clamp" in mo["cl"]), (1852, 2025, "2025-08-12", False))
         self.assertIn("cl-no-new-intake", mo["facts"])
 
@@ -695,40 +719,69 @@ class TestBuildScript(unittest.TestCase):
         self.assertEqual(c("Texas Court of Appeals, 1st District (Houston)"), "Texas Court of Appeals, 1st District (Houston)")
         self.assertEqual(c("  Spaced   name "), "Spaced name")
 
-    def test_courtlistener_years_fill_a_row_and_raise_an_earlier_start_to_the_courts_start(self):
+    def test_courtlistener_years_fill_a_row_and_keep_an_early_year_that_is_real_history(self):
         years = self.years({"ala": {"count": 1000, "approximate": 5, "earliest": "1750-03-01", "latest": "2026-09-01"}})
         data, _ = self.run_build(years=years)
         self.assertEqual(data["cl_snapshot"], SNAPSHOT)
         self.assertIn("2026-09-30", data["source_files"])
         live = data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]
-        self.assertEqual((live["year_from"], live["year_to"], live["basis"]), (1800, 2026, "observed"))
+        # The court began in 1800 but Alabama has no Caselaw Access Project year here and 1750 is a real year: kept.
+        self.assertEqual((live["year_from"], live["year_to"], live["basis"]), (1750, 2026, "observed"))
         self.assertEqual(live["cl"], {"id": "ala", "since": 1800, "ended": None, "count": 1000, "approximate": 5,
-                                      "earliest": "1750-03-01", "latest": "2026-09-01",
-                                      "clamp": {"from": 1750, "to": 1800, "floor": "court-start"}})
+                                      "earliest": "1750-03-01", "latest": "2026-09-01"})
         self.assertIn("1,000 opinions, newest 2026-09-01", live["note"])
-        self.assertIn("Start year raised from 1750 to 1800 (the court's own start)", live["note"])
+        self.assertNotIn("raised", live["note"])
         # a court the summary does not list has no opinions in the bulk files
         old = data["by"][("AL", "Old Alabama Court", "courtlistener_bulk")]
         self.assertEqual((old["cl"]["count"], old["cl"]["latest"], old["year_from"], old["year_to"]), (0, None, None, 1969))
         self.assertIn("no opinions from it", old["note"])
-        self.assertIn("1 start years raised", self.printed)
-        self.assertIn("raised AL Alabama Supreme Court (ala): 1750 -> 1800 (court-start)", self.printed)
+        self.assertIn("0 start years corrected", self.printed)
 
-    def test_the_caselaw_access_projects_earliest_year_is_the_floor_when_the_court_has_no_start(self):
+    def cap_and_cl(self):
+        """Rows for three invented states with the Caselaw Access Project, and a court of each kind."""
         cl = self.CL
-        extra = [
-            ["MN", "Minnesota Supreme Court", "supreme", "courtlistener_bulk", "", "", "y", "accessible", "https://api.example/m/", cl.format(id="minn", s="True", u="True", since="n/a"), "unknown", "200", "2026-11-04"],
-            ["MN", "Minnesota - all reported decisions in CAP reporters", "other", "cap_static", "1830", "2019", "n", "accessible", "https://static.example/meta.json", "CAP: 1 case", "observed", "200", "2026-11-04"],
-        ]
-        years = self.years({"minn": {"count": 43427, "approximate": 1, "earliest": "1665-01-02", "latest": "2026-09-02"},
-                            "ala": {"count": 5, "approximate": 0, "earliest": "1900-01-01", "latest": "2026-09-01"}})
-        data, _ = self.run_build(extra, years)
-        mn = data["by"][("MN", "Minnesota Supreme Court", "courtlistener_bulk")]
-        self.assertEqual((mn["year_from"], mn["cl"]["clamp"]), (1830, {"from": 1665, "to": 1830, "floor": "cap-start"}))
-        self.assertIn("(the Caselaw Access Project's start)", mn["note"])
-        # a start after the floor is left alone
-        self.assertNotIn("clamp", data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]["cl"])
-        self.assertEqual(data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]["year_from"], 1900)
+        cap = lambda j, y: [j, f"{j} - all reported decisions in CAP reporters", "other", "cap_static", str(y), "2019", "n", "accessible", "https://static.example/m.json", "CAP: 1 case", "observed", "200", "2026-11-04"]
+        court = lambda j, name, cid, since: [j, name, "supreme", "courtlistener_bulk", "", "", "y", "accessible", "https://api.example/c/", cl.format(id=cid, s="True", u="True", since=since), "unknown", "200", "2026-11-04"]
+        return [cap("MN", 1830), court("MN", "Minnesota Supreme Court", "minn", "1858"),         # 1665: before both -> 1830
+                cap("MS", 1818), court("MS", "Mississippi Supreme Court", "mss", "1998"),        # 1881: after the project's start -> kept
+                cap("NC", 1778), court("NC", "North Carolina Supreme Court", "nc", "1700"),      # 1750: before the project, after the court -> kept
+                cap("ND", 1830), court("ND", "North Dakota Supreme Court", "nd", "n/a"),         # no court start: the project alone decides
+                cap("NH", 1796), court("NH", "New Hampshire Supreme Court", "nh", "1776"),       # year 19 -> 1796
+                court("NE", "Nebraska Supreme Court", "ne", "1875"),                             # no project year, 1700 is real -> kept
+                court("NV", "Nevada Supreme Court", "nv", "n/a")]                                # no project year, year 18 -> not found
+
+    def test_a_year_before_both_the_courts_start_and_the_projects_is_raised_to_the_projects(self):
+        years = self.years({
+            "minn": {"count": 43427, "approximate": 1, "earliest": "1665-01-02", "latest": "2026-09-02"},
+            "mss": {"count": 100, "approximate": 0, "earliest": "1881-01-01", "latest": "2026-09-02"},
+            "nc": {"count": 100, "approximate": 0, "earliest": "1750-01-01", "latest": "2026-09-02"},
+            "nd": {"count": 100, "approximate": 0, "earliest": "1665-01-01", "latest": "2026-09-02"},
+            "nh": {"count": 17407, "approximate": 1375, "earliest": "1901-31-", "latest": "2026-09-24"},
+            "ne": {"count": 100, "approximate": 0, "earliest": "1700-01-01", "latest": "2026-09-02"},
+            "nv": {"count": 100, "approximate": 0, "earliest": "1801-31-", "latest": "2026-09-02"}})
+        data, _ = self.run_build(self.cap_and_cl(), years)
+        get = lambda j, court: data["by"][(j, court, "courtlistener_bulk")]
+        mn = get("MN", "Minnesota Supreme Court")
+        self.assertEqual((mn["year_from"], mn["cl"]["earliest"], mn["cl"]["clamp"]),
+                         (1830, "1665-01-02", {"from": 1665, "to": 1830, "floor": "cap-start"}))
+        self.assertIn("Start year raised from 1665 to 1830 (the Caselaw Access Project's start)", mn["note"])
+        ms = get("MS", "Mississippi Supreme Court")  # a predecessor court's real history, as Kentucky's 1881
+        self.assertEqual((ms["year_from"], "clamp" in ms["cl"]), (1881, False))
+        nc = get("NC", "North Carolina Supreme Court")  # before the project, but after the court began: not before both
+        self.assertEqual((nc["year_from"], "clamp" in nc["cl"]), (1750, False))
+        nd = get("ND", "North Dakota Supreme Court")  # the court's start is unknown, so the project's year decides
+        self.assertEqual((nd["year_from"], nd["cl"]["clamp"]["floor"]), (1830, "cap-start"))
+        nh = get("NH", "New Hampshire Supreme Court")  # "1901-31-" is "0019-01-31": year 19
+        self.assertEqual((nh["cl"]["earliest"], nh["year_from"], nh["cl"]["clamp"]), ("0019-01-31", 1796, {"from": 19, "to": 1796, "floor": "cap-start"}))
+        ne = get("NE", "Nebraska Supreme Court")  # no project year: only a year below 1600 is corrected
+        self.assertEqual((ne["year_from"], "clamp" in ne["cl"]), (1700, False))
+        nv = get("NV", "Nevada Supreme Court")
+        self.assertEqual((nv["cl"]["earliest"], nv["year_from"], nv["year_to"], nv["cl"]["clamp"]),
+                         ("0018-01-31", None, 2026, {"from": 18, "to": None, "floor": "typo"}))
+        self.assertIn("Earliest year not found: its earliest date is year 18", nv["note"])
+        self.assertIn("4 start years corrected", self.printed)
+        self.assertIn("raised MN Minnesota Supreme Court (minn): 1665 -> 1830 (cap-start)", self.printed)
+        self.assertIn("raised NV Nevada Supreme Court (nv): 18 -> not found (typo)", self.printed)
 
     def test_a_bulk_date_that_lost_its_leading_zeros_is_read_back_and_a_bad_one_is_not_trusted(self):
         rd = self.build.read_date
@@ -740,7 +793,7 @@ class TestBuildScript(unittest.TestCase):
         years = self.years({"ala": {"count": 10, "approximate": 0, "earliest": "1801-31-", "latest": "2026-09-01"}})
         data, _ = self.run_build(years=years)
         live = data["by"][("AL", "Alabama Supreme Court", "courtlistener_bulk")]
-        self.assertEqual((live["cl"]["earliest"], live["year_from"], live["cl"]["clamp"]["from"]), ("0018-01-31", 1800, 18))
+        self.assertEqual((live["cl"]["earliest"], live["year_from"], live["cl"]["clamp"]), ("0018-01-31", None, {"from": 18, "to": None, "floor": "typo"}))
 
     def test_the_years_file_needs_the_shape_the_counts_and_a_snapshot_date(self):
         cov, src, gaps, out = self.survey()
@@ -894,13 +947,13 @@ class TestCli(Case):
     def test_where_shows_courtlistener_years_and_the_newest_opinion(self):
         out = self.cli("where", "MN", "--level", "supreme")
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("years 1858-2026 (observed)", out.stdout)
+        self.assertIn("years 1830-2026 (observed)", out.stdout)
         self.assertIn("CourtListener holds 43,427 opinions (bulk files of 2026-09-30); newest opinion 2026-09-02; "
-                      "start year raised from 1665 to 1858, the court's own start", out.stdout)
+                      "start year raised from 1665 to 1830, the Caselaw Access Project's start", out.stdout)
         res = json.loads(self.cli("where", "MN", "--level", "supreme", "--json").stdout)
         self.assertEqual(res["cl_snapshot"], "2026-09-30")
         cl = next(r for r in res["rows"] if r["source_id"] == "courtlistener_bulk")
-        self.assertEqual((cl["cl"]["latest"], cl["cl"]["count"], cl["year_from"], cl["year_to"]), ("2026-09-02", 43427, 1858, 2026))
+        self.assertEqual((cl["cl"]["latest"], cl["cl"]["count"], cl["year_from"], cl["year_to"]), ("2026-09-02", 43427, 1830, 2026))
 
 
 class TestMcp(Case):
@@ -970,8 +1023,8 @@ class TestMcp(Case):
         res = json.loads(self.text(out, 1))
         self.assertEqual(res["cl_snapshot"], "2026-09-30")
         cl = next(r for r in res["rows"] if r["source_id"] == "courtlistener_bulk")
-        self.assertEqual((cl["year_from"], cl["year_to"], cl["cl"]["latest"], cl["facts"]), (1858, 2026, "2026-09-02", []))
-        self.assertEqual(cl["cl"]["clamp"], {"from": 1665, "to": 1858, "floor": "court-start"})
+        self.assertEqual((cl["year_from"], cl["year_to"], cl["cl"]["latest"], cl["facts"]), (1830, 2026, "2026-09-02", []))
+        self.assertEqual(cl["cl"]["clamp"], {"from": 1665, "to": 1830, "floor": "cap-start"})
         tools = {t["name"]: t for t in out[99]["result"]["tools"]}
         self.assertIn("newest opinion", tools["matter.research_where"]["description"])
 

@@ -171,9 +171,10 @@ page may still open in your browser. The data is `matterkit/data/caselaw_coverag
 `scripts/build_caselaw_coverage.py` rebuilds it from a newer survey. For CourtListener it carries
 the years, the opinion count and the newest opinion's date, counted from CourtListener's public bulk
 files (Public Domain Mark, no key): `scripts/cl_bulk_years.py <snapshot>` streams two of them, saves
-nothing, and writes the per-court summary that `build_caselaw_coverage.py --cl-years` folds in. A start
-year earlier than the court's own start is raised to it, so a mistyped date in the files never reads
-as the court's history.
+nothing, and writes the per-court summary that `build_caselaw_coverage.py --cl-years` folds in. A
+mistyped early date in the files (a Minnesota opinion dated 1665) is corrected, and only when it falls
+before both the court's own start and the Caselaw Access Project's earliest year for the state: it is
+raised to the project's year. A real predecessor court's history (Kentucky's 1881) is kept.
 
 ## Capturing a web page
 
