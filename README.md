@@ -235,6 +235,15 @@ the MCP server above can't:
   `open(..., 'w')` and the like) goes to your approval first. If the store can't be read, the call
   goes to approval too. New files and unregistered drafts in the case folder are untouched. This
   catches an agent's mistakes; it is not a sandbox, and the `source_guard` setting turns it off.
+- **Quote guard.** Before `write_file` or `patch` puts text into a draft (`.md`, `.txt`) in the
+  case folder, each quotation and record page cite in the new text ("… never saw the warrant."
+  Doc. 16 at 2) is looked up in the cited document's page text, the same way `/matter check` does.
+  Each gets a verdict: **exact**, **wrong page** (the words are on another page, or the page is past
+  the end), **not found**, or **can't check** (no text for that document, it changed since it was
+  registered, or the quotation cites case law or nothing). A not found or wrong page refuses the
+  write and tells the agent what is wrong and where the words really are; exact and can't check
+  pass. Exact means the words are in the registered document on that page, not that they prove
+  the point. The `quote_guard` setting turns it off.
 - **Deadline brief.** On a session's first turn, overdue deadlines and those due within
   `deadline_window_days` go to the agent, so it raises them before anything else.
 - **Deadline Watch.** `/matter watch on [HH:MM]` writes a small script to Hermes's `scripts/`
@@ -296,7 +305,7 @@ python3 scripts/panel_demo.py tamper ~/cases/panel-demo
 ```
 
 Settings (Desktop: Settings > Plugins > corpus-open): `matter_dir`, `citation_guard`
-(`lookup` / `local` / `off`), `source_guard` (on by default), `caller_id`, `deadline_window_days`, `max_statute_checks`, and two
+(`lookup` / `local` / `off`), `source_guard` and `quote_guard` (both on by default), `caller_id`, `deadline_window_days`, `max_statute_checks`, and two
 secrets read through Hermes's secret store: `COURTLISTENER_TOKEN` (free, for case cites; optional
 when you saved the key with `courtlistener on` or `courtlistener key`, and used first when set) and
 `CORPUS_API_KEY` (optional).

@@ -87,6 +87,8 @@ class Quote:
     status: str = "unchecked"  # found | wrong-page | not-found | unchecked
     checked_against: str = ""
     where: str = ""
+    cite: str = ""  # the cite the quotation was checked against, as written in the draft
+    note: str = ""  # why an unchecked quotation could not be checked
 
 
 @dataclass
@@ -1612,17 +1614,22 @@ class _Checker:
                     self.rep.notes.append((line, qtext))
                 else:
                     self.rep.add("UNCHECKED", "quote-uncited", line, qtext, "quotation with no cite in the sentence")
+                q.note = "no cite in the sentence"
                 continue
+            q.cite = src.raw
             if src.kind == "authority":
                 q.status = "unchecked"
+                q.note = f"the text of {src.display} is not in the case store"
                 self.rep.add("UNCHECKED", "quote-unchecked", line, qtext,
                              f"text of {src.display} is not in the store; check the quotation by hand")
                 continue
             if not src.target:
+                q.note = "the cited document is not in the case store, or its file is missing or changed"
                 continue
             pages, _, label = self.docs.text(src.target)
             if pages is None:
                 q.status = "unchecked"
+                q.note = f"no readable text for {src.target}"
                 self.rep.add("UNCHECKED", "quote-unchecked", line, qtext,
                              f"no readable text for `{src.target}`; name a text copy in docket.json or extract it")
                 continue
