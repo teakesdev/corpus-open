@@ -5,6 +5,7 @@ Usage:
   matter.py init <case-dir>
   matter.py ingest <case-dir> [paths...] [--exclude SUBSTR]...
   matter.py verify <case-dir>
+  matter.py watch <case-dir>   # the morning check: overdue, due in 0/1/3/7 days, changed files
   matter.py capture <case-dir> --url URL --out Media/captures/YYYY-MM-DD_host/page.html [--kind media|research]
   matter.py capture list <case-dir>
   matter.py status <case-dir>
@@ -24,6 +25,7 @@ Usage:
                               [--owner ours|theirs|court]   # who must act by the date
                               [--author agent:MODEL [--directed-by PERSON]]
   matter.py deadline list <dir> [--all] [--owner ours|theirs|court]   # open dates in the past are marked OVERDUE
+  matter.py deadline ics <dir> [--out FILE]   # open deadlines as a calendar file, reminders 7, 3 and 1 days before
   matter.py deadline update <dir> <deadline_id> --reason TEXT
                               [--state open|met|superseded|lapsed|vacated] [--due YYYY-MM-DD]
                               [--owner ours|theirs|court]
@@ -204,6 +206,17 @@ def cmd_amend(args):
 
 def cmd_deadline(args):
     from matterkit import deadlines as dl
+    if args.sub == "ics":  # read-only: never opens the store for writing
+        from matterkit import calendar_export
+        text, count = calendar_export.build(args.case_dir)
+        if not args.out:
+            sys.stdout.write(text)
+            return
+        with open(args.out, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        print(f"wrote {count} deadline{'' if count == 1 else 's'} to {os.path.abspath(args.out)} "
+              "(reminders 7, 3 and 1 days before; deadlines waiting on an event are left out)")
+        return
     conn = store.connect(args.case_dir)
     if args.sub == "list":
         try:
@@ -247,6 +260,13 @@ def cmd_deadline(args):
             print(f"deadline {args.deadline_id} updated by {by}; events row recorded")
     except dl.DeadlineError as e:
         sys.exit(f"refused: {e}")
+
+
+def cmd_watch(args):
+    from matterkit import watch
+    text = watch.render(watch.report(args.case_dir))
+    print(text or "Nothing to report: no open deadline is overdue or due in 0, 1, 3 or 7 days, and every "
+                  "registered file matches its hash.")
 
 
 def cmd_trigger(args):
@@ -983,6 +1003,7 @@ def main():
     p = sub.add_parser("ingest"); p.add_argument("case_dir"); p.add_argument("paths", nargs="*")
     p.add_argument("--exclude", action="append", default=[]); p.set_defaults(fn=cmd_ingest)
     p = sub.add_parser("verify"); p.add_argument("case_dir"); p.set_defaults(fn=cmd_verify)
+    p = sub.add_parser("watch"); p.add_argument("case_dir"); p.set_defaults(fn=cmd_watch)
     p = sub.add_parser("status"); p.add_argument("case_dir"); p.set_defaults(fn=cmd_status)
 
     p = sub.add_parser("fact"); p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")
@@ -1075,8 +1096,9 @@ def main():
     for c in commands.choices.values():
         c.set_defaults(fn=cmd_rules)
 
-    p = sub.add_parser("deadline"); p.add_argument("sub", choices=["add", "list", "update"]); p.add_argument("case_dir")
+    p = sub.add_parser("deadline"); p.add_argument("sub", choices=["add", "list", "update", "ics"]); p.add_argument("case_dir")
     p.add_argument("deadline_id", nargs="?", help="update: the deadline to change")
+    p.add_argument("--out", help="ics: write the calendar file here (default: print it)")
     p.add_argument("--label"); p.add_argument("--due"); p.add_argument("--rule")
     # defaults are applied in cmd_deadline: `update` must see "not given" as None
     p.add_argument("--confidence", choices=["hard", "working-estimate"])

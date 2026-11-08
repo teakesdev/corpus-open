@@ -5,21 +5,28 @@ What a plugin adds that a skill or an MCP server can't:
   agent writes is listed under the reply with what CourtListener, Corpus and the case file say
   about it, so a fabricated cite is flagged before anyone copies it into a filing;
 - a deadline brief at the start of each session (pre_llm_call on the first turn);
+- Deadline Watch: /matter watch on installs a script that Hermes's cron runs each morning with no
+  model, so overdue and upcoming dates and changed files reach Telegram exactly as the kit wrote
+  them; /matter calendar exports the deadlines with reminders;
 - a source guard (pre_tool_call): Hermes's file tools can't change a registered source document
   or the case store, and a command that looks like it would goes to the person's approval;
 - /matter, a slash command for the case's status, deadlines, packet and cite checks;
 - the matter tools, reading the case folder chosen in Hermes's own settings form, with tokens
   read through Hermes's secret store.
 
-Nothing here files, sends or contacts anyone. Network calls happen only for cite checks, only
-with the bare cites, and only after a person grants them in the case folder (RFC 0001).
+Nothing here files or contacts anyone. Network calls happen only for cite checks, only with the
+bare cites, and only after a person grants them in the case folder (RFC 0001). Deadline Watch
+messages leave only through a cron job a person creates, and each one is logged in the case.
 """
 from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import hashlib
 import io
 import os
+import re
+import shlex
 import shutil
 
 from . import guard as _guard
@@ -32,7 +39,9 @@ SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
 DEMO_SOURCE = os.path.join(KIT, "demo-matter")
 DEMO_DIR = "~/cases/corpus-open-demo"
 USAGE = ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant | "
-         "init <folder> | demo [folder]")
+         "init <folder> | demo [folder] | watch [on [HH:MM]] | calendar")
+WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
+_HHMM = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
 GUARD_MODES = ("lookup", "local", "off")
 DEFAULTS = {
     "matter_dir": "",
@@ -210,6 +219,13 @@ class Plugin:
                 return self._init(rest)
             if sub == "demo":
                 return self._demo(rest or DEMO_DIR)
+            if sub == "watch":
+                words = rest.split()
+                if words and words[0].lower() == "on":
+                    return self._watch_on(words[1] if len(words) > 1 else "08:00")
+                return self._watch_text()
+            if sub == "calendar":
+                return self._calendar()
             return USAGE
         except MatterError as e:
             return str(e)
@@ -268,6 +284,67 @@ class Plugin:
                 "registered and hashed, and two made-up deadlines (one overdue). Nothing in it is real. "
                 + self._select(folder) + " Try /matter, or ask me what's due.")
 
+    # -- Deadline Watch -------------------------------------------------------------------------
+    def _watch_text(self) -> str:
+        from ..matterkit import watch
+        md = resolve_matter(self.settings().get("matter_dir"))
+        text = watch.render(watch.report(md, today=self.today()))
+        return text or ("Nothing to report today: no open deadline is overdue or due in 0, 1, 3 or 7 "
+                        "days, and every registered file matches its hash.")
+
+    def _watch_on(self, when: str) -> str:
+        m = _HHMM.fullmatch(when.strip())
+        if not m:
+            return "Usage: /matter watch on [HH:MM] (24-hour time, for example 07:30; default 08:00)"
+        md = resolve_matter(self.settings().get("matter_dir"))
+        case = os.path.basename(md)
+        slug = (re.sub(r"[^a-z0-9]+", "-", case.lower()).strip("-")[:40] or "case")
+        name = f"corpus-open-watch-{slug}-{hashlib.sha256(md.encode()).hexdigest()[:6]}.py"
+        scripts = os.path.join(_hermes_home(), "scripts")
+        path = os.path.join(scripts, name)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                if f.readline().rstrip("\n") != WATCH_MARK:
+                    return (f"{path} already exists and this plugin didn't write it, so it was left alone. "
+                            "Move it, then run /matter watch on again.")
+        os.makedirs(scripts, exist_ok=True)
+        body = (f"{WATCH_MARK}\n"
+                "# Hermes's cron runs this with no model; it prints the case's deadline news, or nothing.\n"
+                "import sys\n"
+                f"sys.path.insert(0, {KIT!r})\n"
+                "from matterkit import watch\n"
+                f"watch.cron_main({md!r})\n")
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(body)
+        os.replace(tmp, path)
+        hour, minute = int(m.group(1)), int(m.group(2))
+        cmd = " ".join(["hermes cron create", shlex.quote(f"{minute} {hour} * * *"), "--no-agent",
+                        "--script", shlex.quote(name), "--deliver telegram",
+                        "--name", shlex.quote(f"Case deadlines: {case}")])
+        return ("Wrote the morning check for " + md + " to " + path + ".\n"
+                "Run this once in a terminal to schedule it (Hermes asks a person to create cron jobs):\n"
+                f"  {cmd}\n"
+                f"Each day at {hour:02d}:{minute:02d} it sends overdue deadlines, ones due today, tomorrow or "
+                "in 3 or 7 days, and a count of changed or missing case files. On a day with none of "
+                "those it sends nothing. No model runs, so the dates arrive exactly as the case records "
+                "them.\n"
+                "--deliver telegram uses your Telegram home channel (/sethome). Use --deliver local to "
+                "keep the output on this computer instead. Try it now with: hermes cron run <job id>\n"
+                "Each message that goes out is logged, hash only, in the case's .matter/egress.jsonl. "
+                "It carries deadline names and dates, never file names or contents.")
+
+    def _calendar(self) -> str:
+        from ..matterkit import calendar_export
+        md = resolve_matter(self.settings().get("matter_dir"))
+        path, count = calendar_export.write(md)
+        if not count:
+            return f"No open deadlines with a date, so {path} has no events."
+        return (f"Wrote {count} deadline{'' if count == 1 else 's'} to {path}. Open it to add them to "
+                "your calendar, with reminders 7, 3 and 1 days before. Titles keep each date's "
+                "confidence label. Exporting again later updates the same events instead of adding "
+                "copies. Deadlines still waiting on an event have no date yet and are left out.")
+
     def _deadline_text(self) -> str:
         md = resolve_matter(self.settings().get("matter_dir"))
         from ..matterkit import deadlines as dl
@@ -295,6 +372,15 @@ class Plugin:
         return r if isinstance(r, str) else json.dumps(r, indent=1)
 
 
+def _hermes_home() -> str:
+    """Hermes's home folder (its profile's, inside Hermes), where cron looks for scripts."""
+    try:
+        from hermes_constants import get_hermes_home
+        return str(get_hermes_home())
+    except Exception:  # noqa: BLE001 - outside Hermes, or an older Hermes
+        return os.path.expanduser("~/.hermes")
+
+
 def register(ctx, *, secret=_secret, today=None) -> Plugin:
     plugin = Plugin(ctx, secret=secret, today=today)
     for name, schema in SCHEMAS.items():
@@ -312,6 +398,7 @@ def register(ctx, *, secret=_secret, today=None) -> Plugin:
         except Exception:  # noqa: BLE001 - a skill that won't register must not stop the tools loading
             pass
     ctx.register_command("matter", plugin.command,
-                         description="Your case: status, deadlines, counsel packet, cite check, new case, demo",
-                         args_hint="[status|deadlines|packet|check|grant|init|demo]")
+                         description="Your case: status, deadlines, morning watch, calendar, counsel packet, cite "
+                                     "check, new case, demo",
+                         args_hint="[status|deadlines|watch|calendar|packet|check|grant|init|demo]")
     return plugin

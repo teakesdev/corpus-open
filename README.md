@@ -217,7 +217,7 @@ MCP cannot approve a notice, record mailing, or send it. `matter.amend_add`
 can only propose a change to the amendment list; approving or dropping one is a
 person's step (CLI or browser).
 
-## Hermes plugin (citation guard, source guard, deadline brief, /matter)
+## Hermes plugin (citation guard, source guard, deadline brief, Deadline Watch, /matter)
 
 This repo is also a native [Hermes Agent](https://hermes-agent.nousresearch.com) plugin
 (`plugin.yaml` and `__init__.py` at the root, code in `hermes_plugin/`). It adds what a skill or
@@ -237,6 +237,15 @@ the MCP server above can't:
   catches an agent's mistakes; it is not a sandbox, and the `source_guard` setting turns it off.
 - **Deadline brief.** On a session's first turn, overdue deadlines and those due within
   `deadline_window_days` go to the agent, so it raises them before anything else.
+- **Deadline Watch.** `/matter watch on [HH:MM]` writes a small script to Hermes's `scripts/`
+  folder and prints the one command that schedules it:
+  `hermes cron create '0 8 * * *' --no-agent --script corpus-open-watch-<case>.py --deliver telegram`.
+  Each morning Hermes runs it with no model, so the message arrives exactly as the case records it:
+  open deadlines that are overdue or due today, tomorrow, or in 3 or 7 days, each with its
+  confidence label, and a count of registered files that changed or went missing. On a day with
+  none of that it sends nothing. `/matter watch` shows the same check now. `/matter calendar`
+  writes `.matter/exports/deadlines.ics`, the open deadlines as calendar events with reminders 7, 3
+  and 1 days before; importing a newer export updates the same events.
 - **`/matter`** shows status and deadlines; `/matter packet 30s`, `/matter check Drafts/x.md` and
   `/matter grant` (the terminal commands, with full paths, that allow cite checks) do what they say.
   `/matter init <folder>` makes a case folder and points the plugin at it. `/matter demo [folder]`
@@ -299,10 +308,12 @@ a terminal: `courtlistener on` (type `yes`) for case cites, `consent activate --
 |---|---|---|
 | `www.courtlistener.com` citation lookup | the bare case cites (`123 F.4th 456`), up to 60 per reply, with your token | 100 lookups a day per case (the grant's budget; CourtListener's free account allows about 125) |
 | `corpuslaw.us` law search | one statute or code cite per request (`Miss. Code Ann. § 89-7-27`) | `max_statute_checks` per reply, grant budget 50/day |
+| Hermes cron delivery (Deadline Watch, only if you create the job) | deadline names, dates and confidence labels, and counts of changed or missing files; never file names or contents | once a day, only on days with something to report |
 
-No reply text, facts, documents or names leave the machine. Every request is logged to
-`.matter/egress.jsonl`. With `citation_guard: local`, nothing is sent and cites are only listed. The
-plugin files, sends and approves nothing, and sends no telemetry.
+No reply text, facts or documents leave the machine. Every request, and every Deadline Watch
+message, is logged (hash only) to `.matter/egress.jsonl`. With `citation_guard: local`, nothing is sent and cites are only listed. The
+plugin files and approves nothing, sends no telemetry, and sends a Deadline Watch message only
+through a cron job you create.
 
 ## Document extraction and locators (RFC 0004, RFC 0005)
 
@@ -626,6 +637,8 @@ version.
 ```bash
 python3 matter.py deadline list ~/cases/my-case            # open dates already past are marked ⚠ OVERDUE
 python3 matter.py deadline list ~/cases/my-case --owner theirs   # only what the other side must do
+python3 matter.py watch ~/cases/my-case                    # overdue, due in 0/1/3/7 days, changed files
+python3 matter.py deadline ics ~/cases/my-case --out deadlines.ics   # calendar file, reminders 7/3/1 days before
 python3 matter.py deadline update ~/cases/my-case d_abc123 --owner theirs --reason "their answer, not ours"
 python3 matter.py deadline update ~/cases/my-case d_abc123 --state superseded \
   --reason "extension granted by text-only order" --source Filings/docket_sheet.pdf@entry-27
