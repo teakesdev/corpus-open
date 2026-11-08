@@ -185,7 +185,7 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 conn.execute(
                     "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
                     " VALUES (?,?,?,?,?,?)",
-                    (__import__("matterkit.store", fromlist=["new_id"]).new_id(),
+                    (_new_id(),
                      digest, rel_path, st.st_size, st.st_mtime, kind),
                 )
             except sqlite3.IntegrityError:  # another writer registered it after the lookup above
@@ -242,3 +242,8 @@ def verify_integrity(conn, matter_dir: str):
     if view is not None:
         view.close()
     return ok, bad, missing, failures
+
+
+def _new_id():
+    from .store import new_id  # relative: Hermes loads the kit under its own package name
+    return new_id()

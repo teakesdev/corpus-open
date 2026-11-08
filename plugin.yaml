@@ -68,6 +68,13 @@ config_schema:
     description: >-
       Stop Hermes's file tools from changing a registered source document or the case store
       (.matter/), and ask you first when a command looks like it would.
+  quote_guard:
+    type: bool
+    default: true
+    description: >-
+      Before Hermes writes a draft in the case folder, check each quotation and record page cite
+      against the cited document's text, and refuse the write when a quotation is not in the
+      document or is on a different page than cited.
   courtlistener_token:
     type: secret
     env: COURTLISTENER_TOKEN

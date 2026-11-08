@@ -19,10 +19,12 @@ from __future__ import annotations
 import contextlib
 import datetime as _dt
 import io
+import json
 import os
 import shutil
 
 from . import guard as _guard
+from . import quote_guard as _quote_guard
 from . import source_guard as _source_guard
 from .tools import SCHEMAS, TOOLSET, MatterError, Tools, resolve_matter
 
@@ -30,6 +32,7 @@ PLUGIN_ID = "corpus-open"
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
 DEMO_SOURCE = os.path.join(KIT, "demo-matter")
+DEMO_DECLARATION = "Filings/12-declaration_synthetic.md"
 DEMO_DIR = "~/cases/corpus-open-demo"
 USAGE = ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant | "
          "init <folder> | demo [folder]")
@@ -41,6 +44,7 @@ DEFAULTS = {
     "deadline_window_days": 14,
     "max_statute_checks": 5,
     "source_guard": True,
+    "quote_guard": True,
 }
 OFF = (False, "off", "false", "no", "0", 0)
 SECRET_ENV = {"courtlistener_token": "COURTLISTENER_TOKEN", "corpus_api_key": "CORPUS_API_KEY"}
@@ -83,8 +87,9 @@ class Plugin:
                 out[key] = max(0, int(out[key]))
             except (TypeError, ValueError):
                 out[key] = DEFAULTS[key]
-        value = out["source_guard"]
-        out["source_guard"] = (value.strip().lower() if isinstance(value, str) else value) not in OFF
+        for key in ("source_guard", "quote_guard"):
+            value = out[key]
+            out[key] = (value.strip().lower() if isinstance(value, str) else value) not in OFF
         return out
 
     def _matter_or_none(self) -> str | None:
@@ -96,15 +101,24 @@ class Plugin:
     # -- source guard -------------------------------------------------------------------------------
     def on_tool_call(self, tool_name: str = "", args=None, task_id: str = "", **kwargs):
         """pre_tool_call. Never raises: Hermes blocks every tool call when this hook raises."""
-        matter_dir = None
+        matter_dir, settings = None, None
         try:
             settings = self.settings()
-            if not settings["source_guard"]:
-                return None
             matter_dir = settings.get("matter_dir") or None
-            return _source_guard.check(tool_name, args, matter_dir=matter_dir)
+            if settings["source_guard"]:
+                hit = _source_guard.check(tool_name, args, matter_dir=matter_dir)
+                if hit:
+                    return hit
         except Exception:  # noqa: BLE001
-            return _source_guard.fallback(tool_name, args, matter_dir)
+            hit = _source_guard.fallback(tool_name, args, matter_dir)
+            if hit:
+                return hit
+        try:  # quote guard: a quotation or page cite the record doesn't hold may not reach a draft
+            if settings and settings["quote_guard"]:
+                return _quote_guard.check(tool_name, args, matter_dir=matter_dir)
+        except Exception:  # noqa: BLE001 - when the check itself fails, the write goes through
+            return None
+        return None
 
     # -- citation guard -------------------------------------------------------------------------
     def run_guard(self, text: str, matter_dir: str | None) -> _guard.Check:
@@ -264,9 +278,13 @@ class Plugin:
                        "plugin:corpus-open-demo", rule="synthetic demo date")
                 dl.add(conn, "Initial disclosures (demo)", (today + _dt.timedelta(days=7)).isoformat(),
                        "plugin:corpus-open-demo", rule="synthetic demo date")
-        return (f"Made a synthetic demo case at {folder}: a made-up complaint and evidence memo, "
-                "registered and hashed, and two made-up deadlines (one overdue). Nothing in it is real. "
-                + self._select(folder) + " Try /matter, or ask me what's due.")
+        with open(os.path.join(folder, ".matter", "docket.json"), "w", encoding="utf-8") as f:
+            json.dump({"entries": {"12": DEMO_DECLARATION}}, f, indent=2)
+        return (f"Made a synthetic demo case at {folder}: a made-up complaint, evidence memo and a "
+                "three-page declaration filed as Doc. 12, registered and hashed, and two made-up deadlines "
+                "(one overdue). Nothing in it is real. " + self._select(folder) + " Try /matter, ask me "
+                "what's due, or ask me to quote Doc. 12 in a draft: the quote guard checks every "
+                "quotation against the record before it is written.")
 
     def _deadline_text(self) -> str:
         md = resolve_matter(self.settings().get("matter_dir"))
