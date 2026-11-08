@@ -279,10 +279,11 @@ def _target(raw, matter_dir):
     """(case root, path) when raw is a text file in a case that is not a source or the store."""
     if not raw.lower().endswith(TEXT_EXT):
         return None
+    memo, home = {}, _sg._home_roots(matter_dir)
     for cand in _sg._candidates(raw, matter_dir):
         for root in _sg._cases_above(cand):
             try:
-                hit = _sg._classify(cand)
+                hit = _sg._classify(cand, memo, home)  # by file identity, as the source guard sees it
             except _sg.Unreadable:
                 return None
             if hit and hit[0] in ("store", "source"):
