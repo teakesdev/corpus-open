@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import hashlib
 import io
 import os
 import shutil
@@ -43,6 +44,7 @@ DEFAULTS = {
     "source_guard": True,
 }
 OFF = (False, "off", "false", "no", "0", 0)
+CHECKED_MEMORY = 256  # replies this process appended a block to, remembered to skip a replay
 SECRET_ENV = {"courtlistener_token": "COURTLISTENER_TOKEN", "corpus_api_key": "CORPUS_API_KEY"}
 
 
@@ -59,12 +61,17 @@ def _secret(name: str) -> str | None:
     return (value or "").strip() or None
 
 
+def _digest(text: str) -> bytes:
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest()
+
+
 class Plugin:
     def __init__(self, ctx, secret=_secret, today=None):
         self.ctx = ctx
         self.secret = secret
         self.today = today or _dt.date.today
         self.tools = Tools(self.settings, self.run_guard)
+        self._checked: dict = {}  # sha256 of each reply on_reply returned, oldest first
 
     # -- settings -------------------------------------------------------------------------------
     def settings(self) -> dict:
@@ -130,11 +137,19 @@ class Plugin:
         try:
             if self.settings()["citation_guard"] == "off" or not response_text:
                 return None
-            if "Citation check" in response_text and "Checked by Corpus Open" in response_text:
-                return None  # already carries one (a resumed or replayed reply)
+            if _digest(response_text) in self._checked:
+                # Exactly a reply this plugin already returned (a replay), so its block is the
+                # check of this very text. Words in the reply never count: the model can write them.
+                return None
             check = self.run_guard(response_text, self._matter_or_none())
             block = _guard.render(check)
-            return response_text + "\n" + block if block else None
+            if not block:
+                return None
+            out = response_text + "\n" + block
+            self._checked[_digest(out)] = None
+            while len(self._checked) > CHECKED_MEMORY:
+                del self._checked[next(iter(self._checked))]
+            return out
         except Exception:  # noqa: BLE001 - never hold up a reply; the reply goes out unchanged
             return None
 

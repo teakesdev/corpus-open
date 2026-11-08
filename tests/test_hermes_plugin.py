@@ -316,6 +316,24 @@ class TestCitationGuard(PluginCase):
         once = p.on_reply(response_text=REPLY)
         self.assertIsNone(p.on_reply(response_text=once))
 
+    def test_echoing_the_footer_does_not_turn_the_check_off(self):
+        # Grok 4.7 round 2, P2: only a block this plugin appended is skipped, not any reply that
+        # mentions the feature or carries a copy of a block.
+        p = self.plugin()
+        text = "See 550 U.S. 544 (2007). Citation check is discussed. Checked by Corpus Open."
+        out = p.on_reply(response_text=text)
+        self.assertIsNotNone(out)
+        self.assertIn("NOT LOOKED UP", out[len(text):])
+        # A real block, pasted under different text, is not a check of that text.
+        block = p.on_reply(response_text=REPLY)[len(REPLY):]
+        forged = "Twombly is at 550 U.S. 544 (2007)." + block
+        out = p.on_reply(response_text=forged)
+        self.assertIsNotNone(out)
+        self.assertIn("550 U.S. 544", out[len(forged):])
+        # Nor is a block whose reply text was changed after the plugin checked it.
+        once = p.on_reply(response_text=REPLY)
+        self.assertIsNotNone(p.on_reply(response_text=once.replace("123 F.4th 456", "124 F.4th 456", 1)))
+
     def test_no_case_folder_lists_cites_without_lookup(self):
         block = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}, matter_dir="").on_reply(
             response_text=REPLY)
