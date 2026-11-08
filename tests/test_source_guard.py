@@ -12,8 +12,10 @@ import importlib
 import importlib.util
 import io
 import os
+import shutil
 import sys
 import tempfile
+import unicodedata
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -74,6 +76,37 @@ def make_matter(root, files):
     conn.commit()
     conn.close()
     return root
+
+
+def add_source(root, rel, text):
+    """Write rel in the case at root and register it."""
+    p = os.path.join(root, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w") as f:
+        f.write(text)
+    conn = store.connect(root)
+    with redirect_stdout(io.StringIO()):
+        ingest.ingest_paths(conn, root, [p])
+    conn.commit()
+    conn.close()
+    return p
+
+
+def same_file_on_this_volume(name, other):
+    """True when the temp folder's volume opens other as the file made under name."""
+    d = tempfile.mkdtemp()
+    try:
+        open(os.path.join(d, name), "w").close()
+        return os.path.exists(os.path.join(d, other))
+    finally:
+        shutil.rmtree(d)
+
+
+NFC_CAFE, NFD_CAFE = "café", "café"
+assert unicodedata.normalize("NFD", NFC_CAFE) == NFD_CAFE
+# macOS's default APFS is both; Linux CI is neither. The tests that need a real alias skip there.
+CASE_INSENSITIVE = same_file_on_this_volume("Probe", "pROBE")
+NORM_INSENSITIVE = same_file_on_this_volume(NFC_CAFE, NFD_CAFE)
 
 
 class Base(unittest.TestCase):
@@ -206,6 +239,124 @@ class Commands(Base):
         d = self.check("execute_code", {"code": f"import os\nos.remove({self.src!r})"})
         self.assertEqual(d["action"], "approve")
         self.assertIsNone(self.check("execute_code", {"code": f"print(open({self.src!r}).read())"}))
+
+
+class Identity(Base):
+    """A path is protected for the file it opens, not for how it is spelled (Grok 4.7 round 2, P1).
+
+    macOS opens 'evidence/lease.txt' and '.Matter/consent.json' as the registered files, and an NFD
+    name as the NFC file. The guard compares file identity (st_dev, st_ino) and, as a second layer
+    for names that don't exist yet or only appear in a command, case-folded NFC names.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.cafe = add_source(self.case, f"Evidence/{NFC_CAFE}.txt", "photo log\n")
+
+    def assertBlocks(self, tool, args, names=None, matter_dir=None):
+        d = self.check(tool, args, matter_dir=matter_dir)
+        self.assertIsNotNone(d, (tool, args))
+        self.assertEqual(d["action"], "block", (tool, args))
+        if names:
+            self.assertIn(names, d["message"])
+
+    def test_case_variants_of_a_source_are_blocked(self):
+        for rel in ("evidence/lease.txt", "EVIDENCE/LEASE.TXT", "Evidence/Lease.txt"):
+            self.assertBlocks("write_file", {"path": rel, "content": "CHANGED"}, "Evidence/lease.txt",
+                              matter_dir=self.case)
+            self.assertBlocks("write_file", {"path": os.path.join(self.case, rel), "content": "x"},
+                              "Evidence/lease.txt")
+            self.assertBlocks("patch", {"path": rel, "old_string": "lease", "new_string": "x"},
+                              matter_dir=self.case)
+
+    def test_case_variants_of_the_store_are_blocked(self):
+        for rel in (".Matter/consent.json", ".MATTER/matter.db", ".mAtTeR/out/new.txt"):
+            self.assertBlocks("write_file", {"path": rel, "content": '{"kind": "human"}'}, ".matter",
+                              matter_dir=self.case)
+            self.assertBlocks("write_file", {"path": os.path.join(self.case, rel), "content": "{}"})
+
+    def test_an_nfd_name_of_an_nfc_source_is_blocked(self):
+        nfd = os.path.join(self.case, "Evidence", NFD_CAFE + ".txt")
+        self.assertBlocks("write_file", {"path": nfd, "content": "x"}, f"Evidence/{NFC_CAFE}.txt")
+        self.assertBlocks("write_file", {"path": f"evidence/{NFD_CAFE.upper()}.TXT", "content": "x"},
+                          matter_dir=self.case)
+
+    def test_v4a_patches_with_case_and_nfd_variants_are_blocked(self):
+        for line in ("*** Update File: evidence/lease.txt",
+                     "*** Add File: .Matter/consent.json",
+                     "*** Update File: draft.md\n*** Move to: filings/COMPLAINT.txt",
+                     f"*** Delete File: Evidence/{NFD_CAFE}.txt"):
+            text = f"*** Begin Patch\n{line}\n@@\n-a\n+b\n*** End Patch\n"
+            self.assertBlocks("patch", {"mode": "patch", "patch": text}, matter_dir=self.case)
+
+    def test_commands_naming_case_and_nfd_variants_go_to_approval(self):
+        for cmd in ("rm evidence/lease.txt",
+                    "echo x > .Matter/consent.json",
+                    "sqlite3 .MATTER/matter.db 'DELETE FROM documents'",
+                    "sed -i 's/a/b/' EVIDENCE/lease.txt",
+                    "rm -rf evidence",
+                    f"mv Evidence/{NFD_CAFE}.txt /tmp/x"):
+            d = self.check("terminal", {"command": cmd}, matter_dir=self.case)
+            self.assertIsNotNone(d, cmd)
+            self.assertEqual(d["action"], "approve", cmd)
+        for code in ("open('evidence/lease.txt', 'w').write('x')",
+                     "import os\nos.remove('.Matter/consent.json')"):
+            d = self.check("execute_code", {"code": code}, matter_dir=self.case)
+            self.assertIsNotNone(d, code)
+            self.assertEqual(d["action"], "approve", code)
+
+    def test_a_hard_link_to_a_source_is_blocked_by_identity(self):
+        # A hard link is the same file under a name that matches nothing; only identity sees it.
+        inside = os.path.join(self.case, "Drafts", "lease-copy.txt")
+        os.makedirs(os.path.dirname(inside))
+        os.link(self.src, inside)
+        self.assertBlocks("write_file", {"path": inside, "content": "x"}, "Evidence/lease.txt")
+        self.assertBlocks("patch", {"path": "Drafts/lease-copy.txt", "old_string": "a", "new_string": "b"},
+                          matter_dir=self.case)
+        d = self.check("terminal", {"command": f"echo x > {inside}"})
+        self.assertEqual(d["action"], "approve")
+        # Outside any case, the configured case's sources are still known.
+        outside = os.path.join(self.base, "lease-copy.txt")
+        os.link(self.src, outside)
+        self.assertBlocks("write_file", {"path": outside, "content": "x"}, "Evidence/lease.txt",
+                          matter_dir=self.case)
+
+    def test_new_drafts_still_pass(self):
+        for rel in ("Drafts/brief.md", "drafts/brief.md", "evidence/lease-notes.md",
+                    f"Evidence/{NFD_CAFE}-notes.md", "matter-notes/x.md", ".matterish/x.md", "DRAFT.md"):
+            self.assertIsNone(self.check("write_file", {"path": rel, "content": "x"}, matter_dir=self.case),
+                              rel)
+        self.assertIsNone(self.check("terminal", {"command": "echo x > drafts/brief.md"},
+                                     matter_dir=self.case))
+
+    # -- the volume really aliases these names; identity alone must catch them -----------------
+    @unittest.skipUnless(CASE_INSENSITIVE, "the temp folder's volume is case-sensitive")
+    def test_on_a_case_insensitive_volume_identity_alone_blocks(self):
+        self.assertTrue(os.path.samefile(os.path.join(self.case, "evidence", "lease.txt"), self.src))
+        self.assertTrue(os.path.samefile(os.path.join(self.case, ".Matter"),
+                                         os.path.join(self.case, ".matter")))
+        # Turn the name layer off: what is left is the identity check.
+        with mock.patch.object(sg, "_fold", lambda s: s, create=True):
+            self.assertBlocks("write_file", {"path": "evidence/lease.txt", "content": "CHANGED"},
+                              "Evidence/lease.txt", matter_dir=self.case)
+            for rel in (".Matter/consent.json", ".MATTER/matter.db", ".Matter/out/new.txt"):
+                self.assertBlocks("write_file", {"path": rel, "content": "{}"}, ".matter",
+                                  matter_dir=self.case)
+            for cmd in ("rm evidence/lease.txt", "echo x > .Matter/consent.json"):
+                d = self.check("terminal", {"command": cmd}, matter_dir=self.case)
+                self.assertIsNotNone(d, cmd)
+                self.assertEqual(d["action"], "approve", cmd)
+            self.assertIsNone(self.check("write_file", {"path": "drafts/brief.md", "content": "x"},
+                                         matter_dir=self.case))
+
+    @unittest.skipUnless(NORM_INSENSITIVE, "the temp folder's volume keeps NFC and NFD names apart")
+    def test_on_a_normalization_insensitive_volume_identity_alone_blocks(self):
+        nfd = os.path.join(self.case, "Evidence", NFD_CAFE + ".txt")
+        self.assertTrue(os.path.samefile(nfd, self.cafe))
+        with mock.patch.object(sg, "_fold", lambda s: s, create=True):
+            self.assertBlocks("write_file", {"path": nfd, "content": "x"}, f"Evidence/{NFC_CAFE}.txt")
+            d = self.check("terminal", {"command": f"rm {nfd}"})
+            self.assertEqual(d["action"], "approve")
 
 
 class NeverRaises(Base):
