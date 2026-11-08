@@ -243,7 +243,9 @@ the MCP server above can't:
   Each morning Hermes runs it with no model, so the message arrives exactly as the case records it:
   open deadlines that are overdue or due today, tomorrow, or in 3 or 7 days, each with its
   confidence label, and a count of registered files that changed or went missing. On a day with
-  none of that it sends nothing. `/matter watch` shows the same check now. `/matter calendar`
+  none of that it sends nothing. The heading names the case folder, so a folder named after the
+  parties sends their names too. `/matter watch` shows the same check now; `/matter watch off`
+  removes the script and says how to remove the job. `/matter calendar`
   writes `.matter/exports/deadlines.ics`, the open deadlines as calendar events with reminders 7, 3
   and 1 days before; importing a newer export updates the same events.
 - **`/matter`** shows status and deadlines; `/matter packet 30s`, `/matter check Drafts/x.md` and
@@ -308,7 +310,7 @@ a terminal: `courtlistener on` (type `yes`) for case cites, `consent activate --
 |---|---|---|
 | `www.courtlistener.com` citation lookup | the bare case cites (`123 F.4th 456`), up to 60 per reply, with your token | 100 lookups a day per case (the grant's budget; CourtListener's free account allows about 125) |
 | `corpuslaw.us` law search | one statute or code cite per request (`Miss. Code Ann. § 89-7-27`) | `max_statute_checks` per reply, grant budget 50/day |
-| Hermes cron delivery (Deadline Watch, only if you create the job) | deadline names, dates and confidence labels, and counts of changed or missing files; never file names or contents | once a day, only on days with something to report |
+| Hermes cron delivery (Deadline Watch, only if you create the job) | the case folder's name (the message heading, e.g. `Smith v Acme`), deadline names, dates and confidence labels, and counts of changed or missing files; never file names, paths or contents | once a day, only on days with something to report |
 
 No reply text, facts or documents leave the machine. Every request, and every Deadline Watch
 message, is logged (hash only) to `.matter/egress.jsonl`. With `citation_guard: local`, nothing is sent and cites are only listed. The

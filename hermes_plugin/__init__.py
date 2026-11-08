@@ -7,7 +7,9 @@ What a plugin adds that a skill or an MCP server can't:
 - a deadline brief at the start of each session (pre_llm_call on the first turn);
 - Deadline Watch: /matter watch on installs a script that Hermes's cron runs each morning with no
   model, so overdue and upcoming dates and changed files reach Telegram exactly as the kit wrote
-  them; /matter calendar exports the deadlines with reminders;
+  them (the message carries the case folder's name, deadline names, dates and labels, and counts
+  of changed files: never file names, paths or contents); /matter calendar exports the deadlines
+  with reminders;
 - a source guard (pre_tool_call): Hermes's file tools can't change a registered source document
   or the case store, and a command that looks like it would goes to the person's approval;
 - /matter, a slash command for the case's status, deadlines, packet and cite checks;
@@ -39,8 +41,10 @@ SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
 DEMO_SOURCE = os.path.join(KIT, "demo-matter")
 DEMO_DIR = "~/cases/corpus-open-demo"
 USAGE = ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant | "
-         "init <folder> | demo [folder] | watch [on [HH:MM]] | calendar")
+         "init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
 WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
+WATCH_USAGE = ("Usage: /matter watch (the check, now) | /matter watch on [HH:MM] (each morning, through Hermes "
+               "cron) | /matter watch off")
 _HHMM = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
 GUARD_MODES = ("lookup", "local", "off")
 DEFAULTS = {
@@ -221,8 +225,13 @@ class Plugin:
                 return self._demo(rest or DEMO_DIR)
             if sub == "watch":
                 words = rest.split()
-                if words and words[0].lower() == "on":
+                verb = words[0].lower() if words else ""
+                if verb == "on":
                     return self._watch_on(words[1] if len(words) > 1 else "08:00")
+                if verb == "off":
+                    return self._watch_off()
+                if verb:
+                    return WATCH_USAGE
                 return self._watch_text()
             if sub == "calendar":
                 return self._calendar()
@@ -298,15 +307,10 @@ class Plugin:
             return "Usage: /matter watch on [HH:MM] (24-hour time, for example 07:30; default 08:00)"
         md = resolve_matter(self.settings().get("matter_dir"))
         case = os.path.basename(md)
-        slug = (re.sub(r"[^a-z0-9]+", "-", case.lower()).strip("-")[:40] or "case")
-        name = f"corpus-open-watch-{slug}-{hashlib.sha256(md.encode()).hexdigest()[:6]}.py"
-        scripts = os.path.join(_hermes_home(), "scripts")
-        path = os.path.join(scripts, name)
-        if os.path.exists(path):
-            with open(path, encoding="utf-8", errors="replace") as f:
-                if f.readline().rstrip("\n") != WATCH_MARK:
-                    return (f"{path} already exists and this plugin didn't write it, so it was left alone. "
-                            "Move it, then run /matter watch on again.")
+        scripts, name, path = self._watch_script(md)
+        if os.path.exists(path) and not _ours(path):
+            return (f"{path} already exists and this plugin didn't write it, so it was left alone. "
+                    "Move it, then run /matter watch on again.")
         os.makedirs(scripts, exist_ok=True)
         body = (f"{WATCH_MARK}\n"
                 "# Hermes's cron runs this with no model; it prints the case's deadline news, or nothing.\n"
@@ -332,7 +336,29 @@ class Plugin:
                 "--deliver telegram uses your Telegram home channel (/sethome). Use --deliver local to "
                 "keep the output on this computer instead. Try it now with: hermes cron run <job id>\n"
                 "Each message that goes out is logged, hash only, in the case's .matter/egress.jsonl. "
-                "It carries deadline names and dates, never file names or contents.")
+                f"It carries the case folder's name ({case}), deadline names, dates and labels, and counts "
+                "of changed files; never file names, paths or contents. /matter watch off removes it.")
+
+    @staticmethod
+    def _watch_script(md: str) -> tuple[str, str, str]:
+        """(scripts folder, script name, full path) for the case's watch script."""
+        slug = (re.sub(r"[^a-z0-9]+", "-", os.path.basename(md).lower()).strip("-")[:40] or "case")
+        name = f"corpus-open-watch-{slug}-{hashlib.sha256(md.encode()).hexdigest()[:6]}.py"
+        scripts = os.path.join(_hermes_home(), "scripts")
+        return scripts, name, os.path.join(scripts, name)
+
+    def _watch_off(self) -> str:
+        md = resolve_matter(self.settings().get("matter_dir"))
+        _scripts, name, path = self._watch_script(md)
+        steps = ("To remove the scheduled job too, find its id with `hermes cron list` (the job that runs "
+                 f"{name}), then run `hermes cron remove <job id>`. Until then Hermes reports the missing "
+                 "script as a failed run each morning.")
+        if not os.path.lexists(path):
+            return f"No watch script for {md} in Hermes's scripts folder. " + steps
+        if not _ours(path):
+            return (f"{path} exists but this plugin didn't write it, so it was left alone. " + steps)
+        os.remove(path)
+        return f"Removed the morning check's script ({path}). " + steps
 
     def _calendar(self) -> str:
         from ..matterkit import calendar_export
@@ -370,6 +396,14 @@ class Plugin:
             raise MatterError(d.get("error", "failed"))
         r = d["result"]
         return r if isinstance(r, str) else json.dumps(r, indent=1)
+
+
+def _ours(path: str) -> bool:
+    """A regular file whose first line is the watch script's marker (never through a symlink)."""
+    if os.path.islink(path) or not os.path.isfile(path):
+        return False
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.readline().rstrip("\r\n") == WATCH_MARK
 
 
 def _hermes_home() -> str:

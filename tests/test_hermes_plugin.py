@@ -522,6 +522,33 @@ class TestDeadlineWatch(PluginCase):
         with open(os.path.join(scripts, name)) as f:
             self.assertEqual(f.read(), "print('mine')\n")
 
+    def test_watch_off_removes_its_script_and_says_how_to_remove_the_job(self):
+        # SWE-2 r1 P2-2: `watch off` used to show the report and change nothing.
+        p = self.plugin()
+        p.command("watch on")
+        scripts = os.path.join(self.home, "scripts")
+        name = os.listdir(scripts)[0]
+        out = p.command("watch off")
+        self.assertEqual(os.listdir(scripts), [])
+        self.assertIn("hermes cron list", out)
+        self.assertIn("hermes cron remove", out)
+        self.assertIn(name, out)
+        self.assertIn("No watch script", p.command("watch off"))
+
+    def test_watch_off_never_deletes_a_script_it_did_not_write(self):
+        p = self.plugin()
+        p.command("watch on")
+        scripts = os.path.join(self.home, "scripts")
+        name = os.listdir(scripts)[0]
+        with open(os.path.join(scripts, name), "w") as f:
+            f.write("print('mine')\n")
+        self.assertIn("didn't write", p.command("watch off"))
+        self.assertEqual(os.listdir(scripts), [name])
+
+    def test_watch_with_an_unknown_word_shows_usage(self):
+        out = self.plugin().command("watch stop-it")
+        self.assertIn("Usage: /matter watch", out)
+
     def test_watch_needs_a_case_folder(self):
         self.assertIn("No case folder is set", self.plugin(matter_dir="").command("watch on"))
 
@@ -535,7 +562,7 @@ class TestDeadlineWatch(PluginCase):
 
     def test_usage_lists_watch_and_calendar(self):
         out = self.plugin().command("frobnicate")
-        self.assertIn("watch [on [HH:MM]]", out)
+        self.assertIn("watch [on [HH:MM] | off]", out)
         self.assertIn("calendar", out)
 
 

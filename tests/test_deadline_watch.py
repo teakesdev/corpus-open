@@ -174,11 +174,39 @@ class TestCronMain(CaseTest):
         self.assertEqual(rows[0]["payload_type"], "deadline_watch_summary")
         self.assertNotIn("Answer to complaint", json.dumps(rows[0]))
         import hashlib
-        self.assertEqual(rows[0]["sha256"], hashlib.sha256(out.rstrip("\n").encode()).hexdigest())
+        # The hash is of exactly the bytes Hermes delivers (SWE-2 r1 P2-3: no trailing newline added).
+        self.assertEqual(rows[0]["sha256"], hashlib.sha256(out.encode()).hexdigest())
+        self.assertEqual(rows[0]["bytes"], len(out))
 
     def test_a_folder_that_is_no_longer_a_case_says_so(self):
         out = self.run_cron(os.path.join(self._tmp.name, "gone"))
         self.assertIn("isn't a case folder", out)
+        self.assertNotIn(self._tmp.name, out)
+
+    def assert_names_free_failure(self, out):
+        self.assertIn("couldn't finish", out)
+        self.assertIn("matter.py verify", out)
+        for leak in ("Secret Witness", self._tmp.name, "Traceback", "Smith v Acme"):
+            self.assertNotIn(leak, out)
+
+    def test_an_unreadable_registered_file_sends_a_names_free_message(self):
+        # SWE-2 r1 P2-1: a registered file replaced by a folder made verify raise with its path.
+        p = self.evidence()
+        os.remove(p)
+        os.mkdir(p)
+        out = self.run_cron()
+        self.assert_names_free_failure(out)
+        rows = self.egress()
+        self.assertEqual(len(rows), 1)
+        import hashlib
+        self.assertEqual(rows[0]["sha256"], hashlib.sha256(out.encode()).hexdigest())
+
+    def test_a_corrupt_store_sends_a_names_free_message(self):
+        self.conn.close()
+        with open(store.db_path(self.dir), "wb") as f:
+            f.write(b"not a database at all" * 100)
+        out = self.run_cron()
+        self.assert_names_free_failure(out)
 
 
 class TestCalendar(CaseTest):

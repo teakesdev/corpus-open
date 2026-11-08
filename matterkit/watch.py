@@ -14,6 +14,7 @@ import contextlib
 import io
 import os
 import sqlite3
+import sys
 from datetime import date
 
 from . import deadlines, store
@@ -113,16 +114,39 @@ def render(r: dict) -> str:
     return "\n".join(lines)
 
 
-def cron_main(matter_dir: str, today: date | None = None) -> None:
-    """The scheduled job's body: print the summary (or nothing) and log it as egress."""
+FAILED_TEXT = ("Corpus Open Deadline Watch: today's check couldn't finish ({error}). The case store or a "
+               "registered file couldn't be read. Run matter.py verify on the case on your computer to see "
+               "which.")
+
+
+def _emit(matter_dir: str, text: str) -> None:
+    """Log the exact bytes Hermes will deliver, then write them (no newline added)."""
     from . import search
+    search.log_egress(matter_dir, EGRESS_PROVIDER, EGRESS_ENDPOINT, EGRESS_PAYLOAD, text)
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def cron_main(matter_dir: str, today: date | None = None) -> None:
+    """The scheduled job's body: write the summary (or nothing) and log it as egress.
+
+    Hermes delivers a failing script's error output, so nothing here may raise with a path in
+    it: any failure becomes one message that names no file or folder (SWE-2 r1 P2-1).
+    """
     matter_dir = os.path.abspath(os.path.expanduser(matter_dir))
     if not os.path.isfile(store.db_path(matter_dir)):
-        print(f"Corpus Open Deadline Watch: {matter_dir} isn't a case folder any more (no .matter store). "
-              "Point the job at the right folder with /matter watch on, or remove it with hermes cron.")
+        sys.stdout.write("Corpus Open Deadline Watch: the case folder this job checks isn't a case folder any "
+                         "more (no .matter store). Point it at the right folder with /matter watch on, or "
+                         "remove the job with hermes cron remove.")
         return
-    text = render(report(matter_dir, today=today))
+    try:
+        text = render(report(matter_dir, today=today))
+    except Exception as e:  # noqa: BLE001 - the error's message can carry a file's path
+        text = FAILED_TEXT.format(error=type(e).__name__)
     if not text:
         return
-    search.log_egress(matter_dir, EGRESS_PROVIDER, EGRESS_ENDPOINT, EGRESS_PAYLOAD, text)
-    print(text)
+    try:
+        _emit(matter_dir, text)
+    except Exception as e:  # noqa: BLE001 - e.g. the egress log can't be written
+        sys.stdout.write("Corpus Open Deadline Watch: today's summary was held back because the case's egress "
+                         f"log couldn't be written ({type(e).__name__}). Check the case on your computer.")
