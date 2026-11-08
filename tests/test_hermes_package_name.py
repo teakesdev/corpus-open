@@ -65,7 +65,7 @@ CHILD = textwrap.dedent("""
     def ingest():  # its own empty case, so a failed demo can't hide this result
         fresh = case + "-ingest"
         out["init"] = ctx.commands["matter"]("init " + fresh)
-        note = os.path.join(fresh, "evidence", "new-note.txt")
+        note = os.path.join(fresh, "Evidence", "new-note.txt")
         with open(note, "w", encoding="utf-8") as f:
             f.write("A synthetic note added after the demo.\\n")
         return json.loads(ctx.tools["matter_ingest_path"]({"path": note}))
