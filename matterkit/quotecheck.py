@@ -52,7 +52,7 @@ class _Checker(briefcheck._Checker):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.spans: dict = {}
-        self.units_seen: list = []  # (span, has a full cite) per unit, in order: Id. chains
+        self.units_seen: list = []  # (span, has a full cite, opens with Id.) per unit, in order
 
     def coverage(self):
         pass
@@ -62,8 +62,9 @@ class _Checker(briefcheck._Checker):
         super().unit(u)
         for item in self.rep.rows[rows:] + self.rep.findings[findings:]:
             self.spans[id(item)] = (u.start, u.end)
-        full = any(not c.via_id for row in self.rep.rows[rows:] for c in row.cites)
-        self.units_seen.append(((u.start, u.end), full))
+        cites = [c for row in self.rep.rows[rows:] for c in row.cites]  # in the order they appear
+        self.units_seen.append(((u.start, u.end), any(not c.via_id for c in cites),
+                                bool(cites) and cites[0].via_id))
 
 
 def _touches(span, regions) -> bool:
@@ -73,14 +74,17 @@ def _touches(span, regions) -> bool:
 
 def _kept_spans(units, regions) -> set:
     """Spans of the units an edit touches, each followed by the sentences whose Id. may now bind to
-    a cite it changed: every later unit up to the next one with a full (non-Id.) cite."""
+    a cite it changed: every later unit up to the next one with a full (non-Id.) cite, and that one
+    too when an Id. comes before its full cite."""
     keep = set()
-    for i, (span, _full) in enumerate(units):
+    for i, (span, _full, _opens_id) in enumerate(units):
         if not _touches(span, regions):
             continue
         keep.add(span)
-        for later, full in units[i + 1:]:
+        for later, full, opens_id in units[i + 1:]:
             if full:
+                if opens_id:
+                    keep.add(later)
                 break
             keep.add(later)
     return keep

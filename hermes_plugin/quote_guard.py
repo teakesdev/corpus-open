@@ -31,7 +31,7 @@ TEXT_EXT = (".md", ".markdown", ".txt", ".text")
 USE_PDFTOTEXT = True
 MAX_CHARS = 2_000_000  # text to check; a bigger write passes unchecked
 MAX_READ = MAX_CHARS  # a draft bigger than this is not read: a patch's new text is checked alone
-MISSING, UNREADABLE = "missing", "unreadable"
+MISSING, UNREADABLE = object(), object()  # never text: _hunk tells them apart from a draft
 
 _log = logging.getLogger(__name__)
 _warned_no_fuzzy = False
@@ -182,12 +182,14 @@ def _parse_v4a(patch: str):
 
 
 def _v4a(patch, matter_dir):
-    drafts = {}  # path -> [text | UNREADABLE, regions]: later ops on a file build on earlier ones
+    # path -> [text | MISSING | UNREADABLE, regions]: later ops on a file build on earlier ones, as
+    # Hermes's overlay does (an Update after an Add in the same patch edits the added text)
+    drafts = {}
     for kind, path, hunks in _parse_v4a(patch):
         if kind == "add":
             added = [t for _hint, lines in hunks for p, t in lines if p == "+"]
-            if added:
-                yield path, "\n".join(added) + "\n", None
+            text = "\n".join(added) + "\n" if added else ""
+            drafts[path] = [text, [(0, len(text))] if added else []]
         elif kind == "update":
             if path not in drafts:
                 drafts[path] = [_read(path, matter_dir), []]

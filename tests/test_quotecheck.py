@@ -474,6 +474,71 @@ class PatchRound3(PatchBase):
                           "burned the warrant")
 
 
+
+def _hermes_miss(content, old, new, replace_all=False, **kw):
+    """Hermes's fuzzy_find_and_replace finding no match: its answer inside Hermes, where the import
+    works (outside Hermes the import fails and the guard takes another path)."""
+    return content, 0, None, "Could not find a match"
+
+
+class PatchRound4(PatchBase):
+    """SWE-2 round 3: R3-1 an Id. ahead of a full cite in the chain's stop sentence; R3-2 V4A hunks
+    on a draft that can't be read or was added earlier in the same patch, as they run in Hermes."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(qg, "_fuzzy_replace", _hermes_miss)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    # R3-1
+    def test_an_id_ahead_of_a_full_cite_in_the_stop_sentence_is_rechecked(self):
+        self.draft_with('Smith testified. Doc. 16.\nHe "never saw the warrant" Id. at 2. Doc. 17 at 3.\n')
+        self.assertBlocks(self.patch(old_string="Doc. 16", new_string="Doc. 18"), "never saw the warrant")
+
+    def test_an_id_pin_ahead_of_a_full_cite_is_rechecked(self):
+        # Doc. 18 has no page breaks, so a pin into it can't be checked; Doc. 16 has four pages
+        self.draft_with("Smith testified. Doc. 18.\nHe agreed. Id. at 9. Doc. 17 at 3.\n")
+        self.assertBlocks(self.patch(old_string="Doc. 18", new_string="Doc. 16"), "wrong page", "4 pages")
+
+    def test_a_stop_sentence_that_opens_with_a_full_cite_is_not_rechecked(self):
+        self.draft_with('Smith testified. Doc. 16.\nSee Doc. 16 at 2; he "forged it." Id. at 2.\n')
+        self.assertIsNone(self.patch(old_string="Smith", new_string="Jones"))
+
+    # R3-2
+    def test_v4a_hunk_on_a_draft_too_big_to_read_is_checked_in_hermes(self):
+        self.draft_with("Intro. " * 20 + "\n")
+        with mock.patch.object(qg, "MAX_READ", 50):
+            self.assertBlocks(self.v4a('-Intro.\n+He "forged it." Doc. 16 at 2.\n'), "forged it")
+
+    def test_v4a_replace_on_a_big_draft_still_checks_new_text_in_hermes(self):
+        self.draft_with("Intro. " * 20 + "\n")
+        with mock.patch.object(qg, "MAX_READ", 50):
+            self.assertBlocks(self.patch(old_string="Intro.", new_string='He "forged it." Doc. 16 at 2.'),
+                              "forged it")
+
+    def test_add_then_update_in_one_patch_builds_on_the_added_text(self):
+        new = os.path.join(self.case, "Drafts", "new.md")
+        p = ("*** Begin Patch\n*** Add File: " + new + "\n+He QUOTE\n+Doc. 16 at 2.\n*** Update File: " + new +
+             '\n-He QUOTE\n+He "burned the warrant"\n*** End Patch\n')
+        d = qg.check("patch", {"mode": "patch", "patch": p}, use_pdftotext=False)
+        self.assertBlocks(d, "burned the warrant")
+
+    def test_add_then_clean_update_passes(self):
+        new = os.path.join(self.case, "Drafts", "new.md")
+        p = ("*** Begin Patch\n*** Add File: " + new + "\n+He QUOTE\n+Doc. 16 at 2.\n*** Update File: " + new +
+             '\n-He QUOTE\n+He "never saw the warrant"\n*** End Patch\n')
+        self.assertIsNone(qg.check("patch", {"mode": "patch", "patch": p}, use_pdftotext=False))
+
+    def test_update_of_a_missing_draft_still_checks_its_own_lines(self):
+        os.remove(self.draft) if os.path.exists(self.draft) else None
+        self.assertBlocks(self.v4a('-Old.\n+He "forged it." Doc. 16 at 2.\n'), "forged it")
+
+    def test_markers_are_not_text(self):
+        self.assertNotIsInstance(qg.MISSING, str)
+        self.assertNotIsInstance(qg.UNREADABLE, str)
+
+
 class Hook(Base):
     def plugin(self, **settings):
         return hp.register(Ctx(dict({"matter_dir": self.case}, **settings)), secret=lambda n: None)
