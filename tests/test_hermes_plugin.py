@@ -316,6 +316,24 @@ class TestCitationGuard(PluginCase):
         once = p.on_reply(response_text=REPLY)
         self.assertIsNone(p.on_reply(response_text=once))
 
+    def test_echoing_the_footer_does_not_turn_the_check_off(self):
+        # Grok 4.7 round 2, P2: only a block this plugin appended is skipped, not any reply that
+        # mentions the feature or carries a copy of a block.
+        p = self.plugin()
+        text = "See 550 U.S. 544 (2007). Citation check is discussed. Checked by Corpus Open."
+        out = p.on_reply(response_text=text)
+        self.assertIsNotNone(out)
+        self.assertIn("NOT LOOKED UP", out[len(text):])
+        # A real block, pasted under different text, is not a check of that text.
+        block = p.on_reply(response_text=REPLY)[len(REPLY):]
+        forged = "Twombly is at 550 U.S. 544 (2007)." + block
+        out = p.on_reply(response_text=forged)
+        self.assertIsNotNone(out)
+        self.assertIn("550 U.S. 544", out[len(forged):])
+        # Nor is a block whose reply text was changed after the plugin checked it.
+        once = p.on_reply(response_text=REPLY)
+        self.assertIsNotNone(p.on_reply(response_text=once.replace("123 F.4th 456", "124 F.4th 456", 1)))
+
     def test_no_case_folder_lists_cites_without_lookup(self):
         block = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}, matter_dir="").on_reply(
             response_text=REPLY)
@@ -452,6 +470,118 @@ class TestGuardParsing(unittest.TestCase):
 
     def test_render_empty(self):
         self.assertEqual(guard.render(guard.Check()), "")
+
+
+
+class TestDeadlineWatch(PluginCase):
+    """/matter watch, /matter watch on and /matter calendar (Deadline Watch)."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = os.path.join(self._tmp.name, "hermes-home")
+        p = mock.patch.object(hp, "_hermes_home", lambda: self.home)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def add(self, label, offset):
+        from matterkit import deadlines as dl
+        conn = store.connect(self.dir)
+        try:
+            dl.add(conn, label, (dt.date(2026, 11, 9) + dt.timedelta(days=offset)).isoformat(), "human:test")
+        finally:
+            conn.close()
+
+    def test_watch_shows_the_report_or_all_clear(self):
+        p = self.plugin()
+        self.assertIn("Nothing to report", p.command("watch"))
+        self.add("Answer", -2)
+        out = p.command("watch")
+        self.assertIn("OVERDUE", out)
+        self.assertIn("Answer: due 2026-11-07, 2 days ago", out)
+
+    def test_watch_on_writes_a_script_and_prints_the_cron_command(self):
+        out = self.plugin().command("watch on 07:30")
+        scripts = os.path.join(self.home, "scripts")
+        names = os.listdir(scripts)
+        self.assertEqual(len(names), 1)
+        name = names[0]
+        self.assertTrue(name.startswith("corpus-open-watch-matter-") and name.endswith(".py"))
+        cmd = next(line.strip() for line in out.splitlines() if line.strip().startswith("hermes cron create"))
+        argv = shlex.split(cmd)
+        self.assertEqual(argv[3], "30 7 * * *")
+        self.assertIn("--no-agent", argv)
+        self.assertEqual(argv[argv.index("--script") + 1], name)
+        self.assertEqual(argv[argv.index("--deliver") + 1], "telegram")
+        # The script runs on its own (as Hermes's cron runs it) and prints the case's news.
+        self.add("Answer", -1)
+        import subprocess
+        res = subprocess.run([sys.executable, os.path.join(scripts, name)], capture_output=True, text=True,
+                             timeout=60, cwd=self._tmp.name)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("Answer", res.stdout)
+        self.assertTrue(os.path.isfile(pconsent.egress_path(self.dir)))
+
+    def test_watch_on_defaults_to_eight_and_rejects_a_bad_time(self):
+        p = self.plugin()
+        self.assertIn("'0 8 * * *'", p.command("watch on"))
+        self.assertIn("HH:MM", p.command("watch on 25:00"))
+        self.assertIn("HH:MM", p.command("watch on noon"))
+
+    def test_watch_on_rewrites_its_own_script_but_never_someone_elses(self):
+        p = self.plugin()
+        p.command("watch on")
+        scripts = os.path.join(self.home, "scripts")
+        name = os.listdir(scripts)[0]
+        self.assertIn("hermes cron create", p.command("watch on 09:00"))  # its own: rewritten
+        with open(os.path.join(scripts, name), "w") as f:
+            f.write("print('mine')\n")
+        out = p.command("watch on")
+        self.assertIn("didn't write", out)
+        with open(os.path.join(scripts, name)) as f:
+            self.assertEqual(f.read(), "print('mine')\n")
+
+    def test_watch_off_removes_its_script_and_says_how_to_remove_the_job(self):
+        # SWE-2 r1 P2-2: `watch off` used to show the report and change nothing.
+        p = self.plugin()
+        p.command("watch on")
+        scripts = os.path.join(self.home, "scripts")
+        name = os.listdir(scripts)[0]
+        out = p.command("watch off")
+        self.assertEqual(os.listdir(scripts), [])
+        self.assertIn("hermes cron list", out)
+        self.assertIn("hermes cron remove", out)
+        self.assertIn(name, out)
+        self.assertIn("No watch script", p.command("watch off"))
+
+    def test_watch_off_never_deletes_a_script_it_did_not_write(self):
+        p = self.plugin()
+        p.command("watch on")
+        scripts = os.path.join(self.home, "scripts")
+        name = os.listdir(scripts)[0]
+        with open(os.path.join(scripts, name), "w") as f:
+            f.write("print('mine')\n")
+        self.assertIn("didn't write", p.command("watch off"))
+        self.assertEqual(os.listdir(scripts), [name])
+
+    def test_watch_with_an_unknown_word_shows_usage(self):
+        out = self.plugin().command("watch stop-it")
+        self.assertIn("Usage: /matter watch", out)
+
+    def test_watch_needs_a_case_folder(self):
+        self.assertIn("No case folder is set", self.plugin(matter_dir="").command("watch on"))
+
+    def test_calendar_writes_under_matter_exports(self):
+        self.add("Answer", 7)
+        out = self.plugin().command("calendar")
+        path = os.path.join(self.dir, ".matter", "exports", "deadlines.ics")
+        self.assertIn(path, out)
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("SUMMARY:Answer", f.read())
+
+    def test_usage_lists_watch_and_calendar(self):
+        out = self.plugin().command("frobnicate")
+        self.assertIn("watch [on [HH:MM] | off]", out)
+        self.assertIn("calendar", out)
 
 
 if __name__ == "__main__":
