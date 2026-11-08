@@ -40,19 +40,39 @@ class Result:
     checked_against: str = ""  # the text that was searched
     note: str = ""  # why it could not be checked, or what is wrong with a page cite
     line: int = 0
+    span: tuple = (0, 0)  # character offsets of the sentence (brief check's unit) it came from
 
 
 class _Checker(briefcheck._Checker):
-    def coverage(self):  # docket coverage reads every filing; a single write needs none of it
+    """Brief check's checker, minus the docket coverage pass (it reads every filing; one write needs
+    none of it), noting which unit each row and finding came from."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.spans: dict = {}
+
+    def coverage(self):
         pass
 
+    def unit(self, u):
+        rows, findings = len(self.rep.rows), len(self.rep.findings)
+        super().unit(u)
+        for item in self.rep.rows[rows:] + self.rep.findings[findings:]:
+            self.spans[id(item)] = (u.start, u.end)
 
-def check_text(matter_dir: str, text: str, only=None, use_pdftotext: bool = True) -> list[Result]:
+
+def _touches(span, regions) -> bool:
+    a, b = span
+    return any(lo <= b and a <= hi for lo, hi in regions)
+
+
+def check_text(matter_dir: str, text: str, regions=None, use_pdftotext: bool = True) -> list[Result]:
     """Verdicts for the quotations and record page cites in text, in order.
 
-    only: when given, keep just the results whose quotation (or, for a bare page cite, whose cite)
-    appears in one of these strings: the new text of an edit, read with its surrounding draft as
-    context. The store is opened read-only; nothing is written.
+    regions: when given, a list of (start, end) character offsets in text that an edit changed.
+    Only results from a sentence that a region touches are kept, so an edit to a cite alone
+    re-checks its quotation, and problems elsewhere in the draft don't block it. A zero-width
+    region (a deletion) touches the sentence it sits in. The store is opened read-only.
     """
     rep = briefcheck.Report(matter_dir, "<pending write>", hashlib.sha256(text.encode("utf-8")).hexdigest())
     conn = store.connect_readonly(matter_dir)
@@ -60,7 +80,8 @@ def check_text(matter_dir: str, text: str, only=None, use_pdftotext: bool = True
         docket, _ = briefcheck.load_docket(matter_dir)
         docs = briefcheck.Docs(conn, matter_dir, docket, use_pdftotext)
         try:
-            _Checker(rep, conn, docs, docket, text).run()
+            checker = _Checker(rep, conn, docs, docket, text)
+            checker.run()
         finally:
             docs.close()
     finally:
@@ -76,17 +97,17 @@ def check_text(matter_dir: str, text: str, only=None, use_pdftotext: bool = True
     for row in rep.rows:
         for q in row.quotes:
             r = Result(_STATUS.get(q.status, CANT_CHECK), q.text, q.cite, q.where, q.checked_against, q.note,
-                       row.line)
+                       row.line, checker.spans.get(id(row), (0, len(text))))
             if r.verdict == CANT_CHECK and q.cite:
                 r.note = source_note(row.line, q.cite) or r.note
             out.append(r)
     for f in rep.findings:
         if f.code == "pin-out-of-range":
-            out.append(Result(WRONG_PAGE, "", f.cite, "", "", f.message, f.line))
+            out.append(Result(WRONG_PAGE, "", f.cite, "", "", f.message, f.line,
+                              checker.spans.get(id(f), (0, len(text)))))
     out.sort(key=lambda r: r.line)
-    if only is not None:
-        pieces = [o for o in only if o]
-        out = [r for r in out if any((r.quote or r.cite) in o for o in pieces)]
+    if regions is not None:
+        out = [r for r in out if _touches(r.span, regions)]
     return out
 
 

@@ -2,13 +2,17 @@
 
 Runs as a pre_tool_call hook after the source guard. For write_file and patch aimed at a text file
 (.md, .markdown, .txt, .text) inside a case folder, it runs the quote checker (matterkit.quotecheck)
-on the new text before anything is written:
+on the text as it would read after the call, before anything is written. A patch call is read the
+way Hermes's patch tool reads it: `mode` picks the branch ("replace" when absent), and V4A headers
+and hunks follow Hermes's patch parser.
 
 - write_file: the whole content.
-- patch, replace mode: the file as it would read after the edit, so the quotation's sentence keeps
-  its cite, keeping only results from the new text. Problems already in the draft do not block an
-  unrelated edit.
-- patch, V4A mode: each file's added (+) lines.
+- patch, replace mode: old_string -> new_string applied to the draft in memory (exactly, or with
+  Hermes's own loose matcher when an exact match fails, as Hermes does). Only sentences the edit
+  touches are checked, so a cite-only edit re-checks its quotation and problems elsewhere in the
+  draft don't block it. When neither matches, Hermes writes nothing, so neither does the check.
+- patch, V4A mode: each Update hunk applied to the draft the same way, checking the sentences its
+  added lines touch, with the hunk's context lines as context; an Add File's whole text.
 
 A "not found" or "wrong page" blocks the write, and the message tells the agent what is wrong and,
 for a wrong page, where the words really are. "Exact" and "can't check" pass; `/matter check` still
@@ -26,7 +30,14 @@ TEXT_EXT = (".md", ".markdown", ".txt", ".text")
 USE_PDFTOTEXT = True
 MAX_CHARS = 2_000_000
 
-_V4A_SECTION = re.compile(r"^\*\*\* (?:Update|Add) File:[ \t]*(.+?)[ \t]*$", re.M)
+# Hermes's tools/patch_parser.py, as of Hermes 0.22: markers are matched at the start of a line and
+# allow any whitespace inside them ("***Update File:" applies).
+_BEGIN = re.compile(r"^\*\*\*\s*Begin\s+Patch\s*$")
+_END = re.compile(r"^\*\*\*\s*End\s+Patch\s*$")
+_OPS = (("update", re.compile(r"\*\*\*\s*Update\s+File:\s*(.+)")),
+        ("add", re.compile(r"\*\*\*\s*Add\s+File:\s*(.+)")),
+        ("delete", re.compile(r"\*\*\*\s*Delete\s+File:\s*(.+)")),
+        ("move", re.compile(r"\*\*\*\s*Move\s+File:\s*(.+?)\s*->\s*(.+)")))
 
 
 def check(tool_name, args, matter_dir: str | None = None, use_pdftotext: bool | None = None) -> dict | None:
@@ -34,12 +45,12 @@ def check(tool_name, args, matter_dir: str | None = None, use_pdftotext: bool | 
     if not isinstance(args, dict) or tool_name not in _sg.FILE_TOOLS:
         return None
     pdf = USE_PDFTOTEXT if use_pdftotext is None else use_pdftotext
-    for raw, text, only in _writes(tool_name, args, matter_dir):
+    for raw, text, regions in _writes(tool_name, args, matter_dir):
         target = _target(raw, matter_dir)
         if target is None or not text or len(text) > MAX_CHARS:
             continue
         root, path = target
-        problems = [r for r in quotecheck.check_text(root, text, only=only, use_pdftotext=pdf)
+        problems = [r for r in quotecheck.check_text(root, text, regions=regions, use_pdftotext=pdf)
                     if r.verdict in quotecheck.PROBLEMS]
         if problems:
             return {"action": "block", "message": _message(root, path, problems)}
@@ -48,30 +59,145 @@ def check(tool_name, args, matter_dir: str | None = None, use_pdftotext: bool | 
 
 # -- what a call writes --------------------------------------------------------------------------
 def _writes(tool_name, args, matter_dir):
-    """(raw path, text to check, only) for each file the call writes."""
+    """(raw path, text as it would read, regions changed or None for all of it) per file written."""
     if tool_name == "write_file":
         if isinstance(args.get("path"), str) and isinstance(args.get("content"), str):
             yield args["path"].strip(), args["content"], None
         return
-    patch = args.get("patch")
-    if isinstance(patch, str) and patch.strip():
-        sections = list(_V4A_SECTION.finditer(patch))
-        for i, m in enumerate(sections):
-            body = patch[m.end(): sections[i + 1].start() if i + 1 < len(sections) else len(patch)]
-            added = [ln[1:] for ln in body.splitlines() if ln.startswith("+")]
+    mode = args.get("mode") or "replace"
+    if mode == "replace":
+        yield from _replace(args, matter_dir)
+    elif mode == "patch" and isinstance(args.get("patch"), str) and args["patch"]:
+        yield from _v4a(args["patch"], matter_dir)
+
+
+def _replace(args, matter_dir):
+    path, old, new = args.get("path"), args.get("old_string"), args.get("new_string")
+    if not isinstance(path, str) or not path.strip() or not isinstance(old, str) or not isinstance(new, str):
+        return  # Hermes refuses the call
+    path = path.strip()
+    current = _read(path, matter_dir)
+    if current is None:
+        return  # no file to patch: Hermes refuses the call
+    if old and old in current:
+        yield (path, *_replace_exact(current, old, new, bool(args.get("replace_all"))))
+        return
+    loose = _fuzzy_replace(current, old, new, bool(args.get("replace_all")))
+    if loose is None:  # Hermes's matcher is not importable: check the new text on its own
+        yield path, new, None
+        return
+    after, count, _strategy, error = loose
+    if count and not error:
+        yield path, after, [_diff_span(current, after)]
+
+
+def _replace_exact(current, old, new, replace_all):
+    parts, regions, i, length = [], [], 0, 0
+    while True:
+        j = current.find(old, i)
+        if j < 0:
+            break
+        parts.append(current[i:j])
+        length += j - i
+        parts.append(new)
+        regions.append((length, length + len(new)))
+        length += len(new)
+        i = j + len(old)
+        if not replace_all:
+            break
+    parts.append(current[i:])
+    return "".join(parts), regions
+
+
+def _fuzzy_replace(content, old, new, replace_all=False):
+    """Hermes's own loose matcher, or None outside Hermes."""
+    try:
+        from tools.fuzzy_match import fuzzy_find_and_replace  # Hermes's package, on its sys.path
+    except Exception:  # noqa: BLE001
+        return None
+    return fuzzy_find_and_replace(content, old, new, replace_all)
+
+
+def _diff_span(a: str, b: str) -> tuple:
+    p = 0
+    while p < min(len(a), len(b)) and a[p] == b[p]:
+        p += 1
+    s = 0
+    while s < min(len(a), len(b)) - p and a[-1 - s] == b[-1 - s]:
+        s += 1
+    return p, len(b) - s
+
+
+def _parse_v4a(patch: str):
+    """[(kind, path, hunks)] with hunks a list of [(prefix, text)], following Hermes's parser."""
+    lines = [ln.removesuffix("\r") for ln in patch.split("\n")]
+    start, end = -1, len(lines)
+    for i, ln in enumerate(lines):
+        if _BEGIN.match(ln):
+            start = i
+        elif _END.match(ln):
+            end = i
+            break
+    ops, op, hunk = [], None, None
+    for ln in lines[start + 1:end]:
+        hit = next(((kind, m) for kind, rx in _OPS if (m := rx.match(ln))), None)
+        if hit:
+            if op and hunk:
+                op[2].append(hunk)
+            op, hunk = (hit[0], hit[1].group(1).strip(), []), [] if hit[0] == "add" else None
+            ops.append(op)
+        elif ln.startswith("@@"):
+            if op:
+                if hunk:
+                    op[2].append(hunk)
+                hunk = []
+        elif op and ln:
+            if hunk is None:
+                hunk = []
+            if ln[0] in "+- ":
+                hunk.append((ln[0], ln[1:]))
+            elif ln[0] != "\\":
+                hunk.append((" ", ln))
+    if op and hunk:
+        op[2].append(hunk)
+    return ops
+
+
+def _v4a(patch, matter_dir):
+    for kind, path, hunks in _parse_v4a(patch):
+        if kind == "add":
+            added = [t for h in hunks for p, t in h if p == "+"]
             if added:
-                yield m.group(1), "\n".join(added) + "\n", None
-        return
-    path, new = args.get("path"), args.get("new_string")
-    if not isinstance(path, str) or not isinstance(new, str) or not new.strip():
-        return
-    old = args.get("old_string") if isinstance(args.get("old_string"), str) else ""
-    current = _read(path.strip(), matter_dir)
-    if current is not None and old and old in current:
-        after = current.replace(old, new) if args.get("replace_all") else current.replace(old, new, 1)
-        yield path.strip(), after, [new]
-    else:
-        yield path.strip(), new, None
+                yield path, "\n".join(added) + "\n", None
+        elif kind == "update":
+            yield from _update(path, hunks, matter_dir)
+
+
+def _update(path, hunks, matter_dir):
+    current = _read(path, matter_dir)
+    regions = []
+    for hunk in hunks:
+        search = "\n".join(t for p, t in hunk if p != "+")
+        repl_lines = [(p, t) for p, t in hunk if p != "-"]
+        repl = "\n".join(t for _, t in repl_lines)
+        added, off = [], 0
+        for p, t in repl_lines:
+            if p == "+":
+                added.append((off, off + len(t)))
+            off += len(t) + 1
+        if not added:
+            added = [(0, 0)]  # a deletion re-checks the sentence it sits in
+        at = current.find(search) if current is not None and search else -1
+        if at < 0:  # not placed in the draft: check the hunk's own lines
+            if any(p == "+" for p, _ in hunk):
+                yield path, repl + "\n", [(a, b) for a, b in added]
+            continue
+        delta = len(repl) - len(search)
+        regions = [(a + delta, b + delta) if a >= at + len(search) else (a, b) for a, b in regions]
+        regions += [(at + a, at + b) for a, b in added]
+        current = current[:at] + repl + current[at + len(search):]
+    if regions:
+        yield path, current, regions
 
 
 def _read(raw, matter_dir):
@@ -81,7 +207,7 @@ def _read(raw, matter_dir):
                 if os.path.getsize(cand) > MAX_CHARS:
                     return None
                 with open(cand, encoding="utf-8", errors="replace") as f:
-                    return f.read()
+                    return f.read().removeprefix("\ufeff")  # Hermes matches on BOM-stripped text
             except OSError:
                 return None
     return None

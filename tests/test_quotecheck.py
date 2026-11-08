@@ -90,13 +90,14 @@ class Base(unittest.TestCase):
         self.case = os.path.join(os.path.realpath(self.tmp.name), "case")
         self.write("Filings/16-Motion.txt", MOTION)
         self.write("Filings/19-Memo.pdf", "%PDF-1.7\n%synthetic, no text layer\n")
+        self.write("Filings/18-Order.txt", "ORDER. The motion is set for hearing.")
         conn = store.connect(self.case)
         with redirect_stdout(io.StringIO()):
             ingest.ingest_paths(conn, self.case, [os.path.join(self.case, "Filings")])
         conn.commit()
         conn.close()
         with open(os.path.join(self.case, ".matter", "docket.json"), "w") as f:
-            json.dump({"entries": {"16": "Filings/16-Motion.txt", "19": "Filings/19-Memo.pdf"}}, f)
+            json.dump({"entries": {"16": "Filings/16-Motion.txt", "18": "Filings/18-Order.txt", "19": "Filings/19-Memo.pdf"}}, f)
         os.makedirs(os.path.join(self.case, "Drafts"))
         self.draft = os.path.join(self.case, "Drafts", "brief.md")
 
@@ -170,11 +171,23 @@ class Verdicts(Base):
         self.assertEqual(r.verdict, quotecheck.CANT_CHECK)
         self.assertIn("changed", r.note)
 
-    def test_only_keeps_results_from_the_new_text(self):
-        text = ('He "forged the warrant himself." Doc. 16 at 2.\n\n'
-                'He "never saw the warrant" Doc. 16 at 2.\n')
-        got = self.verdicts(text, only=['He "never saw the warrant" Doc. 16 at 2.'])
+    def test_regions_keep_only_results_from_sentences_they_touch(self):
+        first = 'He "forged the warrant himself." Doc. 16 at 2.\n\n'
+        text = first + 'He "never saw the warrant" Doc. 16 at 2.\n'
+        got = self.verdicts(text, regions=[(len(first) + 3, len(first) + 4)])
         self.assertEqual(got, [(quotecheck.EXACT, "never saw the warrant")])
+
+    def test_a_region_on_the_cite_alone_keeps_its_quote(self):
+        text = 'He "never saw the warrant" Doc. 16 at 1.\n'
+        at = text.index("at 1")
+        self.assertEqual(self.verdicts(text, regions=[(at, at + 4)]),
+                         [(quotecheck.WRONG_PAGE, "never saw the warrant")])
+
+    def test_a_region_on_a_folded_citation_line_keeps_its_quote(self):
+        text = 'He "never saw the warrant."\nDoc. 16 at 1.\n'
+        at = text.index("at 1")
+        self.assertEqual(self.verdicts(text, regions=[(at, at + 4)]),
+                         [(quotecheck.WRONG_PAGE, "never saw the warrant.")])
 
     def test_text_with_no_quotes_or_cites_gives_nothing(self):
         self.assertEqual(self.verdicts("Plain sentence with no quotation.\n"), [])
@@ -253,6 +266,131 @@ class PatchContext(Base):
         d = qg.check("patch", {"mode": "patch", "patch": patch}, use_pdftotext=False)
         self.assertEqual(d["action"], "block")
         self.assertIn("burned the warrant", d["message"])
+
+
+class PatchRound2(Base):
+    """SWE-2 round 1: P1-1 cite-only edits, P1-2 Hermes's patch dispatch and headers, P2-1 BOM and
+    loose matches, P2-2 lookalike quotes, P2-3 V4A cites on context lines."""
+
+    def draft_with(self, text, encoding="utf-8"):
+        with open(self.draft, "w", encoding=encoding, newline="") as f:
+            f.write(text)
+
+    def patch(self, **args):
+        args.setdefault("path", self.draft)
+        return qg.check("patch", args, use_pdftotext=False)
+
+    def v4a(self, body, header="*** Update File: "):
+        return qg.check("patch", {"mode": "patch", "patch": "*** Begin Patch\n" + header + self.draft + "\n"
+                                  + body + "*** End Patch\n"}, use_pdftotext=False)
+
+    def assertBlocks(self, d, *words):
+        self.assertIsNotNone(d, "the write was not blocked")
+        self.assertEqual(d["action"], "block")
+        for w in words:
+            self.assertIn(w, d["message"])
+
+    # P1-1
+    def test_cite_only_edit_to_a_wrong_page_blocks(self):
+        self.draft_with('He "never saw the warrant" Doc. 16 at 2.\n')
+        self.assertBlocks(self.patch(old_string="at 2", new_string="at 1"), "wrong page", "p. 2")
+
+    def test_bare_cite_edit_past_the_last_page_blocks(self):
+        self.draft_with("See Doc. 16 at 2.\n")
+        self.assertBlocks(self.patch(old_string="at 2", new_string="at 9"), "wrong page", "4 pages")
+
+    def test_retargeting_a_quote_to_another_document_blocks(self):
+        self.draft_with('He "never saw the warrant" Doc. 16 at 2.\n')
+        self.assertBlocks(self.patch(old_string="Doc. 16", new_string="Doc. 18"), "not found")
+
+    def test_replace_all_cite_rewrite_blocks(self):
+        self.draft_with('A "never saw the warrant" Doc. 16 at 2.\n\nB "released the next morning" Doc. 16 at 3.\n')
+        self.assertBlocks(self.patch(old_string="Doc. 16", new_string="Doc. 18", replace_all=True), "not found")
+
+    def test_cite_only_edit_to_the_right_page_passes(self):
+        self.draft_with('He "never saw the warrant" Doc. 16 at 1.\n')
+        self.assertIsNone(self.patch(old_string="at 1", new_string="at 2"))
+
+    def test_deleting_words_inside_a_quote_is_checked(self):
+        self.draft_with('He "never saw the warrant before the arrest" Doc. 16 at 2.\n')
+        self.assertBlocks(self.patch(old_string="before ", new_string=""), "not found")
+
+    # P1-2
+    def test_replace_mode_ignores_a_stray_patch_argument(self):
+        self.draft_with("Intro.\n")
+        stray = "*** Begin Patch\n*** Update File: other.md\n+fine\n*** End Patch\n"
+        self.assertBlocks(self.patch(mode="replace", old_string="Intro.",
+                                     new_string='He "forged it." Doc. 16 at 2.', patch=stray), "forged it")
+
+    def test_missing_mode_means_replace_like_hermes(self):
+        self.draft_with("Intro.\n")
+        self.assertBlocks(self.patch(old_string="Intro.", new_string='He "forged it." Doc. 16 at 2.',
+                                     patch="*** Update File: other.md\n+x\n"), "forged it")
+        bad = "*** Begin Patch\n*** Update File: " + self.draft + "\n+He \"forged it.\" Doc. 16 at 2.\n*** End Patch\n"
+        self.assertIsNone(qg.check("patch", {"patch": bad}, use_pdftotext=False))  # Hermes: "path required"
+
+    def test_patch_mode_ignores_stray_replace_arguments(self):
+        self.draft_with("Intro.\n")
+        ok = "*** Begin Patch\n*** Update File: " + self.draft + "\n Intro.\n+More.\n*** End Patch\n"
+        self.assertIsNone(qg.check("patch", {"mode": "patch", "patch": ok, "path": self.draft,
+                                             "old_string": "Intro.", "new_string": '"forged it." Doc. 16 at 2.'},
+                                   use_pdftotext=False))
+
+    def test_loose_v4a_headers_hermes_accepts_are_checked(self):
+        self.draft_with("Intro.\n")
+        for header in ("***Update File: ", "***  Update  File:  ", "***\tUpdate File: "):
+            self.assertBlocks(self.v4a('+He "forged it." Doc. 16 at 2.\n', header=header), "forged it")
+
+    def test_v4a_add_file_is_checked(self):
+        new = os.path.join(self.case, "Drafts", "new.md")
+        d = qg.check("patch", {"mode": "patch", "patch": "*** Begin Patch\n***Add File: " + new +
+                               '\n+He "forged it." Doc. 16 at 2.\n*** End Patch\n'}, use_pdftotext=False)
+        self.assertBlocks(d, "forged it")
+
+    # P2-1
+    def test_bom_draft_matches_like_hermes(self):
+        self.draft_with("\ufeffHe QUOTE\nDoc. 16 at 2.\n")
+        self.assertBlocks(self.patch(old_string="He QUOTE\n", new_string='He "burned the warrant"\n'),
+                          "burned the warrant")
+
+    def test_crlf_draft_matches_like_hermes(self):
+        self.draft_with("Intro.\r\nHe QUOTE\r\nDoc. 16 at 2.\r\n")
+        self.assertBlocks(self.patch(old_string="Intro.\nHe QUOTE\n", new_string='Intro.\nHe "burned the warrant"\n'),
+                          "burned the warrant")
+
+    def test_loose_match_uses_hermes_fuzzy_replace_when_it_is_there(self):
+        self.draft_with("He  QUOTE\nDoc. 16 at 2.\n")  # two spaces: an exact match fails
+
+        def fuzzy(content, old, new, replace_all=False, **kw):
+            return content.replace("He  QUOTE", new.rstrip("\n")), 1, "whitespace", None
+
+        with mock.patch.object(qg, "_fuzzy_replace", fuzzy):
+            self.assertBlocks(self.patch(old_string="He QUOTE\n", new_string='He "burned the warrant"\n'),
+                              "burned the warrant")
+
+    def test_no_match_anywhere_means_hermes_writes_nothing(self):
+        self.draft_with("Intro.\n")
+        with mock.patch.object(qg, "_fuzzy_replace", lambda c, o, n, r=False, **kw: (c, 0, None, "no match")):
+            self.assertIsNone(self.patch(old_string="Absent", new_string='"forged it." Doc. 16 at 2.'))
+
+    # P2-2
+    def test_a_lookalike_quote_elsewhere_does_not_block_a_clean_edit(self):
+        self.draft_with('He "never saw the warrant" Doc. 16 at 1.\n\nOther QUOTE.\n')
+        self.assertIsNone(self.patch(old_string="QUOTE.", new_string='he "never saw the warrant" Doc. 16 at 2.'))
+
+    # P2-3
+    def test_v4a_quote_with_its_cite_on_a_context_line_is_checked(self):
+        self.draft_with("Old.\nDoc. 16 at 2.\n")
+        self.assertBlocks(self.v4a(' Old.\n+He "burned the warrant"\n Doc. 16 at 2.\n'), "burned the warrant")
+
+    def test_v4a_old_problems_on_context_lines_do_not_block(self):
+        self.draft_with('He "forged it." Doc. 16 at 2.\n\nEnd.\n')
+        self.assertIsNone(self.v4a(' He "forged it." Doc. 16 at 2.\n \n End.\n+More.\n'))
+
+    def test_v4a_two_hunks_both_checked(self):
+        self.draft_with("One.\n\nTwo.\n")
+        body = '@@\n One.\n+He "never saw the warrant" Doc. 16 at 2.\n@@\n Two.\n+He "burned it" Doc. 16 at 2.\n'
+        self.assertBlocks(self.v4a(body), "burned it")
 
 
 class Hook(Base):
