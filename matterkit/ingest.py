@@ -3,6 +3,8 @@ import hashlib
 import os
 import sqlite3
 
+from . import store
+
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".matter"}
 SKIP_FILES = {".DS_Store"}
 # A subcase's documents.rel_path "parent:<rel_path>" names a document whose bytes live in the
@@ -185,7 +187,7 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 conn.execute(
                     "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
                     " VALUES (?,?,?,?,?,?)",
-                    (__import__("matterkit.store", fromlist=["new_id"]).new_id(),
+                    (store.new_id(),
                      digest, rel_path, st.st_size, st.st_mtime, kind),
                 )
             except sqlite3.IntegrityError:  # another writer registered it after the lookup above
