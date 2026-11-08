@@ -321,6 +321,78 @@ class Identity(Base):
         self.assertBlocks("write_file", {"path": outside, "content": "x"}, "Evidence/lease.txt",
                           matter_dir=self.case)
 
+    def store_file(self, rel, text="{}"):
+        p = os.path.join(self.case, ".matter", rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        if not os.path.exists(p):
+            with open(p, "w") as f:
+                f.write(text)
+        return p
+
+    def test_a_hard_link_to_a_store_file_outside_the_case_is_blocked(self):
+        # Grok 4.7 round 3, P3: the link's name walks through no .matter folder; only identity sees it.
+        consent = self.store_file("consent.json", '{"grants": []}')
+        outside = os.path.join(self.base, "consent-copy.json")
+        os.link(consent, outside)
+        self.assertBlocks("write_file", {"path": outside, "content": '{"grants":[{"kind":"human"}]}'},
+                          ".matter/consent.json", matter_dir=self.case)
+        self.assertBlocks("patch", {"path": outside, "old_string": "[]", "new_string": "[1]"},
+                          matter_dir=self.case)
+        text = f"*** Begin Patch\n*** Update File: {outside}\n@@\n-a\n+b\n*** End Patch\n"
+        self.assertBlocks("patch", {"mode": "patch", "patch": text}, matter_dir=self.case)
+        for tool, args in (("terminal", {"command": f"echo '{{}}' > {outside}"}),
+                           ("execute_code", {"code": f"open({outside!r}, 'w').write('{{}}')"})):
+            d = self.check(tool, args, matter_dir=self.case)
+            self.assertIsNotNone(d, tool)
+            self.assertEqual(d["action"], "approve", tool)
+            self.assertIn(".matter", d["message"], tool)
+
+    def test_every_store_file_is_in_the_table_not_a_fixed_list(self):
+        for rel in ("matter.db", "egress.jsonl", "out/captures/abc.txt", "caselaw/searches.jsonl"):
+            src = os.path.join(self.case, ".matter", rel) if rel == "matter.db" else self.store_file(rel)
+            outside = os.path.join(self.base, "alias-" + rel.replace("/", "-"))
+            os.link(src, outside)
+            self.assertBlocks("write_file", {"path": outside, "content": "x"}, ".matter/" + rel,
+                              matter_dir=self.case)
+
+    def test_a_hard_link_to_a_store_file_inside_the_case_is_blocked(self):
+        # Inside the case the store is known without the case folder setting.
+        consent = self.store_file("consent.json")
+        inside = os.path.join(self.case, "Drafts", "consent.json")
+        os.makedirs(os.path.dirname(inside))
+        os.link(consent, inside)
+        self.assertBlocks("write_file", {"path": inside, "content": "{}"}, ".matter/consent.json")
+        d = self.check("terminal", {"command": f"echo x > {inside}"})
+        self.assertEqual(d["action"], "approve")
+
+    def test_a_store_that_cannot_be_listed_sends_a_linked_write_to_approval(self):
+        consent = self.store_file("consent.json")
+        outside = os.path.join(self.base, "consent-copy.json")
+        os.link(consent, outside)
+        plain = os.path.join(self.base, "notes.txt")
+        with open(plain, "w") as f:
+            f.write("notes\n")
+        with mock.patch.object(sg, "MAX_STORE_FILES", 1, create=True):
+            d = self.check("write_file", {"path": outside, "content": "{}"}, matter_dir=self.case)
+            self.assertEqual(d["action"], "approve")
+            self.assertIn("could not", d["message"])
+            # A file with one name can't be another name of a store file, so it isn't held up;
+            # nor is a folder, whose link count is never 1.
+            self.assertIsNone(self.check("write_file", {"path": plain, "content": "x"}, matter_dir=self.case))
+            os.makedirs(os.path.join(self.base, "scratch", "sub"))
+            self.assertIsNone(self.check("terminal", {"command": f"rm -rf {self.base}/scratch"},
+                                         matter_dir=self.case))
+        with mock.patch.object(sg.os, "scandir", side_effect=PermissionError("denied")):
+            d = self.check("write_file", {"path": outside, "content": "{}"}, matter_dir=self.case)
+            self.assertEqual(d["action"], "approve")
+
+    def test_a_hard_link_to_an_ordinary_file_still_passes(self):
+        draft = os.path.join(self.case, "draft.md")
+        outside = os.path.join(self.base, "draft-copy.md")
+        os.link(draft, outside)
+        self.assertIsNone(self.check("write_file", {"path": outside, "content": "x"}, matter_dir=self.case))
+        self.assertIsNone(self.check("write_file", {"path": draft, "content": "x"}, matter_dir=self.case))
+
     def test_new_drafts_still_pass(self):
         for rel in ("Drafts/brief.md", "drafts/brief.md", "evidence/lease-notes.md",
                     f"Evidence/{NFD_CAFE}-notes.md", "matter-notes/x.md", ".matterish/x.md", "DRAFT.md"):
