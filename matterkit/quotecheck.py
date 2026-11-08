@@ -21,6 +21,7 @@ proposition the quotation supports is right, or that the document is authentic.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 from . import briefcheck, store
@@ -28,6 +29,7 @@ from . import briefcheck, store
 EXACT, WRONG_PAGE, NOT_FOUND, CANT_CHECK = "exact", "wrong page", "not found", "can't check"
 PROBLEMS = (NOT_FOUND, WRONG_PAGE)
 _STATUS = {"found": EXACT, "wrong-page": WRONG_PAGE, "not-found": NOT_FOUND, "unchecked": CANT_CHECK}
+_SURROGATE = re.compile("[\ud800-\udfff]")
 _SOURCE_CODES = ("source-changed", "source-missing", "record-not-in-store")
 
 
@@ -50,6 +52,7 @@ class _Checker(briefcheck._Checker):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.spans: dict = {}
+        self.units_seen: list = []  # (span, has a full cite) per unit, in order: Id. chains
 
     def coverage(self):
         pass
@@ -59,6 +62,8 @@ class _Checker(briefcheck._Checker):
         super().unit(u)
         for item in self.rep.rows[rows:] + self.rep.findings[findings:]:
             self.spans[id(item)] = (u.start, u.end)
+        full = any(not c.via_id for row in self.rep.rows[rows:] for c in row.cites)
+        self.units_seen.append(((u.start, u.end), full))
 
 
 def _touches(span, regions) -> bool:
@@ -66,14 +71,33 @@ def _touches(span, regions) -> bool:
     return any(lo <= b and a <= hi for lo, hi in regions)
 
 
+def _kept_spans(units, regions) -> set:
+    """Spans of the units an edit touches, each followed by the sentences whose Id. may now bind to
+    a cite it changed: every later unit up to the next one with a full (non-Id.) cite."""
+    keep = set()
+    for i, (span, _full) in enumerate(units):
+        if not _touches(span, regions):
+            continue
+        keep.add(span)
+        for later, full in units[i + 1:]:
+            if full:
+                break
+            keep.add(later)
+    return keep
+
+
 def check_text(matter_dir: str, text: str, regions=None, use_pdftotext: bool = True) -> list[Result]:
     """Verdicts for the quotations and record page cites in text, in order.
 
     regions: when given, a list of (start, end) character offsets in text that an edit changed.
-    Only results from a sentence that a region touches are kept, so an edit to a cite alone
-    re-checks its quotation, and problems elsewhere in the draft don't block it. A zero-width
+    Only results from a sentence that a region touches are kept, plus the sentences after it whose
+    "Id." may now refer to a cite it changed (up to the next full cite), so an edit to a cite alone
+    re-checks its quotations, and problems elsewhere in the draft don't block it. A zero-width
     region (a deletion) touches the sentence it sits in. The store is opened read-only.
     """
+    # A draft read the way Hermes reads it keeps undecodable bytes as lone surrogates; brief check
+    # can't encode those, so each becomes U+FFFD (one character for one, so offsets still hold).
+    text = _SURROGATE.sub("\ufffd", text)
     rep = briefcheck.Report(matter_dir, "<pending write>", hashlib.sha256(text.encode("utf-8")).hexdigest())
     conn = store.connect_readonly(matter_dir)
     try:
@@ -107,7 +131,8 @@ def check_text(matter_dir: str, text: str, regions=None, use_pdftotext: bool = T
                               checker.spans.get(id(f), (0, len(text)))))
     out.sort(key=lambda r: r.line)
     if regions is not None:
-        out = [r for r in out if _touches(r.span, regions)]
+        keep = _kept_spans(checker.units_seen, regions)
+        out = [r for r in out if r.span in keep]
     return out
 
 

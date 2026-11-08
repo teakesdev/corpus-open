@@ -268,10 +268,7 @@ class PatchContext(Base):
         self.assertIn("burned the warrant", d["message"])
 
 
-class PatchRound2(Base):
-    """SWE-2 round 1: P1-1 cite-only edits, P1-2 Hermes's patch dispatch and headers, P2-1 BOM and
-    loose matches, P2-2 lookalike quotes, P2-3 V4A cites on context lines."""
-
+class PatchBase(Base):
     def draft_with(self, text, encoding="utf-8"):
         with open(self.draft, "w", encoding=encoding, newline="") as f:
             f.write(text)
@@ -289,6 +286,12 @@ class PatchRound2(Base):
         self.assertEqual(d["action"], "block")
         for w in words:
             self.assertIn(w, d["message"])
+
+
+
+class PatchRound2(PatchBase):
+    """SWE-2 round 1: P1-1 cite-only edits, P1-2 Hermes's patch dispatch and headers, P2-1 BOM and
+    loose matches, P2-2 lookalike quotes, P2-3 V4A cites on context lines."""
 
     # P1-1
     def test_cite_only_edit_to_a_wrong_page_blocks(self):
@@ -391,6 +394,84 @@ class PatchRound2(Base):
         self.draft_with("One.\n\nTwo.\n")
         body = '@@\n One.\n+He "never saw the warrant" Doc. 16 at 2.\n@@\n Two.\n+He "burned it" Doc. 16 at 2.\n'
         self.assertBlocks(self.v4a(body), "burned it")
+
+
+class PatchRound3(PatchBase):
+    """SWE-2 round 2: R2-1 Id. chains, R2-2 addition-only and same-file hunks, R2-3 inert hunks,
+    R2-4 drafts over MAX_CHARS, R2-5 a missing fuzzy matcher is logged, R2-6 undecodable bytes."""
+
+    # R2-1
+    def test_retargeting_an_id_antecedent_rechecks_the_id_sentence(self):
+        self.draft_with('Smith testified. Doc. 16.\nHe "never saw the warrant" Id. at 2.\n')
+        self.assertBlocks(self.patch(old_string="Doc. 16", new_string="Doc. 18"), "never saw the warrant")
+
+    def test_an_id_chain_runs_through_several_sentences(self):
+        self.draft_with('Smith testified. Doc. 16.\nHe agreed. Id. at 1.\nHe "never saw the warrant" Id. at 2.\n')
+        self.assertBlocks(self.patch(old_string="Doc. 16", new_string="Doc. 18"), "never saw the warrant")
+
+    def test_the_id_chain_stops_at_the_next_full_cite(self):
+        self.draft_with('Smith testified. Doc. 16.\nOld "forged it." Doc. 16 at 2.\n')
+        self.assertIsNone(self.patch(old_string="Smith", new_string="Jones"))
+
+    # R2-2
+    def test_addition_only_hunk_lands_after_its_hint(self):
+        self.draft_with("Old.\nDoc. 16 at 2.\n\nEnd.\n")
+        self.assertBlocks(self.v4a('@@ Old. @@\n+He "burned the warrant"\n'), "burned the warrant")
+
+    def test_addition_only_hunk_without_a_hint_lands_at_the_end(self):
+        self.draft_with("Old.\n")
+        self.assertBlocks(self.v4a('@@\n+He "burned the warrant" Doc. 16 at 2.\n'), "burned the warrant")
+        self.assertIsNone(self.v4a('@@\n+He "never saw the warrant" Doc. 16 at 2.\n'))
+
+    def test_hunk_placed_by_hermes_loose_matcher(self):
+        self.draft_with("He  QUOTE\nDoc. 16 at 2.\n")
+
+        def fuzzy(content, old, new, replace_all=False, **kw):
+            if old != "He QUOTE":
+                return content, 0, None, "no match"
+            return content.replace("He  QUOTE", new), 1, "whitespace", None
+
+        with mock.patch.object(qg, "_fuzzy_replace", fuzzy):
+            self.assertBlocks(self.v4a('-He QUOTE\n+He "burned the warrant"\n'), "burned the warrant")
+
+    def test_two_update_ops_on_one_file_build_on_each_other(self):
+        self.draft_with("A.\n")
+        body = ("-A.\n+He QUOTE\n+Doc. 16 at 2.\n*** Update File: " + self.draft +
+                '\n-He QUOTE\n+He "burned the warrant"\n')
+        self.assertBlocks(self.v4a(body), "burned the warrant")
+
+    # R2-3
+    def test_inert_hunks_do_not_recheck_their_sentence(self):
+        self.draft_with('He "forged it." Doc. 16 at 2.\n\nEnd.\n')
+        self.assertIsNone(self.v4a('@@\n He "forged it." Doc. 16 at 2.\n@@\n End.\n+More.\n'))
+        self.assertIsNone(self.v4a('@@\n-He "forged it." Doc. 16 at 2.\n+He "forged it." Doc. 16 at 2.\n'
+                                   '@@\n End.\n+More.\n'))
+
+    # R2-4
+    def test_a_draft_too_big_to_read_still_has_its_new_text_checked(self):
+        self.draft_with("Intro. " * 20 + "\n")
+        with mock.patch.object(qg, "MAX_READ", 50):
+            self.assertBlocks(self.patch(old_string="Intro.", new_string='He "forged it." Doc. 16 at 2.'),
+                              "forged it")
+            self.assertBlocks(self.v4a('-Intro.\n+He "forged it." Doc. 16 at 2.\n'), "forged it")
+
+    def test_a_missing_draft_is_not_patched_so_not_checked(self):
+        os.remove(self.draft) if os.path.exists(self.draft) else None
+        self.assertIsNone(self.patch(old_string="x", new_string='"forged it." Doc. 16 at 2.'))
+
+    # R2-5
+    def test_a_missing_fuzzy_matcher_is_logged(self):
+        self.draft_with("He  QUOTE\n")
+        with self.assertLogs(qg.__name__, level="WARNING"):
+            qg._warned_no_fuzzy = False
+            self.patch(old_string="He QUOTE", new_string="x")
+
+    # R2-6
+    def test_undecodable_bytes_are_kept_like_hermes_keeps_them(self):
+        with open(self.draft, "wb") as f:
+            f.write(b"Intro \xff.\nHe QUOTE\nDoc. 16 at 2.\n")
+        self.assertBlocks(self.patch(old_string="Intro \udcff.\nHe QUOTE", new_string='Intro \udcff.\nHe "burned the warrant"'),
+                          "burned the warrant")
 
 
 class Hook(Base):

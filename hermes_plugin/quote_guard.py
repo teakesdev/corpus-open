@@ -20,6 +20,7 @@ lists what could not be checked. Paths are resolved by the source guard's own ru
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 
@@ -28,12 +29,18 @@ from . import source_guard as _sg
 
 TEXT_EXT = (".md", ".markdown", ".txt", ".text")
 USE_PDFTOTEXT = True
-MAX_CHARS = 2_000_000
+MAX_CHARS = 2_000_000  # text to check; a bigger write passes unchecked
+MAX_READ = MAX_CHARS  # a draft bigger than this is not read: a patch's new text is checked alone
+MISSING, UNREADABLE = "missing", "unreadable"
+
+_log = logging.getLogger(__name__)
+_warned_no_fuzzy = False
 
 # Hermes's tools/patch_parser.py, as of Hermes 0.22: markers are matched at the start of a line and
 # allow any whitespace inside them ("***Update File:" applies).
 _BEGIN = re.compile(r"^\*\*\*\s*Begin\s+Patch\s*$")
 _END = re.compile(r"^\*\*\*\s*End\s+Patch\s*$")
+_HINT = re.compile(r"@@\s*(.+?)\s*@@")
 _OPS = (("update", re.compile(r"\*\*\*\s*Update\s+File:\s*(.+)")),
         ("add", re.compile(r"\*\*\*\s*Add\s+File:\s*(.+)")),
         ("delete", re.compile(r"\*\*\*\s*Delete\s+File:\s*(.+)")),
@@ -77,8 +84,11 @@ def _replace(args, matter_dir):
         return  # Hermes refuses the call
     path = path.strip()
     current = _read(path, matter_dir)
-    if current is None:
+    if current is MISSING:
         return  # no file to patch: Hermes refuses the call
+    if current is UNREADABLE:
+        yield path, new, None  # Hermes may still patch it: check the new text on its own
+        return
     if old and old in current:
         yield (path, *_replace_exact(current, old, new, bool(args.get("replace_all"))))
         return
@@ -110,10 +120,16 @@ def _replace_exact(current, old, new, replace_all):
 
 
 def _fuzzy_replace(content, old, new, replace_all=False):
-    """Hermes's own loose matcher, or None outside Hermes."""
+    """Hermes's own loose matcher, or None outside Hermes (logged once: inside Hermes it means the
+    matcher moved, and a loose patch then has only its new text checked)."""
+    global _warned_no_fuzzy
     try:
         from tools.fuzzy_match import fuzzy_find_and_replace  # Hermes's package, on its sys.path
     except Exception:  # noqa: BLE001
+        if not _warned_no_fuzzy:
+            _warned_no_fuzzy = True
+            _log.warning("corpus-open quote guard: Hermes's tools.fuzzy_match is not importable; "
+                         "a patch whose old_string matches only loosely has only its new text checked")
         return None
     return fuzzy_find_and_replace(content, old, new, replace_all)
 
@@ -129,7 +145,8 @@ def _diff_span(a: str, b: str) -> tuple:
 
 
 def _parse_v4a(patch: str):
-    """[(kind, path, hunks)] with hunks a list of [(prefix, text)], following Hermes's parser."""
+    """[(kind, path, hunks)], each hunk (context hint or None, [(prefix, text)]), following Hermes's
+    parser."""
     lines = [ln.removesuffix("\r") for ln in patch.split("\n")]
     start, end = -1, len(lines)
     for i, ln in enumerate(lines):
@@ -142,75 +159,118 @@ def _parse_v4a(patch: str):
     for ln in lines[start + 1:end]:
         hit = next(((kind, m) for kind, rx in _OPS if (m := rx.match(ln))), None)
         if hit:
-            if op and hunk:
+            if op and hunk and hunk[1]:
                 op[2].append(hunk)
-            op, hunk = (hit[0], hit[1].group(1).strip(), []), [] if hit[0] == "add" else None
+            op, hunk = (hit[0], hit[1].group(1).strip(), []), (None, []) if hit[0] == "add" else None
             ops.append(op)
         elif ln.startswith("@@"):
             if op:
-                if hunk:
+                if hunk and hunk[1]:
                     op[2].append(hunk)
-                hunk = []
+                hint = _HINT.match(ln)
+                hunk = (hint.group(1) if hint else None, [])
         elif op and ln:
             if hunk is None:
-                hunk = []
+                hunk = (None, [])
             if ln[0] in "+- ":
-                hunk.append((ln[0], ln[1:]))
+                hunk[1].append((ln[0], ln[1:]))
             elif ln[0] != "\\":
-                hunk.append((" ", ln))
-    if op and hunk:
+                hunk[1].append((" ", ln))
+    if op and hunk and hunk[1]:
         op[2].append(hunk)
     return ops
 
 
 def _v4a(patch, matter_dir):
+    drafts = {}  # path -> [text | UNREADABLE, regions]: later ops on a file build on earlier ones
     for kind, path, hunks in _parse_v4a(patch):
         if kind == "add":
-            added = [t for h in hunks for p, t in h if p == "+"]
+            added = [t for _hint, lines in hunks for p, t in lines if p == "+"]
             if added:
                 yield path, "\n".join(added) + "\n", None
         elif kind == "update":
-            yield from _update(path, hunks, matter_dir)
+            if path not in drafts:
+                drafts[path] = [_read(path, matter_dir), []]
+            state = drafts[path]
+            for hint, lines in hunks:
+                yield from _hunk(path, state, hint, lines)
+    for path, (text, regions) in drafts.items():
+        if isinstance(text, str) and regions:
+            yield path, text, regions
 
 
-def _update(path, hunks, matter_dir):
-    current = _read(path, matter_dir)
-    regions = []
-    for hunk in hunks:
-        search = "\n".join(t for p, t in hunk if p != "+")
-        repl_lines = [(p, t) for p, t in hunk if p != "-"]
-        repl = "\n".join(t for _, t in repl_lines)
-        added, off = [], 0
-        for p, t in repl_lines:
-            if p == "+":
-                added.append((off, off + len(t)))
-            off += len(t) + 1
-        if not added:
-            added = [(0, 0)]  # a deletion re-checks the sentence it sits in
-        at = current.find(search) if current is not None and search else -1
-        if at < 0:  # not placed in the draft: check the hunk's own lines
-            if any(p == "+" for p, _ in hunk):
-                yield path, repl + "\n", [(a, b) for a, b in added]
-            continue
-        delta = len(repl) - len(search)
-        regions = [(a + delta, b + delta) if a >= at + len(search) else (a, b) for a, b in regions]
-        regions += [(at + a, at + b) for a, b in added]
-        current = current[:at] + repl + current[at + len(search):]
-    if regions:
-        yield path, current, regions
+def _hunk(path, state, hint, lines):
+    """Apply one Update hunk to state ([text, regions]) the way Hermes's _apply_update does; a hunk
+    that can't be placed is yielded on its own lines."""
+    search_lines = [t for p, t in lines if p != "+"]
+    repl_lines = [(p, t) for p, t in lines if p != "-"]
+    if search_lines and search_lines == [t for _, t in repl_lines]:
+        return  # inert: context only, or identical -/+ lines; Hermes skips it
+    repl = "\n".join(t for _, t in repl_lines)
+    added, off = [], 0
+    for p, t in repl_lines:
+        if p == "+":
+            added.append((off, off + len(t)))
+        off += len(t) + 1
+    added = added or [(0, 0)]  # a deletion re-checks the sentence it sits in
+    text = state[0]
+    if not isinstance(text, str):
+        if any(p == "+" for p, _ in lines):
+            yield path, repl + "\n", added
+        return
+    if not search_lines:  # addition-only: after its context hint's line when unique, else at the end
+        if hint and text.count(hint) > 1:
+            yield path, repl + "\n", added  # Hermes refuses an ambiguous hint
+            return
+        if hint and hint in text:
+            eol = text.find("\n", text.find(hint))
+            new, at = ((text + "\n" + repl, len(text) + 1) if eol < 0
+                       else (text[:eol + 1] + repl + "\n" + text[eol + 1:], eol + 1))
+        else:
+            base = text.rstrip("\n")
+            new, at = base + "\n" + repl + "\n", len(base) + 1
+        _splice(state, new, at, at, added)
+        return
+    search = "\n".join(search_lines)
+    at = text.find(search)
+    if at >= 0:
+        _splice(state, text[:at] + repl + text[at + len(search):], at, at + len(search), added)
+        return
+    loose = _fuzzy_replace(text, search, repl)
+    if loose is None:
+        yield path, repl + "\n", added
+        return
+    after, count, _strategy, error = loose
+    if count and not error:  # else Hermes fails the hunk, or it is already applied: no new text
+        lo, hi = _diff_span(text, after)
+        state[1] = [(a + len(after) - len(text), b + len(after) - len(text)) if a >= lo else (a, b)
+                    for a, b in state[1]] + [(lo, hi)]
+        state[0] = after
+
+
+def _splice(state, new, at, old_end, added):
+    """state's text becomes new, in which text[at:old_end] was replaced by a block at `at`; earlier
+    regions after the block shift, and the block's added lines become regions."""
+    delta = len(new) - len(state[0])
+    state[1] = [(a + delta, b + delta) if a >= old_end else (a, b) for a, b in state[1]]
+    state[1] += [(at + a, at + b) for a, b in added]
+    state[0] = new
 
 
 def _read(raw, matter_dir):
+    """The draft's text as Hermes's patch reads it (BOM stripped, undecodable bytes kept as
+    surrogates; line endings normalized, which Hermes's matcher does too), MISSING when there is
+    no such file, or UNREADABLE when it is too big or can't be read."""
     for cand in _sg._candidates(raw, matter_dir):
         if os.path.isfile(cand):
             try:
-                if os.path.getsize(cand) > MAX_CHARS:
-                    return None
-                with open(cand, encoding="utf-8", errors="replace") as f:
-                    return f.read().removeprefix("\ufeff")  # Hermes matches on BOM-stripped text
-            except OSError:
-                return None
-    return None
+                if os.path.getsize(cand) > MAX_READ:
+                    return UNREADABLE
+                with open(cand, encoding="utf-8", errors="surrogateescape") as f:
+                    return f.read().removeprefix("\ufeff")
+            except (OSError, ValueError):
+                return UNREADABLE
+    return MISSING
 
 
 def _target(raw, matter_dir):
