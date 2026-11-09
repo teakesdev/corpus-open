@@ -81,6 +81,27 @@ class TestNoCaseYet(PluginCase):
         self.assertNotIn("matter_ingest_path", out)
 
 
+class TestRegisterMyFiles(PluginCase):
+    """/matter init tells the person to say "register my files"; the agent then calls matter_ingest_path."""
+
+    def test_the_case_folder_itself_is_refused_with_what_to_name_instead(self):
+        self.plugin()
+        for path in (".", self.dir, self.dir + os.sep):
+            r = self.call("matter_ingest_path", {"path": path})
+            self.assertFalse(r["ok"], path)
+            self.assertIn("Filings", r["error"])
+            self.assertNotIn("matter-relative", r["error"])
+        with open(os.path.join(self.dir, "Evidence", "lease.txt"), "w", encoding="utf-8") as f:
+            f.write("lease, synthetic\n")
+        self.assertEqual(self.call("matter_ingest_path", {"path": "Evidence"})["result"]["added"], 1)
+
+    def test_the_tool_says_what_to_register_and_to_leave_drafts_alone(self):
+        self.plugin()
+        said = self.ctx.tools["matter_ingest_path"][1]["description"]
+        self.assertIn("'Filings'", said)
+        self.assertIn("drafts unregistered", said)
+
+
 class TestPlainReasons(PluginCase):
     def notes(self, block):
         return [ln for ln in block.splitlines() if ln.startswith("_") and "not looked up" in ln]

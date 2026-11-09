@@ -120,8 +120,9 @@ SCHEMAS = {
         "Re-hash every registered document in the case folder; report any that changed or went missing."),
     "matter_ingest_path": _schema(
         "matter_ingest_path",
-        "Hash and register one file or folder inside the case folder so facts can cite it. Sources are "
-        "never modified.",
+        "Hash and register one file or folder inside the case folder so facts can cite it, for example "
+        "'Filings' or 'Evidence/lease.pdf' (not the case folder itself). A registered file is a source "
+        "and can no longer be edited, so leave working drafts unregistered. Sources are never modified.",
         {"path": {"type": "string"}}, ["path"]),
 }
 
@@ -266,7 +267,13 @@ class Tools:
 
     def matter_ingest_path(self, args):
         md = self._dir()
-        cand = inside(md, args.get("path", ""))
+        raw = args.get("path", "")
+        if raw and os.path.abspath(raw if os.path.isabs(raw) else os.path.join(md, raw)) == os.path.abspath(md):
+            # "register my files" often arrives as "." or the folder itself, which the kit refuses as
+            # "invalid matter-relative path: '.'"; say what to name instead.
+            raise MatterError("Name a folder inside the case folder (for example Filings or Evidence) or one "
+                              "file. The case folder itself can't be registered in one call.")
+        cand = inside(md, raw)
         with contextlib.redirect_stdout(io.StringIO()), contextlib.closing(store.connect(md)) as conn:
             added, skipped, excluded = ing.ingest_paths(conn, md, [cand])
         return {"added": added, "skipped": skipped, "excluded": excluded}
