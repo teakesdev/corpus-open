@@ -257,12 +257,18 @@ the MCP server above can't:
   removes the script and says how to remove the job. `/matter calendar`
   writes `.matter/exports/deadlines.ics`, the open deadlines as calendar events with reminders 7, 3
   and 1 days before; importing a newer export updates the same events.
-- **`/matter`** shows status and deadlines; `/matter packet 30s`, `/matter check Drafts/x.md` and
-  `/matter grant` (the terminal commands, with full paths, that allow cite checks) do what they say.
-  `/matter init <folder>` makes a case folder and points the plugin at it. `/matter demo [folder]`
-  copies a synthetic case there (default `~/cases/corpus-open-demo`), with its files hashed and
-  two made-up deadlines, one overdue, so the deadline brief and Case pane have something to show;
-  it never writes into a folder that already has files.
+- **`/matter`** shows status and deadlines. Before any case exists it says what the plugin is and
+  the two ways to start (`/matter demo`, `/matter init`), and the agent is told the same on a
+  session's first turn. `/matter packet 30s` renders the counsel packet. `/matter check Drafts/x.md`
+  lists the draft's cites with what the citation guard knows, then each quotation and record page
+  cite with its verdict (exact, wrong page, not found, can't check), problems first. `/matter grant`
+  prints the terminal commands, with full paths, that allow cite checks.
+  `/matter init <folder>` makes a case folder, points the plugin at it and says what to do next.
+  `/matter demo [folder]` makes a practice case (default `~/cases/corpus-open-demo`): three source
+  files recorded with a hash, two made-up deadlines (one overdue), four labeled facts (one with no
+  source), and an unregistered draft with three planted mistakes: a case that does not exist, a
+  quotation that is not in the record, and a quotation cited to the wrong page. It never writes
+  into a folder that already has files.
 - **Skill.** The plugin registers the `matter-kit` skill (`corpus-open:matter-kit`), which teaches
   the agent the labeling rules for facts and sources.
 - **Case pane (Hermes Desktop).** A pane beside the chat (`desktop/plugin.js`) shows the case at a
@@ -285,16 +291,19 @@ hermes plugins install https://github.com/teakesdev/corpus-open
 hermes plugins enable corpus-open
 ```
 
-Then, in Hermes, `/matter init ~/cases/my-case` makes the case folder and points the plugin at it
-(or `/matter demo` for a synthetic one). `/matter grant` prints the two terminal commands that allow
-cite checks, with full paths, so they work from any folder:
+Then, in Hermes, type `/matter`: with no case yet, it offers `/matter demo` (a practice case) and
+`/matter init ~/cases/my-case` (your own). Until a person allows cite checks, every cite is listed
+as `NOT LOOKED UP` with a line pointing to `/matter grant`, which prints the two terminal commands
+that allow them, with full paths, so they work from any folder:
 
 ```sh
-python3 <kit>/matter.py courtlistener on ~/cases/my-case     # case cites: type yes, paste your free key
-python3 <kit>/matter.py consent activate ~/cases/my-case --scope corpus-search --caller hermes   # statutes: type ACTIVATE
+<python> <kit>/matter.py courtlistener on ~/cases/my-case     # case cites: type yes, paste your free key
+<python> <kit>/matter.py consent activate ~/cases/my-case --scope corpus-search --caller hermes   # statutes: type ACTIVATE
 ```
 
-`<kit>` is where Hermes installed the plugin; `/matter grant` prints the real path.
+`<kit>` is where Hermes installed the plugin and `<python>` is the Python Hermes itself runs on;
+`/matter grant` prints both real paths. The kit needs Python 3.10 or newer, and a bare `python3`
+on a Mac can be 3.9.
 
 To try the Case pane on synthetic data, make a demo case, set `matter_dir` to it, and edit one of
 its files on cue to watch the badge turn:

@@ -236,11 +236,10 @@ class TestCitationGuard(PluginCase):
         self.assertTrue(out.startswith(REPLY))
         block = out[len(REPLY):]
         self.assertIn("NOT LOOKED UP", block)
-        cli = "python3 " + shlex.quote(os.path.join(KIT, "matter.py"))
-        self.assertIn(f"{cli} courtlistener on {shlex.quote(self.dir)}", block)
-        self.assertIn(f"{cli} consent activate {shlex.quote(self.dir)} --scope corpus-search --caller hermes",
-                      block)
-        self.assertNotIn("python3 matter.py", block)
+        # The reply points at /matter grant, which prints the commands; the block under every reply
+        # carries no terminal command of its own.
+        self.assertIn("Type /matter grant", block)
+        self.assertNotIn("matter.py", block)
         self.assertEqual(self.posted, [])
         self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
 
@@ -260,7 +259,8 @@ class TestCitationGuard(PluginCase):
     def test_no_key_anywhere_says_where_to_put_one(self):
         self.grant_all()
         block = self.plugin(secrets={}).on_reply(response_text=REPLY)
-        self.assertIn("courtlistener key", block)
+        self.assertIn("no CourtListener key", block)
+        self.assertIn("/matter grant", block)
         self.assertIn("COURTLISTENER_TOKEN", block)
         self.assertEqual(self.posted, [])
 
@@ -345,7 +345,7 @@ class TestCitationGuard(PluginCase):
         g["kind"] = "agent"
         consent.save_grants(self.dir, [g])
         block = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}).on_reply(response_text=REPLY)
-        self.assertIn("no CourtListener grant", block)
+        self.assertIn("looking up case law is not turned on for this case", block)
         self.assertEqual(self.posted, [])
 
     def test_a_failing_source_never_breaks_the_reply(self):
@@ -390,10 +390,13 @@ class TestDeadlineBrief(PluginCase):
         self.assertNotIn("Pretrial memo", ctx)
         self.assertIsNone(p.on_turn(is_first_turn=False))
 
-    def test_nothing_due_or_no_folder_adds_nothing(self):
+    def test_nothing_due_adds_nothing_and_no_folder_says_how_to_start(self):
         self.assertIsNone(self.plugin().on_turn(is_first_turn=True))
-        self.assertIsNone(self.plugin(matter_dir="").on_turn(is_first_turn=True))
-        self.assertIsNone(self.plugin(matter_dir=os.path.join(self.dir, "Evidence")).on_turn(is_first_turn=True))
+        # No case, or a folder that is not one: the agent learns the case tools won't work, once.
+        for md in ("", os.path.join(self.dir, "Evidence")):
+            ctx = self.plugin(matter_dir=md).on_turn(is_first_turn=True)["context"]
+            self.assertIn("No case folder is set up yet", ctx)
+            self.assertNotIn("OVERDUE", ctx)
 
 
 class TestCommand(PluginCase):
@@ -610,8 +613,9 @@ class TestFirstRun(PluginCase):
             cases.init(spaced)
         out = self.plugin(matter_dir=spaced).command("grant")
         kit_cli = shlex.quote(os.path.join(KIT, "matter.py"))
-        self.assertIn(f"python3 {kit_cli} courtlistener on {shlex.quote(spaced)}", out)
-        self.assertIn(f"python3 {kit_cli} consent activate {shlex.quote(spaced)} --scope corpus-search "
+        py = shlex.quote(sys.executable)  # the Python running the plugin, never a bare `python3`
+        self.assertIn(f"{py} {kit_cli} courtlistener on {shlex.quote(spaced)}", out)
+        self.assertIn(f"{py} {kit_cli} consent activate {shlex.quote(spaced)} --scope corpus-search "
                       "--caller hermes", out)
         self.assertNotIn("python3 matter.py", out)
 

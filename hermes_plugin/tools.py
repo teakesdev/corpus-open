@@ -14,6 +14,7 @@ import os
 from ..matterkit import ingest as ing
 from ..matterkit import packet as pk
 from ..matterkit import store
+from .guard import HOW_TO_START
 
 TOOLSET = "corpus_open"
 LABELS = ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]
@@ -24,13 +25,15 @@ class MatterError(ValueError):
 
 
 def resolve_matter(raw: str | None) -> str:
-    """The configured case folder, expanded and checked to be a matter."""
+    """The configured case folder, expanded and checked to be a matter. When there is none, the
+    message is read by people (from /matter) and by the agent (from a tool), so it names the two
+    slash commands that start a case, not a setting or a terminal command."""
     if not raw or not str(raw).strip():
-        raise MatterError("No case folder is set. Set matter_dir in this plugin's settings "
-                          "(Settings > Plugins > corpus-open) to a folder made with `matter.py init`.")
+        raise MatterError("No case folder is set up yet. " + HOW_TO_START)
     path = os.path.abspath(os.path.expanduser(str(raw).strip()))
     if not os.path.isdir(os.path.join(path, ".matter")):
-        raise MatterError(f"{path} is not a matter yet (no .matter/ folder). Run: python3 matter.py init {path}")
+        raise MatterError(f"{path} is not set up as a case folder yet. Type /matter init {path} to set "
+                          "it up (files already there are kept), or /matter demo to try a made-up case.")
     return path
 
 
