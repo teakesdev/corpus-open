@@ -115,16 +115,22 @@ def _resolve_in_matter(path: str) -> str:
     if not path:
         raise ValueError("path required")
     abs_matter = os.path.abspath(MATTER_DIR)
-    if os.path.isabs(path):
-        candidate = os.path.abspath(path)
-    else:
-        candidate = os.path.abspath(os.path.join(abs_matter, path))
-    if not ing.is_within_matter(candidate, abs_matter):
+    candidate = ing.resolve_in_matter(path, abs_matter)
+    if candidate is None:
         raise ValueError("path escapes MATTER_DIR")
     try:
         ing.to_rel_path(candidate, abs_matter)
     except ValueError as e:
         raise ValueError("path escapes MATTER_DIR") from e
+    return candidate
+
+
+def _readable_in_matter(path: str) -> str:
+    """_resolve_in_matter for a file the server reads: a link is followed only when its target is
+    inside MATTER_DIR too, so a link in the case cannot read a file from elsewhere on the disk."""
+    candidate = _resolve_in_matter(path)
+    if not ing.reads_inside(candidate, MATTER_DIR):
+        raise ValueError(f"{path} is a link to a file outside MATTER_DIR, so it is not read")
     return candidate
 
 
@@ -155,7 +161,7 @@ def call(name: str, args: dict):
         return json.dumps({"added": added, "skipped": skipped, "excluded": excluded})
     if name == "matter.brief_check":
         from matterkit import briefcheck
-        report = briefcheck.check(MATTER_DIR, _resolve_in_matter(args["path"]),
+        report = briefcheck.check(MATTER_DIR, _readable_in_matter(args["path"]),
                                   use_pdftotext=args.get("pdftotext", True), mode=args.get("mode", "brief"))
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
     if name == "matter.rules_show":
@@ -191,7 +197,7 @@ def call(name: str, args: dict):
         from matterkit import caselaw, citelookup
         from matterkit.consent import ConsentError
         by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
-        path = _resolve_in_matter(args.get("path", ""))
+        path = _readable_in_matter(args.get("path", ""))
         if not os.path.isfile(path):
             raise ValueError(f"no such draft: {args.get('path')}")
         max_requests = max(1, min(int(args.get("max_requests") or 1), 3))

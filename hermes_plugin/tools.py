@@ -30,7 +30,7 @@ def draft_path(md: str, rel: str) -> str:
     if rel and os.path.abspath(rel if os.path.isabs(rel) else os.path.join(md, rel)) == os.path.abspath(md):
         raise MatterError("That is the case folder itself. Name one file in it, for example a draft in Drafts.")
     p = inside(md, rel)
-    if os.path.lexists(p) and not ing.is_within_matter(os.path.realpath(p), os.path.realpath(md)):
+    if not ing.reads_inside(p, md):
         raise MatterError(f"{rel} is a link to a file outside the case folder, so it is not read. Copy the "
                           "file into the case folder instead.")
     if os.path.isdir(p):
@@ -59,8 +59,8 @@ def inside(matter_dir: str, path: str) -> str:
     if not path:
         raise MatterError("path required")
     root = os.path.abspath(matter_dir)
-    cand = os.path.abspath(path if os.path.isabs(path) else os.path.join(root, path))
-    if not ing.is_within_matter(cand, root):
+    cand = ing.resolve_in_matter(path, root)
+    if cand is None:
         raise MatterError("path is outside the case folder")
     ing.to_rel_path(cand, root)
     return cand
@@ -294,16 +294,22 @@ class Tools:
         # The kit prints why it skipped a path and counts nothing, which reads to the agent as done.
         if os.path.islink(cand) and not os.path.exists(cand):
             raise MatterError(f"{raw} is a link to a file that is no longer there. Register the file itself.")
-        if os.path.islink(cand) and ing._links_out(cand, md):
-            raise MatterError(f"{raw} is a link to a file outside the case folder (or into a subcase), so it "
-                              "is not registered. Copy the file into the case folder instead.")
         sub = ing.nested_matter_root(cand, md)
         if sub:
             raise MatterError(f"{os.path.relpath(sub, md)} is its own case (a subcase). Register its papers "
                               "from that case, not this one.")
+        if (os.path.islink(cand) or not os.path.isdir(cand)) and os.path.lexists(cand) and ing._links_out(cand, md):
+            # A link at the file itself or at a folder on the way: either way the bytes live elsewhere.
+            raise MatterError(f"{raw} leads through a link to a file outside the case folder (or into a "
+                              "subcase), so it is not registered. Copy the file into the case folder instead.")
         if not os.path.exists(cand):
             raise MatterError(f"There is no {raw} in the case folder. Name a folder that is there (for "
                               "example Filings or Evidence) or one file.")
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.closing(store.connect(md)) as conn:
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said), contextlib.closing(store.connect(md)) as conn:
             added, skipped, excluded = ing.ingest_paths(conn, md, [cand])
-        return {"added": added, "skipped": skipped, "excluded": excluded}
+        # The kit's "! ..." lines say why a file was left out; without them a skip reads as done.
+        root = os.path.abspath(md) + os.sep
+        notes = [ln.strip().lstrip("! ").replace(root, "") for ln in said.getvalue().splitlines()
+                 if ln.strip().startswith("!")]
+        return {"added": added, "skipped": skipped, "excluded": excluded, "notes": notes}
