@@ -346,8 +346,15 @@ class Plugin:
 
     def _grant_text(self) -> str:
         s = self.settings()
-        md, caller = s["matter_dir"] or None, s["caller_id"]
-        return ("A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
+        caller, lead = s["caller_id"], ""
+        try:
+            md = resolve_matter(s["matter_dir"])
+        except MatterError as e:
+            # No case yet: say how to get one, and print no line that would fail on this folder.
+            md = None
+            lead = f"{e} After that, /matter grant prints the two lines below with your folder in them.\n\n"
+        return (lead +
+                "A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
                 "grant an agent writes). Copy each line into a terminal; they work from any folder:\n"
                 f"  {_guard.grant_command('case', md, caller)}\n"
                 "    case cites (CourtListener): asks you to type yes, then for your free key (get one at "

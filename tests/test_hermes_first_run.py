@@ -304,5 +304,57 @@ class TestCheckCommand(PluginCase):
         self.assertIn("Quotations could not be checked: boom", out)
 
 
+class TestFoundRunningInsideHermes(PluginCase):
+    """Faults the first live run inside Hermes (v0.23.0, 2026-11-09) turned up."""
+
+    def test_a_word_of_the_sentence_is_not_shown_as_part_of_the_case_name(self):
+        text = "Any pleading must meet the plausibility standard of Ashcroft v. Iqbal, 556 U.S. 662 (2009)."
+        block = self.plugin().on_reply(response_text=text)[len(text):]
+        self.assertIn("· Ashcroft v. Iqbal, 556 U.S. 662", block)
+        self.assertNotIn("of Ashcroft", block)
+
+    def test_grant_before_any_case_says_to_start_one_first(self):
+        # The two lines came out with a bare <case folder> and no word on how to get a folder.
+        out = self.plugin(matter_dir="").command("grant")
+        self.assertTrue(out.startswith("No case folder is set up yet"), out[:90])
+        self.assertIn("/matter demo", out)
+        self.assertIn("/matter init", out)
+        self.assertIn("<case folder>", out)
+        plain = os.path.join(self._tmp.name, "just a folder")
+        os.makedirs(plain)
+        out = self.plugin(matter_dir=plain).command("grant")
+        self.assertTrue(out.startswith(f"{plain} is not set up as a case folder yet"), out[:90])
+        self.assertIn(f"/matter init {plain}", out)
+        self.assertIn("<case folder>", out)  # no command that would fail on a folder that is not a case
+        self.assertNotIn(f"courtlistener on {shlex.quote(plain)}", out)
+        # A case that exists gets the two lines and nothing in front of them.
+        self.assertTrue(self.plugin().command("grant").startswith("A person turns on cite checks"))
+
+
+class TestSkillInsideHermes(unittest.TestCase):
+    """With lookups off, the agent told the person to run `python3 <kit>/matter.py courtlistener on
+    <folder>`: the skill's words. A stock Mac's python3 is too old for the kit, and inside Hermes
+    /matter grant prints the lines that work on this computer."""
+
+    def setUp(self):
+        with open(hp.SKILL_PATH, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def section(self, heading):
+        _, found, rest = self.text.partition(f"\n## {heading}")
+        self.assertTrue(found, f"no section: {heading}")
+        return rest.split("\n## ", 1)[0]
+
+    def test_a_hermes_section_names_the_slash_commands_and_the_tools(self):
+        said = self.section("Inside Hermes")
+        for word in ("/matter grant", "/matter demo", "/matter init", "matter_ingest_path", "python3"):
+            self.assertIn(word, said)
+        # It comes before the terminal setup an agent would otherwise copy.
+        self.assertLess(self.text.index("## Inside Hermes"), self.text.index("## Setup"))
+
+    def test_the_lookup_advice_gives_the_hermes_way(self):
+        self.assertIn("/matter grant", self.section("Case law lookups"))
+
+
 if __name__ == "__main__":
     unittest.main()
