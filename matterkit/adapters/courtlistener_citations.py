@@ -13,6 +13,7 @@ payload is validated before the first is sent, and a throttled run stops. It nev
 """
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -30,8 +31,9 @@ class Throttled(Exception):
         self.until = until
 
 
-def post_form(url: str, fields: dict, token: str):
-    """POST form fields with the token; return the parsed JSON. Redirects are refused."""
+def post_form(url: str, fields: dict, token: str, timeout: float = 60):
+    """POST form fields with the token; return the parsed JSON. Redirects are refused. A connection
+    that drops or times out part way is a RuntimeError like any other failure to reach CourtListener."""
     if not token:
         raise consent.ConsentError("citation lookup requires a token — no egress")
     req = urllib.request.Request(
@@ -39,7 +41,7 @@ def post_form(url: str, fields: dict, token: str):
         headers={"User-Agent": UA, "Accept": "application/json",
                  "Content-Type": "application/x-www-form-urlencoded", "Authorization": "Token " + token})
     try:
-        with opener().open(req, timeout=60) as resp:
+        with opener().open(req, timeout=timeout) as resp:
             raw = resp.read()
     except consent.ConsentError:
         raise
@@ -64,6 +66,8 @@ def post_form(url: str, fields: dict, token: str):
         raise RuntimeError(f"CourtListener HTTP {code}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"could not reach CourtListener: {e.reason}") from e
+    except (OSError, http.client.HTTPException) as e:  # a timeout or reset while reading the answer
+        raise RuntimeError(f"could not reach CourtListener: {e}") from e
     try:
         return json.loads(raw.decode("utf-8"))
     except ValueError as e:

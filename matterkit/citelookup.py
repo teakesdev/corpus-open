@@ -76,6 +76,7 @@ class DraftCite:
     names: list = field(default_factory=list)  # every case name the draft gives this cite
     year: str | None = None  # from the draft's parenthetical
     lines: list = field(default_factory=list)
+    keys: list = field(default_factory=list)  # brief check's authority keys for this cite: local only
 
 
 @dataclass
@@ -95,7 +96,7 @@ class Result:
 def draft_cites(text: str) -> list[DraftCite]:
     """Full case cites in the draft, deduplicated, in order of first appearance."""
     found = []
-    for _key, _disp, _pin, a, b, kind, _extra in briefcheck.scan_authorities(text):
+    for key, _disp, _pin, a, b, kind, _extra in briefcheck.scan_authorities(text):
         if kind != "case":
             continue
         m = briefcheck.CASE_RE.match(text, a)
@@ -109,9 +110,9 @@ def draft_cites(text: str) -> list[DraftCite]:
         else:
             continue
         name = _LEAD.sub("", _OPENER.sub("", briefcheck._case_name(text[:a])))
-        found.append((a, sent, year, name, text.count("\n", 0, a) + 1))
+        found.append((a, sent, year, name, text.count("\n", 0, a) + 1, key))
     out: dict[str, DraftCite] = {}
-    for _a, sent, year, name, line in sorted(found):
+    for _a, sent, year, name, line, key in sorted(found):
         c = out.get(sent)
         if c is None:
             c = out[sent] = DraftCite(sent, f"{name}, {sent}" if name else sent)
@@ -120,6 +121,8 @@ def draft_cites(text: str) -> list[DraftCite]:
         c.year = c.year or year
         if line not in c.lines:
             c.lines.append(line)
+        if key not in c.keys:
+            c.keys.append(key)
     return list(out.values())
 
 

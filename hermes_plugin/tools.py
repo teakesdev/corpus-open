@@ -1,9 +1,10 @@
 """Matter tools for Hermes: the case folder's store, read-mostly, through the kit's own modules.
 
 Every handler takes (args, **kwargs), returns a JSON string and never raises, as Hermes asks.
-Nothing here files, sends or contacts anyone. The one network path is matter_cite_check, which
-goes through the guard and so through the kit's consent grants (the case's default for bare cites,
-or a person's own).
+Nothing here files, sends or contacts anyone. Two handlers reach the network, both through the
+kit's consent grants (the case's default for bare cites, or a person's own): matter_cite_check,
+through the guard, and matter_brief_check, which sends a draft's bare case cites to CourtListener
+with the plugin's key unless citation_guard is not lookup or offline is set.
 """
 from __future__ import annotations
 
@@ -19,6 +20,8 @@ from .guard import HOW_TO_START
 
 TOOLSET = "corpus_open"
 LABELS = ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]
+BRIEF_KEY_HINT = ("add it in Hermes's settings for this plugin (courtlistener_token), never in a chat; "
+                  "/matter grant shows how")
 
 
 class MatterError(ValueError):
@@ -118,8 +121,12 @@ SCHEMAS = {
         "matter_brief_check",
         "Check a draft brief or complaint inside the case folder (Markdown, text, Word .docx or PDF): every "
         "record cite, pleading cite, authority, quotation and fact tag is tied to a hash-verified document "
-        "or flagged. Read-only. Tied to a source is not legal correctness.",
-        {"path": {"type": "string"}, "mode": {"type": "string", "enum": ["brief", "complaint"]}},
+        "or flagged. Each case cite is also checked on CourtListener with this plugin's key: only the bare "
+        "citations are sent, in at most one request; a cite with no answer is marked NOT VERIFIED with the "
+        "reason. offline=true, or citation_guard local, sends nothing. Never writes the store. Tied to a "
+        "source or found on CourtListener is not legal correctness.",
+        {"path": {"type": "string"}, "mode": {"type": "string", "enum": ["brief", "complaint"]},
+         "offline": {"type": "boolean"}},
         ["path"]),
     "matter_rules_show": _schema(
         "matter_rules_show",
@@ -157,9 +164,10 @@ def _err(e: Exception) -> str:
 class Tools:
     """Handlers bound to a settings reader so each call sees the current case folder."""
 
-    def __init__(self, settings, guard_runner):
+    def __init__(self, settings, guard_runner, courtlistener_token=None):
         self.settings = settings  # callable: () -> dict of plugin settings
         self.guard_runner = guard_runner  # callable: (text, matter_dir) -> guard.Check
+        self.courtlistener_token = courtlistener_token  # callable: () -> the key from Hermes's settings, or None
 
     def _dir(self) -> str:
         return resolve_matter(self.settings().get("matter_dir"))
@@ -219,9 +227,19 @@ class Tools:
     def matter_brief_check(self, args):
         from ..matterkit import briefcheck
         md = self._dir()
+        s = self.settings()
+        lookup = s.get("citation_guard") == "lookup"
+        # The key comes from the plugin (Hermes's settings, catalog rule 11), never from a bare
+        # environment read here: "" when there is none.
+        token = (self.courtlistener_token() or "") if lookup and self.courtlistener_token else ""
+        cites = briefcheck.CiteCheck(
+            caller_id=str(s.get("caller_id") or "hermes"), offline=not lookup or bool(args.get("offline")),
+            offline_why=("" if lookup else f"citation_guard is {s.get('citation_guard')} in this plugin's settings, "
+                                           "so nothing leaves this computer"),
+            token=token, key_hint=BRIEF_KEY_HINT)
         with contextlib.redirect_stdout(io.StringIO()):
             report = briefcheck.check(md, draft_path(md, args.get("path", "")), use_pdftotext=True,
-                                      mode=args.get("mode") or "brief")
+                                      mode=args.get("mode") or "brief", cites=cites)
         return {"exit": report.exit_code, "summary": report.summary(), "report": report.render()}
 
     def matter_rules_show(self, args):

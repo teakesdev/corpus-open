@@ -58,8 +58,8 @@ CASE_DEFAULTS = {
 }
 TURN_ON_HINT = ("Checking bare case and statute cites is on for a case until a person turns it off; case law "
                 "search, and anything else, needs a person to turn it on. To turn case law lookups on: in "
-                "Matter Kit's browser window open the case, then Case law lookups, then Turn on; or run "
-                "`matter.py courtlistener on <case folder>`.")
+                "Matter Kit's browser window open the case, then Case law lookups, then Turn on case law search; "
+                "or run `matter.py courtlistener on <case folder>`.")
 
 
 class ConsentError(PermissionError):

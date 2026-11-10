@@ -172,7 +172,7 @@ class PluginCase(unittest.TestCase):
             self.addCleanup(p.stop)
         self.posted = []
 
-        def post(url, data, token):
+        def post(url, data, token, timeout=None):  # brief check asks for a shorter timeout
             self.posted.append((url, data, token))
             return cl_answer(data["text"])
         p = mock.patch.object(clc, "post_form", post)

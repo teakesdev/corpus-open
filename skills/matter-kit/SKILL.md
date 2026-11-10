@@ -33,7 +33,9 @@ commands. The terminal commands in the rest of this file are for other setups.
   `python3 … matter.py …` line for them yourself: the `python3` on many computers
   is too old to run the kit, and `/matter grant` names one that works.
 - **Checking a draft**: `matter_brief_check` and `matter_cite_check` on the file,
-  or tell the person about `/matter check <file>`.
+  or tell the person about `/matter check <file>`. `matter_brief_check` also looks
+  each case cite up on CourtListener (bare cites only); a cite it could not look up
+  is marked NOT VERIFIED with the reason, which you pass on. `offline: true` sends nothing.
 - Do not run `matter.py` with `python3` in a terminal to do what a `matter_*` tool
   does. If you need a kit command that has no tool, use the interpreter that
   `/matter grant` prints.
@@ -206,7 +208,7 @@ off or the key is missing, tell the person in plain words, one time, what the
 reply says:
 
 > To let me search case law for this case, open Matter Kit in your browser,
-> open the case, click "Case law lookups", then "Turn on". To check citations,
+> open the case, click "Case law lookups", then "Turn on case law search". To check citations,
 > paste your free CourtListener key there (CourtListener's API page has it).
 > Or run `python3 matter.py courtlistener on <case folder>` once.
 

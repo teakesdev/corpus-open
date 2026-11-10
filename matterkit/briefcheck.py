@@ -1,6 +1,13 @@
 """Brief check: tie every cite, quotation and factual sentence in a draft to the store.
 
-Read-only. The store is opened with `store.connect_readonly`; nothing is written.
+The store is opened with `store.connect_readonly` and never written. When an entry point asks for
+it (the CLI, MCP, the browser UI and the Hermes plugin pass a CiteCheck), brief check also checks
+the draft's case cites on CourtListener (design 2026-11-09 §3): a saved answer when there is one,
+else at most one request of bare "volume reporter page" lines, else NOT VERIFIED with the reason.
+That may append CourtListener's answers to `.matter/caselaw/cites.jsonl` and one hash-only line per
+request to `.matter/egress.jsonl`, and give a case nobody has chosen for its default cite-check
+grant in `.matter/consent.json` (consent.ensure_defaults); nothing else. Offline, it sends nothing
+and writes nothing. A library call without a CiteCheck has no CourtListener phase at all.
 For each draft unit (a sentence, with a following citation-only sentence folded
 in) it resolves:
 
@@ -49,7 +56,11 @@ TOOL_ID = "matter-kit brief-check 0.1"
 LIMITS = ("“Tied to a source in the store” means the cited document or authority record exists in this "
           "matter's store, its bytes still match the registered hash, and the cite or quotation matched it. "
           "It does not mean the proposition is legally correct, that an authority is still good law (no citator "
-          "was run), or that a source is authentic, admissible or complete.")
+          "was run), or that a source is authentic, admissible or complete. Case cites are also checked on "
+          "CourtListener unless the check is off, there is no key, or brief check ran offline: found there means "
+          "an opinion sits at that volume, reporter and page, not that it says what the draft says. Brief check "
+          "never writes the store; it may append CourtListener's answers to .matter/caselaw/cites.jsonl and a "
+          "hash-only line per request to .matter/egress.jsonl.")
 
 STATUS_OK = {"source-checked", "verified-official"}
 STATUS_LOCATED = {"resolved", "research-pending"}
@@ -110,6 +121,24 @@ class AuthorityUse:
     checked_via: str | None
     lines: list = field(default_factory=list)
     pins: list = field(default_factory=list)
+    courtlistener: str | None = None  # what CourtListener said, for the authorities table
+
+
+COURTLISTENER_TIMEOUT = 20  # seconds brief check waits for CourtListener before marking cites NOT VERIFIED
+OFFLINE_WHY = "brief check ran offline, so nothing was sent; run it again without offline to check this cite"
+
+
+@dataclass
+class CiteCheck:
+    """Asks brief check to check the draft's case cites on CourtListener (design 2026-11-09 §3). The CLI,
+    MCP, the browser UI and the Hermes plugin pass one; a caller that passes none gets no CourtListener
+    phase, and no key is read and nothing is sent."""
+    caller_id: str
+    offline: bool = False
+    offline_why: str = ""  # why nothing is sent when offline (default OFFLINE_WHY)
+    token: str | None = None  # a host's own key, "" for none; None reads COURTLISTENER_TOKEN or the saved key
+    post: object = None  # the transport, for tests; None is the adapter's own, with COURTLISTENER_TIMEOUT
+    key_hint: str = ""  # where a key goes, for the no-key reason (default: Matter Kit's own command and UI)
 
 
 # --------------------------------------------------------------------------
@@ -1044,6 +1073,7 @@ class Report:
         self.rule_texts: list = []  # (line, cite, rules.Attached, anchor id) for rule cites found in a pack
         self.draft = None  # the draftdocs.Draft read from a .docx or .pdf draft: it knows where each line came from
         self.headings: list = []  # (line, level, text, opens a fact section) for a .docx or .pdf draft
+        self.courtlistener: dict | None = None  # the CourtListener phase's counts; None when it did not run
 
     @property
     def structured(self) -> bool:
@@ -1089,6 +1119,8 @@ class Report:
                                          "still checked)" if self.mode == "complaint" else
                                          " (every factual sentence needs a cite)"),
                f"- Tool: {TOOL_ID} · checked {now_iso()}", ""]
+        if self.courtlistener is not None:
+            out.insert(-2, _courtlistener_line(self.courtlistener))
         head, rule = ("Where", "|---|") if self.structured else ("Line", "|---:|")
         loc = lambda line, where: esc(where) if where else line  # noqa: E731
         if self.structured:
@@ -1136,7 +1168,7 @@ class Report:
             where = list(dict.fromkeys(self.where(ln) or str(ln) for ln in lines)) if self.structured else lines
             out.append(f"| {esc(a.display)} | {esc(', '.join(map(str, where)))} | "
                        f"{esc(', '.join(p for p in a.pins if p)) or '—'} | {a.store_status or '**not logged**'} | "
-                       f"{esc(a.checked_via or '—')} |")
+                       f"{esc('; '.join(v for v in (a.checked_via, a.courtlistener) if v) or '—')} |")
         if self.rules_packs:
             out += ["", "## Rule text in attached packs", "",
                     f"Each rule cite found in an attached rules pack ({rules.DERIVED}). A cite missing from "
@@ -1174,10 +1206,11 @@ MODES = ("brief", "complaint")
 
 
 def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_path: str | None = None,
-          mode: str = "brief") -> Report:
+          mode: str = "brief", cites: CiteCheck | None = None) -> Report:
     """mode "brief": every factual sentence needs a cite. mode "complaint": allegations need
     none (uncited sentences and quotations are not flagged), but every cite, authority and
-    sourced quotation is still checked, and a HYPOTHESIS/INFERENCE/UNKNOWN fact tag is flagged."""
+    sourced quotation is still checked, and a HYPOTHESIS/INFERENCE/UNKNOWN fact tag is flagged.
+    cites: check the draft's case cites on CourtListener too (see CiteCheck); None skips that."""
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}; use one of: {', '.join(MODES)}")
     if draft_path.lower().endswith((".docx", ".pdf")) and os.path.getsize(draft_path) > draftdocs.MAX_DRAFT_BYTES:
@@ -1198,13 +1231,111 @@ def check(matter_dir: str, draft_path: str, use_pdftotext: bool = True, docket_p
         docs = Docs(conn, matter_dir, docket, use_pdftotext)
         rep.pdftotext_version = docs.pdftotext_version
         try:
-            _Checker(rep, conn, docs, docket, draft).run()
+            checker = _Checker(rep, conn, docs, docket, draft)
+            checker.run()
         finally:
             docs.close()
         rep.inputs = dict(docs.read)
     finally:
         conn.close()
+    if cites is not None:  # after the store is closed: a slow network never holds it open
+        _courtlistener(rep, checker.text, checker.uses, cites)
     return rep
+
+
+# --------------------------------------------------------------------------
+# CourtListener (design 2026-11-09 §3)
+# --------------------------------------------------------------------------
+def _not_sent(err, opts: CiteCheck) -> str:
+    """Why nothing was sent, from the refusal check_draft raised, and how to fix it."""
+    from . import caselaw
+    text = str(err)
+    if "turned off for this case by a person" in text:
+        return ("case cite checking was turned off for this case by a person, so nothing was sent; "
+                "`matter.py courtlistener on <case folder>` or the browser UI's Case law panel turns it back on")
+    if "daily budget" in text:
+        return ("this case's daily limit of CourtListener lookups is used up, so nothing was sent; "
+                "run brief check again tomorrow")
+    if "CourtListener key" in text or "requires a token" in text:
+        hint = opts.key_hint or "save it with `matter.py courtlistener key` or in the browser UI's Case law panel"
+        return f"no CourtListener key is set, so nothing was sent; get a free key at {caselaw.KEY_URL} and {hint}"
+    if "no valid grant" in text:
+        return (f"no grant in this case lets `{opts.caller_id}` look cites up, so nothing was sent; "
+                "`matter.py courtlistener status <case folder>` shows what is on")
+    return f"not sent: {text}"
+
+
+def _courtlistener(rep: Report, text: str, uses: dict, opts: CiteCheck) -> None:
+    """Each full case cite once: a saved answer, else one request through caselaw.check_draft (which
+    re-checks the grant and logs the request hash-only), else NOT VERIFIED with the reason. Findings
+    go beside the store's, at each cite's first line. `text` has comments and fact tags blanked."""
+    from . import caselaw, citelookup, consent  # here, not above: citelookup imports this module
+    found = citelookup.draft_cites(text)
+    rep.courtlistener = info = {"cites": len(found), "sent": 0, "requests": 0, "answered": 0, "saved": 0,
+                                "why": None}
+    if not found:
+        return
+    over = (f"over the one request brief check sends ({citelookup.MAX_PER_REQUEST} cites); run `matter.py cite "
+            "lookup <case folder> <draft> --max-requests {n}` on the draft (its .md or .txt copy) for the rest")
+    raw, report, why = text.encode("utf-8"), None, None
+    if opts.offline:
+        why = opts.offline_why or OFFLINE_WHY
+    else:
+        try:
+            report = caselaw.check_draft(rep.matter_dir, rep.draft_path, raw, opts.caller_id, max_requests=1,
+                                         token=opts.token, post=opts.post, timeout=COURTLISTENER_TIMEOUT, over=over)
+        except consent.ConsentError as e:
+            why = _not_sent(e, opts)
+        except (OSError, ValueError, RuntimeError) as e:  # never a crash; post_form wraps the rest
+            why = f"not checked ({e}); run brief check again later"
+    if report is None:
+        report = caselaw.check_draft(rep.matter_dir, rep.draft_path, raw, opts.caller_id, offline=True,
+                                     why_not_sent=why)
+    info.update(requests=report.sent, answered=report.answered, saved=report.saved, why=why,
+                sent=sum(len(p.split("\n")) for p in report.payloads[:report.sent]))
+    for r in report.results:
+        line = r.cite.lines[0] if r.cite.lines else 0
+        saved = r.note.split(";")[0] if r.note.startswith("saved answer from") else ""
+        when = f" ({saved})" if saved else ""
+        if r.outcome == citelookup.FOUND:
+            cell = f"CourtListener: found, {citelookup._opinion(r.cluster)}{when}"
+            cell += "".join(f"; ⚠ {w}" for w in r.warnings)
+        elif r.outcome == citelookup.NAME_DIFFERS:
+            k = r.cluster
+            rep.add("BLOCK", "cite-name-differs", line, r.cite.display,
+                    f"CourtListener has a different case at this cite: {k['case_name']}"
+                    + (f" ({k['url']})" if k["url"] else "") + f". Check that the cite points to the case you mean.{when}")
+            cell = "CourtListener: name differs"
+        elif r.outcome == citelookup.NOT_FOUND:
+            rep.add("BLOCK", "cite-not-found", line, r.cite.display, citelookup.NOT_FOUND_TEXT + when)
+            cell = "CourtListener: not found"
+        else:
+            note = r.note
+            if "could not reach CourtListener" in note:
+                note = f"network error ({note.removeprefix('stopped: ')}); run brief check again later"
+            rep.add("UNCHECKED", "cite-not-verified", line, r.cite.display, f"NOT VERIFIED on CourtListener: {note}")
+            cell = "CourtListener: NOT VERIFIED"
+        for key in r.cite.keys:
+            if key in uses:
+                uses[key].courtlistener = cell
+
+
+def _courtlistener_line(c: dict) -> str:
+    """The report header's line: what was sent, how many requests went out, and what was not sent."""
+    from .citelookup import URL
+    if not c["cites"]:
+        return "- CourtListener: the draft has no full case cites; nothing sent"
+    plural = lambda n, word: f"{n} {word}{'s' if n != 1 else ''}"  # noqa: E731
+    parts = [plural(c["cites"], "case cite")]
+    if c["requests"]:
+        parts.append(f"sent {c['sent']} to `{URL}` in {plural(c['requests'], 'request')} as bare \"volume "
+                     "reporter page\" lines, no names, pins or other draft text"
+                     + ("; no answer" if c["answered"] < c["requests"] else ""))
+    else:
+        parts.append("nothing sent" + (f" ({re.split(r', so |; ', c['why'])[0]})" if c["why"] else ""))
+    if c["saved"]:
+        parts.append(f"{c['saved']} answered from this case's saved lookups")
+    return "- CourtListener: " + "; ".join(parts)
 
 
 class _Checker:

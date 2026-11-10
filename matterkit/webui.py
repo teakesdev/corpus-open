@@ -559,8 +559,9 @@ def h_brief_check(app, req, case):
             raise HttpError(400, "Brief check reads .md and .txt drafts only for now. In Word, use "
                                  "File > Save As > Plain Text (.txt), put the copy in the case, and check that.")
         shown = hashlib.sha256(pin.read(path)).hexdigest()  # read without following a link
+        cites = briefcheck.CiteCheck(caller_id=req.identity.name)  # bare case cites to CourtListener, by default
         try:
-            rep = briefcheck.check(pin.path, os.path.join(pin.path, path), mode=mode)
+            rep = briefcheck.check(pin.path, os.path.join(pin.path, path), mode=mode, cites=cites)
         except (ValueError, FileNotFoundError) as e:
             raise HttpError(400, f"Brief check refused: {e}") from None
         if rep.draft_sha256 != shown:  # the report must describe the file that was picked

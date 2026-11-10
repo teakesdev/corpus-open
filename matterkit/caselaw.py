@@ -59,7 +59,7 @@ SEARCH_NEEDS_KEY = ("case law search requires a free CourtListener key (CourtLis
 HOW_TO_TURN_ON = (
     "A person turns case law search on, once per case, in one of two ways:\n"
     "- In Matter Kit's browser window (`python3 matter.py ui <workspace>`): open the case, then "
-    "\"Case law lookups\", then \"Turn on\". Paste a free CourtListener key there too (get one at "
+    "\"Case law lookups\", then \"Turn on case law search\". Paste a free CourtListener key there too (get one at "
     f"{KEY_URL}); search and case cite checking need it.\n"
     "- Or in a terminal: `python3 matter.py courtlistener on <case folder>`.")
 CASE_OFF = "`matter.py courtlistener off <case folder>`"
@@ -271,29 +271,47 @@ def search(matter_dir: str, caller_id: str, query: str, limit: int = 5, fresh: b
     return S.manual_search(matter_dir, caller_id, query, limit=limit, auth_mode="authenticated", fresh=True)
 
 
+NO_KEY = ("citation lookup requires a free CourtListener key, saved in Matter Kit's Case law lookups panel "
+          "or set as COURTLISTENER_TOKEN — refusing egress")
+
+
 def check_draft(matter_dir: str, path: str, raw: bytes, caller_id: str, max_requests: int = 1,
-                fresh: bool = False, limit_name: str = "max_requests"):
+                fresh: bool = False, limit_name: str = "max_requests", *, offline: bool = False,
+                why_not_sent: str | None = None, token: str | None = None, post=None,
+                timeout: float | None = None, over: str | None = None):
     """Check a draft's case cites. Cites CourtListener answered before come from the case's saved
     lookups; only the rest are sent. Returns citelookup.Report (its `saved` counts the former).
-    Raises ConsentError when a cite would have to be sent and lookups are off or there is no key."""
+    Raises ConsentError when a cite would have to be sent and lookups are off or there is no key.
+
+    offline: send nothing and write nothing (not even a never-chosen case's default); each cite with
+    no saved answer is NOT LOOKED UP, with `why_not_sent` as the reason. token: a host's own key (the
+    Hermes plugin's, from Hermes's settings); None reads COURTLISTENER_TOKEN or the key Matter Kit
+    saved. post and timeout go to the adapter's transport. over: what a cite past the last request
+    says, with {n} for the requests the draft needs."""
     cites = citelookup.draft_cites(raw.decode("utf-8", "replace"))
     saved = {} if fresh else saved_lookups.find_cites(matter_dir, [c.sent for c in cites])
     todo = [c for c in cites if c.sent not in saved]
     payloads = citelookup.payloads(todo)
     answers, stopped, sent = [], None, 0
-    if payloads:
+    if payloads and offline:
+        stopped = why_not_sent or "offline: nothing was sent"
+    elif payloads:
         consent.ensure_defaults(matter_dir, [citelookup.PROVIDER])  # a never-chosen case: its default, once
         consent.authorize(matter_dir, citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE, caller_id)
-        if not credentials.courtlistener_token():
-            raise consent.ConsentError("citation lookup requires a free CourtListener key, saved in Matter Kit's "
-                                       "Case law lookups panel or set as COURTLISTENER_TOKEN — refusing egress")
-        from .adapters.courtlistener_citations import CitationLookupAdapter
-        adapter = CitationLookupAdapter(matter_dir, caller_id)
+        key = (credentials.courtlistener_token() if token is None else token).strip()
+        if not key:
+            raise consent.ConsentError(NO_KEY)
+        from .adapters import courtlistener_citations as clc
+        if post is None and timeout is not None:
+            def post(url, fields, tok):  # looked up at call time, so a test's stand-in is the one used
+                return clc.post_form(url, fields, tok, timeout=timeout)
+        adapter = clc.CitationLookupAdapter(matter_dir, caller_id, post=post, token=key)
         answers, stopped = adapter.lookup(payloads[:max_requests])
         sent = adapter.sent
         saved_lookups.save_cites(matter_dir, citelookup.answered(payloads, answers))
         if stopped is None and len(payloads) > max_requests:
-            stopped = f"over {limit_name} {max_requests}; run again in a minute for the rest"
+            stopped = (over.format(n=len(payloads)) if over else
+                       f"over {limit_name} {max_requests}; run again in a minute for the rest")
     results = {r.cite.sent: r for r in citelookup.interpret(todo, payloads, answers, stopped)}
     old = [c for c in cites if c.sent in saved]
     # Each saved answer is replayed as a one-line request, so today's draft (its case names and

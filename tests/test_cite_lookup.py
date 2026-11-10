@@ -77,6 +77,14 @@ class Matter(unittest.TestCase):
         self.dir = os.path.join(self._tmp.name, "matter")
         with redirect_stdout(io.StringIO()):
             cases.init(self.dir)
+        # A new case checks its case cites by default (brief check, cite lookup): a settings folder of its
+        # own and no COURTLISTENER_TOKEN, so no test reads the person's real saved key. A test that needs a
+        # key sets one.
+        env = {k: v for k, v in os.environ.items() if k != "COURTLISTENER_TOKEN"}
+        env["MATTER_KIT_CONFIG"] = os.path.join(self._tmp.name, "no-config")
+        patch = mock.patch.dict(os.environ, env, clear=True)
+        patch.start()
+        self.addCleanup(patch.stop)
 
 
 # --------------------------------------------------------------------------

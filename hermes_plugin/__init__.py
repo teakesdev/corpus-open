@@ -141,7 +141,7 @@ class Plugin:
         self.secret = secret
         self.secret_route = secret_route
         self.today = today or _dt.date.today
-        self.tools = Tools(self.settings, self.run_guard)
+        self.tools = Tools(self.settings, self.run_guard, self.courtlistener_token)
         self._checked: dict = {}  # sha256 of each reply on_reply returned, oldest first
 
     # -- settings -------------------------------------------------------------------------------

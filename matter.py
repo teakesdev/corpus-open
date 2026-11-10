@@ -54,6 +54,8 @@ Usage:
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
   matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
+                        [--offline]   # never writes the store; checks the draft's case cites on CourtListener
+                        # (bare cites, at most one request; a saved answer first); --offline sends nothing
   matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N] [--fresh]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
                         # sends the draft's case cites, nothing else, to CourtListener; on by default
@@ -500,12 +502,14 @@ def existing_draft(case_dir, path):
 
 
 def cmd_brief(args):
-    """brief check: tie every cite, quotation and factual sentence in a draft to the store.
-    Read-only. Exit 1 = blocking findings, 2 = items a human must check, 0 = all tied."""
+    """brief check: tie every cite, quotation and factual sentence in a draft to the store, and check
+    the draft's case cites on CourtListener (bare cites only; --offline sends nothing). Never writes the
+    store. Exit 1 = blocking findings, 2 = items a human must check, 0 = all tied."""
     from matterkit import briefcheck
+    cites = briefcheck.CiteCheck(caller_id=os.environ.get("USER", "human"), offline=args.offline)
     try:
         report = briefcheck.check(args.case_dir, draft_path(args.case_dir, args.draft), use_pdftotext=not args.no_pdftotext,
-                                  docket_path=args.docket, mode=args.mode)
+                                  docket_path=args.docket, mode=args.mode, cites=cites)
     except (ValueError, FileNotFoundError) as e:
         sys.exit(f"brief check refused: {e}")
     text = report.render()
@@ -1097,6 +1101,9 @@ def main():
     p.add_argument("--docket", help="docket map JSON to use instead of <dir>/.matter/docket.json")
     p.add_argument("--mode", choices=["brief", "complaint"], default="brief",
                    help="complaint: allegations need no record cite; cites, authorities and sourced quotes still checked")
+    p.add_argument("--offline", action="store_true",
+                   help="send nothing: case cites with no saved CourtListener answer are marked NOT VERIFIED "
+                        "(by default their bare cites, nothing else, go to CourtListener in at most one request)")
     p.set_defaults(fn=cmd_brief)
 
     p = sub.add_parser("docket"); p.add_argument("sub", choices=["suggest"]); p.add_argument("case_dir")

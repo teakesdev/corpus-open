@@ -274,5 +274,71 @@ class TestHermesSecretRoute(Base):
         self.assertEqual([t for _u, _d, t in self.posted], ["env-" + TOKEN])
 
 
+class TestBriefCheckInHermes(Base):
+    """matter_brief_check checks case cites with the plugin's own key and caller; citation_guard local
+    and the offline argument send nothing (design 2026-11-09 §3, decisions 2026-11-10)."""
+    DRAFT = ("Courts dismiss such claims. Smith v. Jones, 123 F.4th 456, 460 (5th Cir. 2024).\n\n"
+             "The rule is settled. Doe v. Roe Corp., 501 U.S. 1001, 1003 (1991).\n")
+
+    def setUp(self):
+        super().setUp()
+        self.rel = "Filings/drafts/brief.md"
+        path = os.path.join(self.dir, *self.rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.DRAFT)
+
+    def requests(self):
+        return [e for e in self.egress() if "event" not in e]
+
+    def brief(self, args):
+        out = self.call("matter_brief_check", args)
+        self.assertTrue(out["ok"], out)
+        return out["result"]
+
+    def test_sends_only_the_bare_cites_with_the_key_from_hermes_settings(self):
+        self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN})
+        out = self.brief({"path": self.rel})
+        self.assertEqual([(d, t) for _u, d, t in self.posted], [({"text": "123 F.4th 456\n501 U.S. 1001"}, TOKEN)])
+        self.assertIn("CourtListener: found", out["report"])
+        self.assertIn("`cite-not-found`", out["report"])  # the local CourtListener has no Doe
+        self.assertNotIn(TOKEN, json.dumps(out))
+
+    def test_local_sends_nothing_and_says_why(self):
+        self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}, citation_guard="local")
+        out = self.brief({"path": self.rel})
+        self.assertEqual(self.posted, [])
+        self.assertEqual(self.requests(), [])
+        self.assertEqual(out["report"].count("`cite-not-verified`"), 2)
+        self.assertIn("citation_guard is local", out["report"])
+
+    def test_the_offline_argument_sends_nothing(self):
+        self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN})
+        out = self.brief({"path": self.rel, "offline": True})
+        self.assertEqual(self.posted, [])
+        self.assertEqual(out["report"].count("`cite-not-verified`"), 2)
+        self.assertIn("offline", out["report"])
+
+    def test_no_key_says_where_the_key_goes_in_hermes(self):
+        self.plugin()
+        out = self.brief({"path": self.rel})
+        self.assertEqual(self.posted, [])
+        self.assertIn("courtlistener_token", out["report"])
+        self.assertNotIn("matter.py courtlistener key", out["report"])
+
+    def test_a_bare_environment_variable_is_not_read_when_hermes_has_the_route(self):
+        with fake_hermes({}), mock.patch.dict(os.environ, {"COURTLISTENER_TOKEN": "env-" + TOKEN}):
+            self.ctx = Ctx({"matter_dir": self.dir})
+            hp.register(self.ctx)
+            out = self.brief({"path": self.rel})
+        self.assertEqual(self.posted, [])
+        self.assertIn("no CourtListener key", out["report"])
+
+    def test_the_tool_schema_offers_offline(self):
+        self.plugin()
+        schema = self.ctx.tools["matter_brief_check"][1]
+        self.assertEqual(schema["parameters"]["properties"]["offline"]["type"], "boolean")
+
+
 if __name__ == "__main__":
     unittest.main()
