@@ -3,7 +3,7 @@
   "label": "Corpus Open",
   "description": "Backend for the Corpus Open case panel in Hermes Desktop: case overview, deadlines, tamper check, facts with no source. Read-only.",
   "icon": "Scale",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "tab": { "path": "/corpus-open", "hidden": true },
   "entry": "dist/index.js",
   "api": "plugin_api.py"
