@@ -109,6 +109,34 @@ class TestPluginP3s(PluginCase):
         self.assertEqual(r["result"]["added"], 1)
 
 
+class TestRound1P3s(PluginCase):
+    """DeepSeek's round 1 review of PR #9."""
+
+    def test_recorded_as_names_the_stored_spelling_after_a_skip(self):
+        write(os.path.join(self.dir, "Evidence", "a.md"), "synthetic\n")
+        os.symlink(os.path.join(self.dir, "Evidence"), os.path.join(self.dir, "Filings", "ev"))
+        self.plugin()
+        first = self.call("matter_ingest_path", {"path": "Evidence/a.md"})["result"]
+        self.assertEqual((first["added"], first["recorded_as"]), (1, "Evidence/a.md"))
+        again = self.call("matter_ingest_path", {"path": "Filings/ev/a.md"})
+        self.assertTrue(again["ok"], again)
+        self.assertEqual((again["result"]["skipped"], again["result"]["recorded_as"]), (1, "Evidence/a.md"))
+
+    def test_double_slash_spelling_of_the_case(self):
+        write(os.path.join(self.dir, "Evidence", "a.md"), "synthetic\n")
+        p = self.plugin()
+        r = self.call("matter_ingest_path", {"path": "/" + self.dir})
+        self.assertIn("case folder itself", r["error"])
+        r = self.call("matter_ingest_path", {"path": "/" + os.path.join(self.dir, "Evidence", "a.md")})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["result"]["added"], r["result"]["recorded_as"]), (1, "Evidence/a.md"))
+        self.assertIn("case folder itself", p.command("check /" + self.dir))
+
+    def test_notes_cut_a_double_slash_root(self):
+        self.assertEqual(ing.case_relative_notes("  ! not found: /x/case/E/a.md\n", "//x/case"),
+                         ["not found: E/a.md"])
+
+
 class TestResolveP3s(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -154,6 +182,17 @@ class TestResolveP3s(unittest.TestCase):
 class TestMcpP3s(unittest.TestCase):
     setUp = TestMcpFollowUps.setUp
     mcp = TestMcpFollowUps.mcp
+
+    def test_mcp_recorded_as_after_a_skip_and_double_slash(self):
+        write(os.path.join(self.dir, "Evidence", "a.md"), "synthetic\n")
+        os.symlink(os.path.join(self.dir, "Evidence"), os.path.join(self.dir, "Filings", "ev"))
+        out = self.mcp(("matter.ingest_path", {"path": "Evidence/a.md"}),
+                       ("matter.ingest_path", {"path": "Filings/ev/a.md"}),
+                       ("matter.ingest_path", {"path": "/" + self.dir}))
+        second = json.loads(out[2]["result"]["content"][0]["text"])
+        self.assertEqual((second["skipped"], second["recorded_as"]), (1, "Evidence/a.md"))
+        self.assertTrue(out[3]["result"].get("isError"), out[3])
+        self.assertIn("case folder itself", out[3]["result"]["content"][0]["text"])
 
     def test_f3_mcp_ingest_says_why_a_file_was_skipped(self):
         write(os.path.join(self.dir, "Evidence", "ok.md"), "synthetic\n")

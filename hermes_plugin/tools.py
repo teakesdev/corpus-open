@@ -57,14 +57,14 @@ def resolve_matter(raw: str | None) -> str:
 def _is_case_root(matter_dir: str, path: str) -> bool:
     """True when `path` names the case folder itself, in any spelling that leads there (".", the
     folder as configured, or its real location when the case was set up through a link)."""
-    return bool(path) and ing.resolve_in_matter(path, matter_dir) == os.path.abspath(matter_dir)
+    return bool(path) and ing.resolve_in_matter(path, matter_dir) == ing.abs_path(matter_dir)
 
 
 def inside(matter_dir: str, path: str) -> str:
     """Resolve `path` inside the matter; relative paths join the matter root, not the cwd."""
     if not path:
         raise MatterError("path required")
-    root = os.path.abspath(matter_dir)
+    root = ing.abs_path(matter_dir)
     cand = ing.resolve_in_matter(path, root)
     if cand is None:
         raise MatterError("path is outside the case folder")
@@ -319,9 +319,11 @@ class Tools:
         said = io.StringIO()
         with contextlib.redirect_stdout(said), contextlib.closing(store.connect(md)) as conn:
             added, skipped, excluded = ing.ingest_paths(conn, md, [cand])
+            recorded_as = ing.recorded_name(conn, md, cand)
         # The kit's "! ..." lines say why a file was left out; without them a skip reads as done.
         # recorded_as is the name facts cite: a path through a linked folder inside the case is
-        # recorded under the name it resolves to, which may differ from the one asked for.
+        # recorded under the name it resolves to, and a file already registered under another
+        # spelling keeps that stored name, so either may differ from the one asked for.
         return {"added": added, "skipped": skipped, "excluded": excluded,
                 "notes": ing.case_relative_notes(said.getvalue(), md),
-                "recorded_as": ing.to_rel_path(cand, md)}
+                "recorded_as": recorded_as}

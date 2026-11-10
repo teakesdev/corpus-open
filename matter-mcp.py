@@ -115,7 +115,7 @@ def _resolve_in_matter(path: str) -> str:
     """Resolve path inside MATTER_DIR. Relative paths are joined to the matter root, not cwd."""
     if not path:
         raise ValueError("path required")
-    abs_matter = os.path.abspath(MATTER_DIR)
+    abs_matter = ing.abs_path(MATTER_DIR)
     candidate = ing.resolve_in_matter(path, abs_matter)
     if candidate is None:
         raise ValueError("path escapes MATTER_DIR")
@@ -166,7 +166,7 @@ def call(name: str, args: dict):
         # notes say why each excluded file was left out; recorded_as is the name facts cite.
         return json.dumps({"added": added, "skipped": skipped, "excluded": excluded,
                            "notes": ing.case_relative_notes(said.getvalue(), MATTER_DIR),
-                           "recorded_as": ing.to_rel_path(candidate, os.path.abspath(MATTER_DIR))})
+                           "recorded_as": ing.recorded_name(conn, MATTER_DIR, candidate)})
     if name == "matter.brief_check":
         from matterkit import briefcheck
         report = briefcheck.check(MATTER_DIR, _readable_in_matter(args["path"]),
