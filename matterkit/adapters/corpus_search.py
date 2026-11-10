@@ -11,6 +11,7 @@ distinctly from legitimate zero-result searches (empty results list).
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -92,6 +93,10 @@ class CorpusSearchAdapter:
                 raise ConsentError(
                     f"refusing HTTP {e.code} redirect to {loc} — no follow") from e
             raise RuntimeError(f"Corpus MCP HTTP {e.code}: {e.reason}") from e
+        except urllib.error.URLError as e:  # no connection, no such host, a refused or timed-out connect
+            raise RuntimeError(f"could not reach Corpus ({HOST}): {e.reason}") from e
+        except (OSError, http.client.HTTPException) as e:  # a timeout or reset while reading the answer
+            raise RuntimeError(f"could not reach Corpus ({HOST}): {e}") from e
         return json.loads(raw.decode("utf-8"))
 
     def _call_tool(self, name: str, arguments: dict) -> dict:
