@@ -33,15 +33,20 @@ class CaseChanged(CaseError):
 
 
 def init(case_dir):
-    """Create the case folders and the store (idempotent). Returns how many documents are registered."""
+    """Create the case folders and the store (idempotent). Returns how many documents are registered.
+    A new case gets its default bare-cite checks (consent.CASE_DEFAULTS); a check a person already
+    granted or turned off is left as it is."""
+    from . import consent
     os.makedirs(case_dir, exist_ok=True)
     for f in FOLDERS:
         os.makedirs(os.path.join(case_dir, f), exist_ok=True)
     conn = store.connect(case_dir)
     try:
-        return conn.execute("SELECT COUNT(*) c FROM documents").fetchone()["c"]
+        n = conn.execute("SELECT COUNT(*) c FROM documents").fetchone()["c"]
     finally:
         conn.close()
+    consent.ensure_defaults(case_dir, note=False)
+    return n
 
 
 def is_case(path):

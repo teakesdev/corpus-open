@@ -23,13 +23,19 @@ commands. The terminal commands in the rest of this file are for other setups.
   (`Filings`, `Evidence`, `Correspondence`) or on one file, not on the case folder
   itself. Leave working drafts unregistered: a registered file is a source and
   can't be edited afterwards.
-- **Cites or statutes "not looked up"**: you cannot turn lookups on, and must not
-  try. Tell the person, once, to type `/matter grant`. It prints the two lines to
-  copy into a terminal, written for this computer. Do not write out a
+- **Cites or statutes "not looked up"**: every case checks bare cites by default
+  (case cites on CourtListener, statute and code cites on Corpus), unless a person
+  turned that check off; case cites also need the person's free CourtListener key.
+  You cannot add the key or turn a check on or off, and must not try. Never ask for
+  the key in the chat. Tell the person, once, to type `/matter grant`. It says what
+  is sent, where the key goes in Hermes's settings, and prints the lines that turn
+  each check off or back on, written for this computer. Do not write out a
   `python3 … matter.py …` line for them yourself: the `python3` on many computers
   is too old to run the kit, and `/matter grant` names one that works.
 - **Checking a draft**: `matter_brief_check` and `matter_cite_check` on the file,
-  or tell the person about `/matter check <file>`.
+  or tell the person about `/matter check <file>`. `matter_brief_check` also looks
+  each case cite up on CourtListener (bare cites only); a cite it could not look up
+  is marked NOT VERIFIED with the reason, which you pass on. `offline: true` sends nothing.
 - Do not run `matter.py` with `python3` in a terminal to do what a `matter_*` tool
   does. If you need a kit command that has no tool, use the interpreter that
   `/matter grant` prints.
@@ -191,18 +197,24 @@ Read-mostly plus local ingest/verify; nothing files or contacts anyone.
 draft's cited cases real, and do the names match?) are how you keep up with the
 case law. They send only search words and bare citations, never documents.
 
-They work once the person has turned case law lookups on for the case. You
-cannot turn them on, and must not try (no grant files, no `consent` commands).
-If a lookup replies "Nothing was sent" because lookups are off or the key is
-missing, tell the person in plain words, one time, what the reply says:
+Checking citations is on by default for every case: `matter.cite_lookup` sends
+bare case citations such as `550 U.S. 544` to CourtListener once the person has
+saved a free CourtListener key, and nothing else. Search is off until the person
+turns it on for the case, because search words can describe the facts. A person
+can turn either off for a case, and off stays off. You cannot turn anything on or
+off, and must not try (no grant files, no `consent` commands), and you never ask
+for the key in a chat. If a lookup replies "Nothing was sent" because a check is
+off or the key is missing, tell the person in plain words, one time, what the
+reply says:
 
-> To let me look up case law for this case, open Matter Kit in your browser,
-> open the case, click "Case law lookups", then "Turn on". To check citations,
-> also paste your free CourtListener key there (CourtListener's API page has
-> it). Or run `python3 matter.py courtlistener on <case folder>` once.
+> To let me search case law for this case, open Matter Kit in your browser,
+> open the case, click "Case law lookups", then "Turn on case law search". To check citations,
+> paste your free CourtListener key there (CourtListener's API page has it).
+> Or run `python3 matter.py courtlistener on <case folder>` once.
 
-Inside Hermes, say this instead: "Type `/matter grant`. It prints the two lines
-that turn lookups on, ready to copy into a terminal."
+Inside Hermes, say this instead: "Type `/matter grant`. It shows what is sent,
+where your CourtListener key goes in Hermes's settings, and the lines that turn
+each check off or back on."
 
 Then carry on with the work that doesn't need lookups. Answers are saved in the
 case: repeating a search or re-checking a draft reads them back without sending

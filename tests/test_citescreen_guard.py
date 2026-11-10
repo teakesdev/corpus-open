@@ -38,6 +38,7 @@ load_plugin()
 hp = importlib.import_module(PKG + ".hermes_plugin")
 guard = importlib.import_module(PKG + ".hermes_plugin.guard")
 screen = importlib.import_module(PKG + ".matterkit.citescreen")
+corpus = importlib.import_module(PKG + ".matterkit.adapters.corpus_search")
 
 DRAFT_REL = "Drafts/response_draft_synthetic.md"
 with open(os.path.join(KIT, "demo-matter", DRAFT_REL), encoding="utf-8") as _f:
@@ -218,6 +219,18 @@ class TestPlugin(GuardCase):
         p = mock.patch.dict(os.environ, env, clear=True)
         p.start()
         self.addCleanup(p.stop)
+        # Cite checks are on by default, so with the guard on lookup the draft's statute cite goes to
+        # Corpus. A stand-in answers, and keeps what it was asked.
+        self.asked = []
+
+        def rpc(_adapter, payload):
+            if payload["method"] == "initialize":
+                return {"jsonrpc": "2.0", "id": 1, "result": {}}
+            self.asked.append(payload["params"]["arguments"])
+            return {"jsonrpc": "2.0", "id": 2, "result": {"text": "0 results", "isError": False}}
+        p = mock.patch.object(corpus.CorpusSearchAdapter, "_rpc", rpc)
+        p.start()
+        self.addCleanup(p.stop)
 
     def plugin(self, **settings):
         return hp.Plugin(Ctx(dict(matter_dir=self.dir, **settings)), secret=lambda _name: None)
@@ -230,6 +243,11 @@ class TestPlugin(GuardCase):
     def test_matter_check_with_no_key(self):
         out = self.plugin().command(f"check {DRAFT_REL}")
         self.assertIn(f"**NO SUCH VOLUME** · Harlow v. Demo Freight Lines, Inc., {HARLOW}", out)
+        self.assertIn("there is no CourtListener key yet", out)  # so no case cite was sent
+        self.assertEqual(self.asked, [{"query": "42 U.S.C. § 2000e-3(a)", "limit": 5, "jurisdiction": "US"}])
+        self.asked.clear()
+        self.plugin(citation_guard="local").command(f"check {DRAFT_REL}")
+        self.assertEqual(self.asked, [])
 
     def test_the_tool_counts_it_as_a_problem(self):
         res = self.plugin(citation_guard="local").tools.matter_cite_check({"path": DRAFT_REL})
@@ -239,8 +257,8 @@ class TestPlugin(GuardCase):
     def test_the_demo_message_says_the_made_up_case_needs_no_lookup(self):
         out = hp.Plugin(Ctx({}), secret=lambda _name: None).command(
             "demo " + os.path.join(os.path.dirname(self.dir), "demo"))
-        self.assertIn("finds all three, the made-up case even before case law lookups are on (/matter grant)",
-                      out)
+        self.assertIn("finds all three, the made-up case with no lookup at all. The real case is checked too "
+                      "once a CourtListener key is set (/matter grant)", out)
 
     def test_the_block_under_a_reply(self):
         out = self.plugin(citation_guard="local").on_reply(response_text=DRAFT)

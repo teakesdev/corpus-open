@@ -1,11 +1,12 @@
 """Citation guard: find every citation in a piece of text and say what is known about each one.
 
 Case cites (volume reporter page) go to CourtListener's citation lookup through the kit's own
-adapter; statute and code cites go to Corpus's law search through the kit's Corpus adapter. Both
-adapters refuse to send anything unless the case folder holds a human-issued grant in
-.matter/consent.json naming this caller (RFC 0001), and both log every request to
-.matter/egress.jsonl. Without a grant, a token or a case folder, the guard still lists every cite it
-found and says plainly that it was not looked up.
+adapter; statute and code cites go, one bare cite per request, to Corpus's law search through the
+kit's statute lookup adapter (matterkit.statutelookup decides what may be sent). Both adapters
+refuse to send anything unless .matter/consent.json allows it: the case's default grant, which
+covers bare cites only and which a person can turn off for the case, or a person's own grant
+(RFC 0001). Both log every request to .matter/egress.jsonl. Without a grant, a token or a case
+folder, the guard still lists every cite it found and says plainly that it was not looked up.
 
 Outcomes say what a source holds at a cite, never that the text says what a reply says or that
 the authority is still good law.
@@ -46,19 +47,24 @@ def python_cmd() -> str:
 
 
 def grant_command(kind: str, matter_dir: str | None, caller: str) -> str:
-    """The terminal command a person runs to allow lookups, with the interpreter's and the kit's full
-    paths so it works from any folder. kind is "case" (CourtListener, the one switch) or "statute"
-    (Corpus)."""
+    """The terminal command a person runs to turn a check on or off, with the interpreter's and the
+    kit's full paths so it works from any folder. kind is "case" (CourtListener on: case cites and
+    search), "case-off", "statute" (Corpus statute and code cites back on) or "statute-off". Both cite
+    checks cover every caller, so `caller` no longer changes the line."""
     cli = python_cmd() + " " + shlex.quote(KIT_CLI)
     md = shlex.quote(os.path.abspath(os.path.expanduser(matter_dir))) if matter_dir else "<case folder>"
     if kind == "case":
         return f"{cli} courtlistener on {md}"
-    return f"{cli} consent activate {md} --scope corpus-search --caller {shlex.quote(str(caller))}"
+    if kind == "case-off":
+        return f"{cli} courtlistener off {md}"
+    if kind == "statute-off":
+        return f"{cli} consent decline {md} --scope statute-lookup"
+    return f"{cli} consent activate {md} --scope statute-lookup"
 
 
 NO_KEY = ("Case cites were not looked up: there is no CourtListener key yet. The key is free: get one "
-          f"at {KEY_URL} and paste it into this plugin's settings (COURTLISTENER_TOKEN), or type "
-          "/matter grant and follow its first step.")
+          f"at {KEY_URL} and add it in Hermes's settings for this plugin (COURTLISTENER_TOKEN), never in a "
+          "chat. /matter grant shows how.")
 NO_FOLDER = "no case folder is set up yet. " + HOW_TO_START
 _WHAT = {"case": ("Case cites", "case law"), "statute": ("Statute and code cites", "statutes")}
 
@@ -69,6 +75,9 @@ def not_allowed(kind: str, e: Exception) -> str:
     `/matter grant` prints the steps. kind is "case" or "statute"."""
     cites, what = _WHAT[kind]
     text = str(e)
+    if "turned off for this case by a person" in text:
+        return (f"{cites} were not looked up: looking up {what} was turned off for this case by a person. "
+                "Type /matter grant to see how to turn it back on.")
     if "daily budget" in text:
         return (f"{cites} were not looked up: today's limit for looking up {what} in this case is used "
                 "up. The count starts over each day.")
@@ -266,10 +275,10 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
         else:
             try:
                 if corpus_factory is None:
-                    from ..matterkit.adapters.corpus_search import CorpusSearchAdapter
+                    from ..matterkit.adapters.corpus_search import CorpusStatuteLookupAdapter
 
                     def corpus_factory(md, key):
-                        return CorpusSearchAdapter(md, "authenticated" if key else "anonymous", api_key=key)
+                        return CorpusStatuteLookupAdapter(md, "authenticated" if key else "anonymous", api_key=key)
                 adapter = corpus_factory(matter_dir, corpus_api_key)
             except ConsentError as e:
                 why = not_allowed("statute", e)

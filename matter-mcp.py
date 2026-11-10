@@ -3,9 +3,10 @@
 
 Set MATTER_DIR to the case workspace root before launching. Tools are deliberately
 read-mostly: agents can register facts and render packets, but nothing here files or
-contacts anyone. The one thing that leaves the machine is a case law lookup
-(matter.search, matter.cite_lookup) to CourtListener, and only after a person has turned
-lookups on for the case; no tool here can turn them on.
+contacts anyone. What leaves the machine goes to CourtListener: bare case cites
+(matter.cite_lookup, matter.brief_check), on for every case unless a person turned that
+check off, and query text (matter.search), only after a person turned search on. No tool
+here can turn a check on, or undo a person's off.
 """
 import contextlib
 import json
@@ -83,23 +84,24 @@ TOOLS = [
     {"name": "matter.hold_render", "description": "Render one custodian notice packet by notice_id (all correspondence kinds). Only DOCUMENTED FACT and UNKNOWN assertion rows; HYPOTHESIS omitted. Validates source hashes. Read-only, nosend; no approval or mailing writes.",
      "inputSchema": {"type": "object", "required": ["notice_id"],
                      "properties": {"notice_id": {"type": "string"}}, "additionalProperties": False}},
-    {"name": "matter.brief_check", "description": "Check a draft brief (Markdown, text, Word .docx or PDF inside MATTER_DIR; findings are located as para. N, fn. N or p. N:LINE for Word and PDF): every record cite (Doc. 16 at 2), pleading cite (Compl. ¶ 59), authority, quotation and fact tag is tied to a hash-verified source in the store or flagged. Read-only; the store is never written. Returns the report; first line gives exit=0 (all tied), 1 (blocking), 2 (needs a human). Tied to a source is not legal correctness or good law.",
+    {"name": "matter.brief_check", "description": "Check a draft brief (Markdown, text, Word .docx or PDF inside MATTER_DIR; findings are located as para. N, fn. N or p. N:LINE for Word and PDF): every record cite (Doc. 16 at 2), pleading cite (Compl. ¶ 59), authority, quotation and fact tag is tied to a hash-verified source in the store or flagged. It also checks each case cite on CourtListener: a saved answer first, else at most one request that sends only the bare citations (e.g. '550 U.S. 544'), never the draft's text, else the cite is marked NOT VERIFIED with the reason (turned off for the case, no CourtListener key, offline, a network error, the daily limit). A cite CourtListener does not have, or that names a different case there, blocks. offline=true sends nothing. It never writes the store; it may add CourtListener's answers and a hash-only request log to the case's .matter folder. Returns the report; first line gives exit=0 (all tied), 1 (blocking), 2 (needs a human). Tied to a source or found on CourtListener is not legal correctness or good law.",
      "inputSchema": {"type": "object", "required": ["path"],
                      "properties": {"path": {"type": "string"}, "pdftotext": {"type": "boolean"},
-                                    "mode": {"type": "string", "enum": ["brief", "complaint"], "description": "complaint: allegations need no record cite"}}}},
+                                    "mode": {"type": "string", "enum": ["brief", "complaint"], "description": "complaint: allegations need no record cite"},
+                                    "offline": {"type": "boolean", "description": "send nothing to CourtListener; cites with no saved answer are NOT VERIFIED (default false)"}}}},
     {"name": "matter.rules_show", "description": "Text of a rule or subsection from a rules pack attached to this matter (.matter/rules.json), with the pack id, version and current-as-of date. Cite as 'L.U.Civ.R. 7(b)(4)', 'Fed. R. Civ. P. 15(a)(2)', 'Local Rule 7(b)(4)' or an anchor id. A bare 'Rule 15' names no rule set: it lists every attached pack that has it and picks none unless `pack` is given. Derived text, not the official copy. Read-only. No network.",
      "inputSchema": {"type": "object", "required": ["cite"],
                      "properties": {"cite": {"type": "string"}, "pack": {"type": "string", "description": "pack id"}}}},
     {"name": "matter.correspondence_list", "description": "Read the custodian notice ledger, including status, exhibit hashes, confirmation dates, and receipt evidence. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "matter.caselaw_status", "description": "Whether case law lookups (CourtListener search and cite checking) are on for this case, today's use against the daily limit, and whether a CourtListener key is saved. When they are off, the text says exactly how the person turns them on: tell them that in plain words. Read-only. No network.",
+    {"name": "matter.caselaw_status", "description": "Which lookups are on for this case, today's use against each daily limit, and whether a CourtListener key is saved. Case cite checking (bare case cites to CourtListener) and statute and code cite checking (bare cites to Corpus, corpuslaw.us) are on for every case unless a person turned them off; case law search (query words to CourtListener) is on only when a person turned it on. The text says exactly how the person turns each on or off: tell them that in plain words. Read-only. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "matter.search", "description": "Search CourtListener's case law (court opinions) for a question or phrase, e.g. 'inherent authority to manage docket'. Sends only the query text; returns case names, citations, CourtListener links and snippets. Results are leads, not good law and not source-checked: read the opinion before relying on one. Needs case law lookups turned on by the person (if off, the reply explains how; pass that on). Uses the saved CourtListener key when there is one. A search asked before is answered from the case's saved lookups: nothing is sent and it works even with lookups off.",
+    {"name": "matter.search", "description": "Search CourtListener's case law (court opinions) for a question or phrase, e.g. 'inherent authority to manage docket'. Sends only the query text; returns case names, citations, CourtListener links and snippets. Results are leads, not good law and not source-checked: read the opinion before relying on one. Needs case law search turned on by the person: it is off by default (if off, the reply explains how; pass that on). Uses the saved CourtListener key when there is one. A search asked before is answered from the case's saved lookups: nothing is sent and it works even with lookups off.",
      "inputSchema": {"type": "object", "required": ["query"],
                      "properties": {"query": {"type": "string"},
                                     "limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "default 5"},
                                     "fresh": {"type": "boolean", "description": "ask CourtListener again instead of using the answer saved in this case (default false)"}}}},
-    {"name": "matter.cite_lookup", "description": "Check every case citation in a Markdown or text draft inside MATTER_DIR against CourtListener: is each cite real, and does the case name match? Sends only the bare citations (e.g. '550 U.S. 544'), never the draft's text. Returns the report; first line gives exit=0 (all found and matching), 1 (a cite not found or a name differs: check by hand), 2 (needs a human). record=true adds found cases to the matter's authorities as 'resolved' (not good law). Needs case law lookups turned on and a CourtListener key (if not, the reply explains how; pass that on). One request covers a whole short draft; max_requests above 1 waits about a minute between requests. Cites CourtListener answered before come from the case's saved lookups and are not sent again.",
+    {"name": "matter.cite_lookup", "description": "Check every case citation in a Markdown or text draft inside MATTER_DIR against CourtListener: is each cite real, and does the case name match? Sends only the bare citations (e.g. '550 U.S. 544'), never the draft's text. Returns the report; first line gives exit=0 (all found and matching), 1 (a cite not found or a name differs: check by hand), 2 (needs a human). record=true adds found cases to the matter's authorities as 'resolved' (not good law). Case cite checking is on for every case unless a person turned it off; it needs a CourtListener key (if it is off or there is no key, the reply explains how; pass that on). One request covers a whole short draft; max_requests above 1 waits about a minute between requests. Cites CourtListener answered before come from the case's saved lookups and are not sent again.",
      "inputSchema": {"type": "object", "required": ["path"],
                      "properties": {"path": {"type": "string"},
                                     "max_requests": {"type": "integer", "minimum": 1, "maximum": 3, "description": "default 1"},
@@ -134,10 +136,11 @@ def _readable_in_matter(path: str) -> str:
     return candidate
 
 
-def _off_reply(err) -> str:
-    """Lookups refused (off, a limit reached, no key): say so in words the agent can pass on."""
+def _off_reply(err, on) -> str:
+    """Lookups refused (off, a limit reached, no key): say so in words the agent can pass on. `on` is
+    whether the check asked for is on for the case; when it is off, the status says why and how."""
     from matterkit import caselaw
-    why = "" if not caselaw.is_on(MATTER_DIR) else f" {err}"
+    why = f" {err}" if on(MATTER_DIR) else ""
     return f"Nothing was sent.{why}\n\n{caselaw.describe(MATTER_DIR)}"
 
 
@@ -161,8 +164,11 @@ def call(name: str, args: dict):
         return json.dumps({"added": added, "skipped": skipped, "excluded": excluded})
     if name == "matter.brief_check":
         from matterkit import briefcheck
-        report = briefcheck.check(MATTER_DIR, _readable_in_matter(args["path"]),
-                                  use_pdftotext=args.get("pdftotext", True), mode=args.get("mode", "brief"))
+        cites = briefcheck.CiteCheck(caller_id="agent", offline=bool(args.get("offline")))
+        with contextlib.redirect_stdout(sys.stderr):  # stdout is the JSON-RPC channel
+            report = briefcheck.check(MATTER_DIR, _readable_in_matter(args["path"]),
+                                      use_pdftotext=args.get("pdftotext", True), mode=args.get("mode", "brief"),
+                                      cites=cites)
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
     if name == "matter.rules_show":
         from matterkit import rules
@@ -183,7 +189,7 @@ def call(name: str, args: dict):
         try:
             rows = caselaw.search(MATTER_DIR, "agent", query, limit=limit, fresh=bool(args.get("fresh")))
         except ConsentError as e:
-            return _off_reply(e)
+            return _off_reply(e, caselaw.search_on)
         saved = rows and rows[0].provenance.get("saved")
         out = [f"{len(rows)} CourtListener result(s) for {query!r} (leads only: not source-checked, not good law)"
                + (f"; saved in this case {str(rows[0].provenance.get('retrieved_at'))[:10]}, nothing sent"
@@ -206,7 +212,7 @@ def call(name: str, args: dict):
                 report = caselaw.lookup_draft(MATTER_DIR, path, "agent", max_requests=max_requests,
                                              fresh=bool(args.get("fresh")))
         except ConsentError as e:
-            return _off_reply(e)
+            return _off_reply(e, caselaw.cite_check_on)
         if args.get("record"):
             report.recorded = citelookup.record(store.connect(MATTER_DIR), report.results, by)
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"

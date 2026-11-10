@@ -90,7 +90,9 @@ class TestMatterInTheTerminal(PluginCase):
     def test_the_words_are_the_same(self):
         p = self.demo()
         out = p.command(f"check {DRAFT}", platform="cli")
-        for words in ("Citation check: 3 cites", "- · NOT LOOKED UP · Ashcroft v. Iqbal, 556 U.S. 662",
+        for words in ("Citation check: 1 of 3 to check by hand",
+                      "- ⚠ NO SUCH VOLUME · Harlow v. Demo Freight Lines, Inc., 812 F.4th 1099: F.4th has no volume 812",
+                      "- · NOT LOOKED UP · Ashcroft v. Iqbal, 556 U.S. 662",
                       "Quotations and page cites: 2 of 3 to fix", "- ⚠ not found: ", "- ⚠ wrong page: ",
                       "- ✓ exact: ", DECLARATION, "Case cites were not looked up"):
             self.assertIn(words, out)
@@ -103,7 +105,7 @@ class TestMatterInTheTerminal(PluginCase):
         p = self.demo()
         raw, plain = p.command("grant"), p.command("grant", platform="cli")
         commands = [ln for ln in raw.splitlines() if ln.startswith("  ") and "matter.py" in ln]
-        self.assertEqual(len(commands), 2)
+        self.assertEqual(len(commands), 4)  # each check off, and each back on
         for ln in commands:
             self.assertIn(ln, plain.splitlines())
 
