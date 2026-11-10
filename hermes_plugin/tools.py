@@ -27,7 +27,7 @@ class MatterError(ValueError):
 def draft_path(md: str, rel: str) -> str:
     """A file inside the case folder to read, or a MatterError a newcomer can act on (not an errno).
     A link is followed only when its target is inside the case folder too."""
-    if rel and os.path.abspath(rel if os.path.isabs(rel) else os.path.join(md, rel)) == os.path.abspath(md):
+    if _is_case_root(md, rel):
         raise MatterError("That is the case folder itself. Name one file in it, for example a draft in Drafts.")
     p = inside(md, rel)
     if not ing.reads_inside(p, md):
@@ -47,21 +47,29 @@ def resolve_matter(raw: str | None) -> str:
     slash commands that start a case, not a setting or a terminal command."""
     if not raw or not str(raw).strip():
         raise MatterError("No case folder is set up yet. " + HOW_TO_START)
-    path = os.path.abspath(os.path.expanduser(str(raw).strip()))
+    path = ing.abs_path(os.path.expanduser(str(raw).strip()))
     if not os.path.isdir(os.path.join(path, ".matter")):
         raise MatterError(f"{path} is not set up as a case folder yet. Type /matter init {path} to set "
                           "it up (files already there are kept), or /matter demo to try a made-up case.")
     return path
 
 
+def _is_case_root(matter_dir: str, path: str) -> bool:
+    """True when `path` names the case folder itself, in any spelling that leads there (".", the
+    folder as configured, or its real location when the case was set up through a link)."""
+    return bool(path) and ing.resolve_in_matter(path, matter_dir) == ing.abs_path(matter_dir)
+
+
 def inside(matter_dir: str, path: str) -> str:
     """Resolve `path` inside the matter; relative paths join the matter root, not the cwd."""
     if not path:
         raise MatterError("path required")
-    root = os.path.abspath(matter_dir)
+    root = ing.abs_path(matter_dir)
     cand = ing.resolve_in_matter(path, root)
     if cand is None:
         raise MatterError("path is outside the case folder")
+    if cand == root:
+        raise MatterError("That is the case folder itself. Name a folder or a file in it.")
     ing.to_rel_path(cand, root)
     return cand
 
@@ -139,7 +147,9 @@ SCHEMAS = {
         "matter_ingest_path",
         "Hash and register one file or folder inside the case folder so facts can cite it, for example "
         "'Filings' or 'Evidence/lease.pdf' (not the case folder itself). A registered file is a source "
-        "and can no longer be edited, so leave working drafts unregistered. Sources are never modified.",
+        "and can no longer be edited, so leave working drafts unregistered. Sources are never modified. "
+        "The reply counts added, skipped (already registered) and excluded files; notes says why each "
+        "excluded file was left out, and recorded_as is the case-relative name facts cite it by.",
         {"path": {"type": "string"}}, ["path"]),
 }
 
@@ -285,11 +295,11 @@ class Tools:
     def matter_ingest_path(self, args):
         md = self._dir()
         raw = args.get("path", "")
-        if raw and os.path.abspath(raw if os.path.isabs(raw) else os.path.join(md, raw)) == os.path.abspath(md):
+        if _is_case_root(md, raw):
             # "register my files" often arrives as "." or the folder itself, which the kit refuses as
             # "invalid matter-relative path: '.'"; say what to name instead.
-            raise MatterError("Name a folder inside the case folder (for example Filings or Evidence) or one "
-                              "file. The case folder itself can't be registered in one call.")
+            raise MatterError("That is the case folder itself, which can't be registered in one call. Name a "
+                              "folder inside it (for example Filings or Evidence) or one file.")
         cand = inside(md, raw)
         # The kit prints why it skipped a path and counts nothing, which reads to the agent as done.
         if os.path.islink(cand) and not os.path.exists(cand):
@@ -300,16 +310,20 @@ class Tools:
                               "from that case, not this one.")
         if (os.path.islink(cand) or not os.path.isdir(cand)) and os.path.lexists(cand) and ing._links_out(cand, md):
             # A link at the file itself or at a folder on the way: either way the bytes live elsewhere.
-            raise MatterError(f"{raw} leads through a link to a file outside the case folder (or into a "
-                              "subcase), so it is not registered. Copy the file into the case folder instead.")
+            how = "is a link" if os.path.islink(cand) else "leads through a linked folder"
+            raise MatterError(f"{raw} {how} to a file outside the case folder (or into a subcase), so it is "
+                              "not registered. Copy the file into the case folder instead.")
         if not os.path.exists(cand):
             raise MatterError(f"There is no {raw} in the case folder. Name a folder that is there (for "
                               "example Filings or Evidence) or one file.")
         said = io.StringIO()
         with contextlib.redirect_stdout(said), contextlib.closing(store.connect(md)) as conn:
             added, skipped, excluded = ing.ingest_paths(conn, md, [cand])
+            recorded_as = ing.recorded_name(conn, md, cand)
         # The kit's "! ..." lines say why a file was left out; without them a skip reads as done.
-        root = os.path.abspath(md) + os.sep
-        notes = [ln.strip().lstrip("! ").replace(root, "") for ln in said.getvalue().splitlines()
-                 if ln.strip().startswith("!")]
-        return {"added": added, "skipped": skipped, "excluded": excluded, "notes": notes}
+        # recorded_as is the name facts cite: a path through a linked folder inside the case is
+        # recorded under the name it resolves to, and a file already registered under another
+        # spelling keeps that stored name, so either may differ from the one asked for.
+        return {"added": added, "skipped": skipped, "excluded": excluded,
+                "notes": ing.case_relative_notes(said.getvalue(), md),
+                "recorded_as": recorded_as}

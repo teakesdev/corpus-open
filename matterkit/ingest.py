@@ -1,6 +1,7 @@
 """Ingest files into the matter store: hash, classify, register. Sources are never modified."""
 import hashlib
 import os
+import re
 import sqlite3
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".matter"}
@@ -77,12 +78,20 @@ def walk_files(root: str):
             yield os.path.join(dirpath, fn)
 
 
+def abs_path(path: str) -> str:
+    """os.path.abspath, plus a leading "//" folded to "/". POSIX keeps exactly two leading slashes
+    as written, but on macOS and Linux "//x" is "/x", and a spelling left with two would not match
+    the case folder's own."""
+    p = os.path.abspath(path)
+    return p[1:] if p.startswith("//") and not p.startswith("///") else p
+
+
 def is_within_matter(path: str, matter_dir: str) -> bool:
     """True iff abspath(path) is the matter root or a descendant (no .. escape)."""
-    abs_path = os.path.abspath(path)
+    abs_p = os.path.abspath(path)
     abs_matter = os.path.abspath(matter_dir)
     try:
-        rel = os.path.relpath(abs_path, abs_matter)
+        rel = os.path.relpath(abs_p, abs_matter)
     except ValueError:
         return False
     if rel == os.curdir:
@@ -96,20 +105,65 @@ def resolve_in_matter(path: str, matter_dir: str):
     resolved, inside the matter's real location (a case set up through a link, or /var vs
     /private/var on a Mac) is mapped back under matter_dir. Only the folder part is resolved: a
     link at the last step keeps its own name, so later link checks still see it."""
-    root = os.path.abspath(matter_dir)
-    cand = os.path.abspath(path if os.path.isabs(path) else os.path.join(root, path))
+    root = abs_path(matter_dir)
+    cand = abs_path(path if os.path.isabs(path) else os.path.join(root, path))
     if is_within_matter(cand, root):
         return cand
     if not os.path.isabs(path):
         return None
     real_root = os.path.realpath(root)
-    if os.path.realpath(cand) == real_root:
+    if _same_dir(os.path.realpath(cand), real_root):
         return root
     head, leaf = os.path.split(cand)
-    real_head = os.path.realpath(head)
-    if not is_within_matter(real_head, real_root):
+    rel = _rel_under(os.path.realpath(head), real_root)
+    if rel is None:
         return None
-    return os.path.normpath(os.path.join(root, os.path.relpath(real_head, real_root), leaf))
+    return os.path.normpath(os.path.join(root, rel, leaf))
+
+
+def _same_dir(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _rel_under(real_head: str, real_root: str):
+    """real_head (no links left in it) relative to real_root, or None when it is not under it. The
+    folders are compared as folders on the disk, not as spellings, so a disk that ignores capital
+    letters (the Mac default) finds "/cases/CASE/evidence" under "/cases/case"."""
+    if is_within_matter(real_head, real_root):
+        return os.path.relpath(real_head, real_root)
+    cur = real_head
+    while True:
+        if _same_dir(cur, real_root):
+            return os.path.relpath(real_head, cur)
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def case_relative_notes(printed: str, matter_dir: str) -> list:
+    """The "  ! reason: /abs/path" lines ingest_paths printed, as "reason: rel/path" for a reply:
+    only the leading marker is dropped, and the matter root is cut only where a path starts (after
+    a space or at the start), never from the middle of a name."""
+    lead = re.compile(r"(?:(?<=\s)|^)/?" + re.escape(abs_path(matter_dir) + os.sep))
+    return [lead.sub("", ln.strip()[2:]) for ln in printed.splitlines() if ln.strip().startswith("! ")]
+
+
+def recorded_name(conn, matter_dir: str, cand: str) -> str:
+    """The case-relative name facts cite `cand` by after an ingest: for a file already registered
+    under another spelling (same bytes, reached through a linked folder or another capitalization),
+    the stored name, not the one asked for. A folder, or a file left out, keeps its own name."""
+    rel = to_rel_path(cand, matter_dir)
+    if not os.path.isfile(cand) or _links_out(cand, matter_dir):
+        return rel
+    row = conn.execute("SELECT rel_path FROM documents WHERE rel_path=?", (rel,)).fetchone()
+    if row is None:
+        row = conn.execute("SELECT rel_path FROM documents WHERE sha256=? ORDER BY rowid",
+                           (sha256_file(cand),)).fetchone()
+    return row[0] if row else rel
 
 
 def reads_inside(path: str, matter_dir: str) -> bool:
@@ -166,10 +220,10 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
     documents.rel_path is always relative to abspath(matter_dir), never cwd.
     Paths that resolve outside the matter are excluded (fail-closed).
     """
-    abs_matter = os.path.abspath(matter_dir)
+    abs_matter = abs_path(matter_dir)
     added = skipped = excluded = 0
     for p in paths:
-        ap = os.path.abspath(p)
+        ap = abs_path(p)
         if not os.path.exists(ap):
             print(f"  ! not found: {p}")
             continue

@@ -34,8 +34,8 @@ so it can still be edited. Then:
 
 ## Try it from a terminal
 
-Run these lines in a terminal opened in the kit's own folder: the folder that holds matter.py,
-one level up from this README, not this folder. Needs Python 3.10 or newer. On a Mac, the `python3` that comes with the system is 3.9 and will
+Run these lines in a terminal opened in the kit's own folder: the folder that holds matter.py.
+Needs Python 3.10 or newer. On a Mac, the `python3` that comes with the system is 3.9 and will
 not run the kit, so the first line picks a newer one. Copy the folder first, so this one stays
 clean. The ingest line leaves the draft and this README unrecorded, as `/matter demo` does: a
 recorded file is a source, and the agent can no longer edit it.
