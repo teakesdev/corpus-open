@@ -458,8 +458,8 @@ class Plugin:
             "",
             "Try these:",
             "- /matter: the case at a glance",
-            f"- /matter check {DEMO_DRAFT}: finds the two bad quotations now, and the made-up case once "
-            "case law lookups are on (/matter grant)",
+            f"- /matter check {DEMO_DRAFT}: finds all three, the made-up case even before case law "
+            "lookups are on (/matter grant)",
             '- ask "what\'s due in my case?"',
             "- ask me to add a quotation from Doc. 12 to the draft: one that is not in the record is "
             "refused before it is written. Ask for an edit to one part of the draft: rewriting the whole "
