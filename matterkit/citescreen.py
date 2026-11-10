@@ -64,9 +64,11 @@ SERIES = (
     Series("S. Ct.", 1882, count=144, as_of=_d(2024, 7, 1), allowance=3, growth=1,
            source="CiNii record of West's interim edition: v. 144 is October Term 2023, one volume a term; "
                   "NRS and reporters-db: 1882-"),
-    Series("L. Ed.", 1790, 1956, 100,
+    Series("L. Ed.", 1754, 1956, 100,
            source="reporters-db and the Cardiff Index to Legal Abbreviations: 1790-1956; library catalog "
-                  "record of the set: 100 volumes"),
+                  "record of the set: 100 volumes. The start is the U.S. row's 1754, not 1790: 1 L. Ed. "
+                  "reprints 1 U.S. (1 Dall.), so 1 L. Ed. 11 is a 1754 case and 1 L. Ed. 59 a 1784 one "
+                  "(CourtListener's index of 1 L. Ed.; Leagle's entry for 1 U.S. 111)"),
     Series("L. Ed. 2d", 1956,
            source="reporters-db: 1956-; Wikipedia 'Lawyers' Edition': starts at 352 U.S. (1956). No public "
                   "volume count found, so no ceiling"),

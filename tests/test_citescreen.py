@@ -148,6 +148,16 @@ class TestYears(unittest.TestCase):
         self.assertIsNone(screen(5, "F.4th", year=TODAY.year))
         self.assertIsNone(screen(500, "U.S.", year=1754))
 
+    def test_a_reprint_series_starts_with_the_reports_it_reprints(self):
+        # 1 L. Ed. reprints 1 U.S. (1 Dall.), whose first cases are from 1754. A real parallel cite:
+        # Respublica v. De Longchamps, 1 U.S. 111, 1 L. Ed. 59 (1784).
+        self.assertIsNone(screen(1, "L. Ed.", 59, year=1784))
+        self.assertIsNone(screen(1, "L. Ed.", 11, year=1754))
+        self.assertEqual(citescreen.screen_text(
+            "Respublica v. De Longchamps, 1 U.S. 111, 1 L. Ed. 59 (1784).", today=TODAY), {})
+        self.assertEqual(row("L. Ed.").first_year, row("U.S.").first_year)
+        self.assertEqual(screen(1, "L. Ed.", 59, year=1752).code, "year-before-start")
+
     def test_no_year_checks_only_the_volume(self):
         self.assertIsNone(screen(5, "F.4th"))
         self.assertIsNone(screen(5, "F.4th", year=None))
