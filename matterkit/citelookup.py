@@ -53,6 +53,11 @@ CANONICAL_REPORTERS["fedappx"] = "F. App'x"  # "Fed. Appx." / "Fed. App'x"
 # A sentence opener brief check's name walk keeps ("Again, Smith v. Jones"): dropped from the local name.
 _OPENER = re.compile(r"^(?:Accordingly|Again|Also|Finally|First|Further|Furthermore|Here|However|Indeed|Likewise|"
                      r"Moreover|Notably|Second|Similarly|Still|Then|Third|Thus|Yet),\s+")
+# Lowercase words the name walk keeps because they join the words of a name ("Board of Education").
+# In front of the name they are the sentence's ("the standard of Ashcroft v. Iqbal", "as in Bell
+# Atlantic Corp. v. Twombly"): dropped from the local name. "in re" is a name's own start, and a
+# capitalized "The", "A" or "In" stays.
+_LEAD = re.compile(r"^(?:(?:of|the|and|for|a|in(?!\s+re\b))(?:\s+|$))+")
 _REPS = "|".join(re.escape(r) for r in sorted(set(CANONICAL_REPORTERS.values()), key=len, reverse=True))
 _PAYLOAD_LINE = re.compile(rf"[0-9]{{1,4}} (?:{_REPS}) [0-9]{{1,5}}|[0-9]{{4}} WL [0-9]{{3,9}}")
 DROPPED_TEXT = ("CourtListener's answer for this line named a different cite, so it was set aside. "
@@ -103,7 +108,7 @@ def draft_cites(text: str) -> list[DraftCite]:
             sent, year = f"{_ascii(m['year'])} WL {_ascii(m['num'])}", None
         else:
             continue
-        name = _OPENER.sub("", briefcheck._case_name(text[:a]))
+        name = _LEAD.sub("", _OPENER.sub("", briefcheck._case_name(text[:a])))
         found.append((a, sent, year, name, text.count("\n", 0, a) + 1))
     out: dict[str, DraftCite] = {}
     for _a, sent, year, name, line in sorted(found):

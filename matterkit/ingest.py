@@ -159,6 +159,10 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 print(f"  ! links outside this matter (or into a nested matter): {fp}")
                 excluded += 1
                 continue
+            if not os.path.exists(fp):  # a link whose target is gone: nothing to hash
+                print(f"  ! not found: {fp}")
+                excluded += 1
+                continue
             try:
                 rel_path = to_rel_path(fp, abs_matter)
             except ValueError:

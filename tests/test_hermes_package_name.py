@@ -117,7 +117,7 @@ class TestPluginUnderHermesPackageName(unittest.TestCase):
         self.assertEqual(self.out["top_level_loaded"], [])
 
     def test_matter_demo_makes_the_case(self):
-        self.assertTrue(self.out["demo"].startswith("Made a synthetic demo case"), self.out["demo"])
+        self.assertTrue(self.out["demo"].startswith("Made a practice case"), self.out["demo"])
         self.assertEqual(self.out["matter_dir"], self.case)
         self.assertNotIn("error", self.out["counts"], self.out["counts"])
         self.assertGreater(self.out["counts"]["documents"], 0)

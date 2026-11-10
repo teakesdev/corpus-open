@@ -101,6 +101,41 @@ class TestPayload(unittest.TestCase):
         self.assertEqual(gamma.names, ["Gamma v. Delta"])
         self.assertEqual(gamma.lines, [8])
 
+    def test_a_lowercase_word_in_front_of_a_name_belongs_to_the_sentence(self):
+        # Seen in a live reply: "the plausibility standard of Ashcroft v. Iqbal" was listed as
+        # "of Ashcroft v. Iqbal". Brief check's name walk keeps "of", "in" and "the" because they
+        # join the words of a name; in front of the name they are the sentence's.
+        for text, shown in (
+                ("the plausibility standard of Ashcroft v. Iqbal, 556 U.S. 662 (2009)",
+                 "Ashcroft v. Iqbal, 556 U.S. 662"),
+                ("as in Bell Atlantic Corp. v. Twombly, 550 U.S. 544 (2007)",
+                 "Bell Atlantic Corp. v. Twombly, 550 U.S. 544"),
+                ("so held the Estate of Smith v. Jones, 100 F.3d 200 (5th Cir. 1996)",
+                 "Estate of Smith v. Jones, 100 F.3d 200"),
+                ("the rule of In re Gault, 387 U.S. 1 (1967)", "In re Gault, 387 U.S. 1"),
+                ("the holding in in re Gault, 387 U.S. 1 (1967)", "in re Gault, 387 U.S. 1")):
+            (c,) = citelookup.draft_cites(text)
+            self.assertEqual(c.display, shown, text)
+            self.assertEqual(c.names, [shown.rsplit(", ", 1)[0]], text)
+        # A connector with no name after it is no name at all.
+        (c,) = citelookup.draft_cites("the rule in 556 U.S. 662 (2009) applies")
+        self.assertEqual((c.display, c.names), ("556 U.S. 662", []))
+
+    def test_a_name_keeps_its_own_first_word_and_the_words_inside_it(self):
+        for text, shown in (
+                ("The Florida Bar v. Went For It, Inc., 515 U.S. 618 (1995)",
+                 "The Florida Bar v. Went For It, Inc., 515 U.S. 618"),
+                ("He relies on de la Cruz v. State, 100 F.3d 300 (5th Cir. 1996)",
+                 "de la Cruz v. State, 100 F.3d 300"),
+                ("It was close. A Book Named Memoirs v. Attorney General, 383 U.S. 413 (1966)",
+                 "A Book Named Memoirs v. Attorney General, 383 U.S. 413"),
+                ("Women in City Government United v. City of New York, 563 F.2d 537 (2d Cir. 1977)",
+                 "Women in City Government United v. City of New York, 563 F.2d 537"),
+                ("See United States v. Board of Education of City of Chicago, 11 F.3d 668 (7th Cir. 1993)",
+                 "United States v. Board of Education of City of Chicago, 11 F.3d 668")):
+            (c,) = citelookup.draft_cites(text)
+            self.assertEqual(c.display, shown, text)
+
     def test_reporter_spacing_is_canonical(self):
         cites = citelookup.draft_cites("A v. B, 9 F. Supp.2d 10; C v. D, 3 U. S. 4; E v. F, 5 S.Ct. 6.")
         self.assertEqual([c.sent for c in cites], ["9 F. Supp. 2d 10", "3 U.S. 4", "5 S. Ct. 6"])

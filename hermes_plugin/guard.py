@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import sys
 from dataclasses import dataclass, field
 
 from ..matterkit import authority, citations, citelookup, store
@@ -32,19 +33,51 @@ LIMITS = ("Found means a source holds something at that cite. It does not mean i
 KIT_CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "matter.py")
 
 
+KEY_URL = "https://www.courtlistener.com/profile/api/"
+HOW_TO_START = ("Type /matter demo to try a made-up case, or /matter init ~/cases/my-case to start "
+                "your own.")
+
+
+def python_cmd() -> str:
+    """The Python running this plugin (Hermes's own), quoted for a shell. A printed command must not
+    start with a bare `python3`: on a stock Mac that is Python 3.9, which the kit does not run on."""
+    return shlex.quote(sys.executable) if sys.executable else "python3"
+
+
 def grant_command(kind: str, matter_dir: str | None, caller: str) -> str:
-    """The terminal command a person runs to allow lookups, with the kit's full path so it works from
-    any folder. kind is "case" (CourtListener, the one switch) or "statute" (Corpus)."""
-    cli = "python3 " + shlex.quote(KIT_CLI)
+    """The terminal command a person runs to allow lookups, with the interpreter's and the kit's full
+    paths so it works from any folder. kind is "case" (CourtListener, the one switch) or "statute"
+    (Corpus)."""
+    cli = python_cmd() + " " + shlex.quote(KIT_CLI)
     md = shlex.quote(os.path.abspath(os.path.expanduser(matter_dir))) if matter_dir else "<case folder>"
     if kind == "case":
         return f"{cli} courtlistener on {md}"
     return f"{cli} consent activate {md} --scope corpus-search --caller {shlex.quote(str(caller))}"
 
 
-NO_KEY = ("Case cites were not looked up: there is no CourtListener key. Get a free one at "
-          "https://www.courtlistener.com/profile/api/ and save it with `python3 " + shlex.quote(KIT_CLI) +
-          " courtlistener key`, or as COURTLISTENER_TOKEN in this plugin's settings.")
+NO_KEY = ("Case cites were not looked up: there is no CourtListener key yet. The key is free: get one "
+          f"at {KEY_URL} and paste it into this plugin's settings (COURTLISTENER_TOKEN), or type "
+          "/matter grant and follow its first step.")
+NO_FOLDER = "no case folder is set up yet. " + HOW_TO_START
+_WHAT = {"case": ("Case cites", "case law"), "statute": ("Statute and code cites", "statutes")}
+
+
+def not_allowed(kind: str, e: Exception) -> str:
+    """Why a lookup was refused, in words for someone who has never seen a grant. The refusal's own
+    text names providers, endpoints and payload types; none of that helps the reader, and
+    `/matter grant` prints the steps. kind is "case" or "statute"."""
+    cites, what = _WHAT[kind]
+    text = str(e)
+    if "daily budget" in text:
+        return (f"{cites} were not looked up: today's limit for looking up {what} in this case is used "
+                "up. The count starts over each day.")
+    if "grant expired" in text:
+        return (f"{cites} were not looked up: the permission to look up {what} for this case has run "
+                "out. Type /matter grant to turn it on again.")
+    if text.startswith("no valid grant"):
+        return (f"{cites} were not looked up: looking up {what} is not turned on for this case yet. "
+                "Type /matter grant to see how to turn it on.")
+    return f"{cites} were not looked up: {_short(e)}"
 
 # Code-name prefix -> Corpus jurisdiction code. Unknown codes search every jurisdiction.
 _JURIS = [
@@ -92,7 +125,9 @@ def jurisdiction(cite: str) -> str | None:
 
 
 def statute_cites(text: str) -> list[str]:
-    """Code and statute cites the kit's local parser finds, longest form only, in order, once each."""
+    """Code and statute cites the kit's local parser finds, longest form only, in order, once each.
+    A bare section ("§ 89-7-27") is the short form of a full cite in the same text that ends in that
+    section ("Miss. Code Ann. § 89-7-27"), so only the full cite is listed and looked up."""
     rows = [r for r in citations.extract_citations(text)
             if r["status"] == "extracted" and "§" in (r["parsed_citation"] or "")]
     keep = [r for r in rows if not any(o is not r and o["char_start"] <= r["char_start"]
@@ -104,7 +139,8 @@ def statute_cites(text: str) -> list[str]:
         c = r["parsed_citation"].strip()
         if c not in out:
             out.append(c)
-    return out
+    full = [_norm(c) for c in out if not c.startswith("§")]
+    return [c for c in out if not (c.startswith("§") and any(f.endswith(_norm(c)) for f in full))]
 
 
 def _heading_cite(heading: str) -> str:
@@ -173,7 +209,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
         if not lookup:
             why = "Case cites were not looked up: the guard is set to local only."
         elif not matter_dir:
-            why = "Case cites were not looked up: no case folder is set (matter_dir)."
+            why = "Case cites were not looked up: " + NO_FOLDER
         elif not courtlistener_token:
             why = NO_KEY
         else:
@@ -189,9 +225,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                 if len(payloads) > 1 and stopped is None:
                     stopped = "more than 60 case cites; only the first 60 were looked up"
             except ConsentError as e:
-                why = (f"Case cites were not looked up: this case folder has no CourtListener grant for "
-                       f"'{caller_id}' ({_short(e)}). A person grants it once in a terminal: "
-                       + grant_command("case", matter_dir, caller_id))
+                why = not_allowed("case", e)
             except Exception as e:  # noqa: BLE001
                 why = f"Case cites were not looked up: {_short(e)}"
         if why:
@@ -225,7 +259,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
         if not lookup:
             why = "Statute and code cites were not looked up: the guard is set to local only."
         elif not matter_dir:
-            why = "Statute and code cites were not looked up: no case folder is set (matter_dir)."
+            why = "Statute and code cites were not looked up: " + NO_FOLDER
         else:
             try:
                 if corpus_factory is None:
@@ -234,6 +268,8 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                     def corpus_factory(md, key):
                         return CorpusSearchAdapter(md, "authenticated" if key else "anonymous", api_key=key)
                 adapter = corpus_factory(matter_dir, corpus_api_key)
+            except ConsentError as e:
+                why = not_allowed("statute", e)
             except Exception as e:  # noqa: BLE001
                 why = f"Statute and code cites were not looked up: {_short(e)}"
         from ..matterkit.search import SearchQuery
@@ -255,9 +291,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                         row.detail = ("Corpus returned no section with this exact cite. It may be outside "
                                       "Corpus's coverage or cited in another form; check it by hand.")
                 except ConsentError as e:
-                    why = (f"Statute and code cites were not looked up: this case folder has no Corpus grant "
-                           f"for '{caller_id}' ({_short(e)}). A person grants it once in a terminal: "
-                           + grant_command("statute", matter_dir, caller_id))
+                    why = not_allowed("statute", e)
                 except Exception as e:  # noqa: BLE001
                     why = f"Statute and code cites were not looked up: {_short(e)}"
             elif adapter is not None and why is None:
@@ -268,9 +302,13 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
     return result
 
 
-def _short(e: Exception) -> str:
+def _short(e: Exception, limit: int = 240) -> str:
+    """The error's first line, cut at a word (never mid-word) when it is long."""
     s = str(e).strip().splitlines()[0] if str(e).strip() else type(e).__name__
-    return s[:240]
+    if len(s) <= limit:
+        return s
+    head = s[:limit]
+    return (head[:head.rfind(" ")] if " " in head else head).rstrip(" ,;:(—-") + "…"
 
 
 _MARK = {citelookup.FOUND: "✓", IN_CORPUS: "✓", citelookup.NOT_LOOKED_UP: "·"}

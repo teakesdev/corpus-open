@@ -14,6 +14,7 @@ import os
 from ..matterkit import ingest as ing
 from ..matterkit import packet as pk
 from ..matterkit import store
+from .guard import HOW_TO_START
 
 TOOLSET = "corpus_open"
 LABELS = ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]
@@ -23,14 +24,33 @@ class MatterError(ValueError):
     pass
 
 
+def draft_path(md: str, rel: str) -> str:
+    """A file inside the case folder to read, or a MatterError a newcomer can act on (not an errno).
+    A link is followed only when its target is inside the case folder too."""
+    if rel and os.path.abspath(rel if os.path.isabs(rel) else os.path.join(md, rel)) == os.path.abspath(md):
+        raise MatterError("That is the case folder itself. Name one file in it, for example a draft in Drafts.")
+    p = inside(md, rel)
+    if os.path.lexists(p) and not ing.is_within_matter(os.path.realpath(p), os.path.realpath(md)):
+        raise MatterError(f"{rel} is a link to a file outside the case folder, so it is not read. Copy the "
+                          "file into the case folder instead.")
+    if os.path.isdir(p):
+        raise MatterError(f"{rel} is a folder. Name one file in it, for example a draft in Drafts.")
+    if not os.path.isfile(p):
+        raise MatterError(f"There is no {rel} in the case folder. Check the name, or type /matter to "
+                          "see the case.")
+    return p
+
+
 def resolve_matter(raw: str | None) -> str:
-    """The configured case folder, expanded and checked to be a matter."""
+    """The configured case folder, expanded and checked to be a matter. When there is none, the
+    message is read by people (from /matter) and by the agent (from a tool), so it names the two
+    slash commands that start a case, not a setting or a terminal command."""
     if not raw or not str(raw).strip():
-        raise MatterError("No case folder is set. Set matter_dir in this plugin's settings "
-                          "(Settings > Plugins > corpus-open) to a folder made with `matter.py init`.")
+        raise MatterError("No case folder is set up yet. " + HOW_TO_START)
     path = os.path.abspath(os.path.expanduser(str(raw).strip()))
     if not os.path.isdir(os.path.join(path, ".matter")):
-        raise MatterError(f"{path} is not a matter yet (no .matter/ folder). Run: python3 matter.py init {path}")
+        raise MatterError(f"{path} is not set up as a case folder yet. Type /matter init {path} to set "
+                          "it up (files already there are kept), or /matter demo to try a made-up case.")
     return path
 
 
@@ -117,8 +137,9 @@ SCHEMAS = {
         "Re-hash every registered document in the case folder; report any that changed or went missing."),
     "matter_ingest_path": _schema(
         "matter_ingest_path",
-        "Hash and register one file or folder inside the case folder so facts can cite it. Sources are "
-        "never modified.",
+        "Hash and register one file or folder inside the case folder so facts can cite it, for example "
+        "'Filings' or 'Evidence/lease.pdf' (not the case folder itself). A registered file is a source "
+        "and can no longer be edited, so leave working drafts unregistered. Sources are never modified.",
         {"path": {"type": "string"}}, ["path"]),
 }
 
@@ -197,7 +218,7 @@ class Tools:
         from ..matterkit import briefcheck
         md = self._dir()
         with contextlib.redirect_stdout(io.StringIO()):
-            report = briefcheck.check(md, inside(md, args.get("path", "")), use_pdftotext=True,
+            report = briefcheck.check(md, draft_path(md, args.get("path", "")), use_pdftotext=True,
                                       mode=args.get("mode") or "brief")
         return {"exit": report.exit_code, "summary": report.summary(), "report": report.render()}
 
@@ -224,7 +245,7 @@ class Tools:
         if args.get("path"):
             if md is None:
                 raise MatterError("path needs a case folder; pass text instead or set matter_dir")
-            p = inside(md, args["path"])
+            p = draft_path(md, args["path"])
             if p.lower().endswith((".docx", ".pdf", ".doc")):
                 raise MatterError("cite check reads Markdown or text; pass the .md copy or the text itself")
             with open(p, "rb") as f:
@@ -263,7 +284,26 @@ class Tools:
 
     def matter_ingest_path(self, args):
         md = self._dir()
-        cand = inside(md, args.get("path", ""))
+        raw = args.get("path", "")
+        if raw and os.path.abspath(raw if os.path.isabs(raw) else os.path.join(md, raw)) == os.path.abspath(md):
+            # "register my files" often arrives as "." or the folder itself, which the kit refuses as
+            # "invalid matter-relative path: '.'"; say what to name instead.
+            raise MatterError("Name a folder inside the case folder (for example Filings or Evidence) or one "
+                              "file. The case folder itself can't be registered in one call.")
+        cand = inside(md, raw)
+        # The kit prints why it skipped a path and counts nothing, which reads to the agent as done.
+        if os.path.islink(cand) and not os.path.exists(cand):
+            raise MatterError(f"{raw} is a link to a file that is no longer there. Register the file itself.")
+        if os.path.islink(cand) and ing._links_out(cand, md):
+            raise MatterError(f"{raw} is a link to a file outside the case folder (or into a subcase), so it "
+                              "is not registered. Copy the file into the case folder instead.")
+        sub = ing.nested_matter_root(cand, md)
+        if sub:
+            raise MatterError(f"{os.path.relpath(sub, md)} is its own case (a subcase). Register its papers "
+                              "from that case, not this one.")
+        if not os.path.exists(cand):
+            raise MatterError(f"There is no {raw} in the case folder. Name a folder that is there (for "
+                              "example Filings or Evidence) or one file.")
         with contextlib.redirect_stdout(io.StringIO()), contextlib.closing(store.connect(md)) as conn:
             added, skipped, excluded = ing.ingest_paths(conn, md, [cand])
         return {"added": added, "skipped": skipped, "excluded": excluded}

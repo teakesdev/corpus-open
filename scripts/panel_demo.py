@@ -35,7 +35,8 @@ def setup(target: str, today: dt.date | None = None) -> str:
     target = os.path.abspath(os.path.expanduser(target))
     if os.path.exists(target):
         raise SystemExit(f"{target} already exists; pick a new folder")
-    shutil.copytree(SOURCE, target, ignore=shutil.ignore_patterns(".matter", "__pycache__"))
+    # Drafts/ belongs to `/matter demo`; here every copied file is registered, and a draft is not a source.
+    shutil.copytree(SOURCE, target, ignore=shutil.ignore_patterns(".matter", "__pycache__", "Drafts"))
     with open(os.path.join(target, "matter.json"), "w", encoding="utf-8") as f:
         f.write('{"title": "%s"}\n' % TITLE)
     t = today or dt.date.today()

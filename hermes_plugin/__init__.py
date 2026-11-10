@@ -35,14 +35,41 @@ import shutil
 from . import guard as _guard
 from . import quote_guard as _quote_guard
 from . import source_guard as _source_guard
-from .tools import SCHEMAS, TOOLSET, MatterError, Tools, resolve_matter
+from .tools import SCHEMAS, TOOLSET, MatterError, Tools, draft_path, resolve_matter
 
 PLUGIN_ID = "corpus-open"
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
 DEMO_SOURCE = os.path.join(KIT, "demo-matter")
 DEMO_DECLARATION = "Filings/12-declaration_synthetic.md"
+DEMO_COMPLAINT = "Filings/complaint_synthetic.md"
+DEMO_DRAFT = "Drafts/response_draft_synthetic.md"  # a working draft: never registered as a source
 DEMO_DIR = "~/cases/corpus-open-demo"
+DEMO_BY = "plugin:corpus-open-demo"
+# (text, label, sources). The last has no source on purpose: it shows as UNSUPPORTED, and it is the
+# same claim the demo draft's made-up quotation asserts.
+DEMO_FACTS = (
+    ("Demo Corp.'s HR manager swore that Plaintiff received no written warnings before January 5, 2026.",
+     "DOCUMENTED FACT", (DEMO_DECLARATION + "@p. 2 ¶ 3",)),
+    ("The HR manager swore that after the January 5 meeting she was told to mark the personnel file "
+     "\"voluntary resignation.\"", "DOCUMENTED FACT", (DEMO_DECLARATION + "@p. 3 ¶ 6",)),
+    ("Plaintiff alleges wrongful termination on January 5, 2026.", "ALLEGATION", (DEMO_COMPLAINT,)),
+    ("The plant manager ordered the file changed to hide the reason for the firing.", "HYPOTHESIS", ()),
+)
+WELCOME = ("Corpus Open keeps a court case in one folder on this computer and checks what the AI says "
+           "about it against your own documents.")
+DEMO_WAY = "- /matter demo: a made-up case to try things on. Nothing in it is real."
+THEN_ASK = ('After that, ask in plain words: "what\'s due in my case?", "register my files", '
+            '"check my draft".')
+NO_CASE_HINT = ("[Corpus Open] No case folder is set up yet, so the case tools (matter_*) will not work "
+                "and cites in replies are listed but not looked up. If the user brings up a court case "
+                "or legal papers, tell them once: " + _guard.HOW_TO_START + " Otherwise do not mention "
+                "this.")
+UNCONFIRMED = ("Dates marked working-estimate, unverified or secondary-source are not confirmed. Check "
+               "them against the rules and the court's orders.")
+_QUOTE_ORDER = (_quote_guard.quotecheck.NOT_FOUND, _quote_guard.quotecheck.WRONG_PAGE,
+                _quote_guard.quotecheck.CANT_CHECK, _quote_guard.quotecheck.EXACT)
+_QUOTE_MARK = {_quote_guard.quotecheck.EXACT: "✓", _quote_guard.quotecheck.CANT_CHECK: "·"}
 USAGE = ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant | "
          "init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
 WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
@@ -219,11 +246,12 @@ class Plugin:
         return "\n".join(lines)
 
     def on_turn(self, is_first_turn: bool = False, **kwargs):
-        """pre_llm_call: on a session's first turn, hand the agent the case's deadlines."""
+        """pre_llm_call: on a session's first turn, hand the agent the case's deadlines; with no case
+        yet, tell it so, and how the user starts one."""
         if not is_first_turn:
             return None
         try:
-            text = self.deadline_brief()
+            text = NO_CASE_HINT if self._matter_or_none() is None else self.deadline_brief()
         except Exception:  # noqa: BLE001
             return None
         return {"context": text} if text else None
@@ -235,6 +263,8 @@ class Plugin:
         rest = parts[1].strip() if len(parts) > 1 else ""
         try:
             if sub in ("", "status"):
+                if self._matter_or_none() is None:
+                    return self._welcome()
                 return self._unwrap(self.tools.handler("matter_status")({})) + "\n\n" + self._deadline_text()
             if sub == "deadlines":
                 return self._deadline_text()
@@ -243,8 +273,7 @@ class Plugin:
             if sub == "check":
                 if not rest:
                     return "Usage: /matter check <draft.md inside the case folder>"
-                res = self.tools.matter_cite_check({"path": rest})
-                return res["report"] or "No citations found."
+                return self._check(rest)
             if sub == "grant":
                 return self._grant_text()
             if sub == "init":
@@ -269,14 +298,71 @@ class Plugin:
         except Exception as e:  # noqa: BLE001
             return f"/matter failed: {e}"
 
+    def _welcome(self) -> str:
+        """What `/matter` says before there is a case: what this is, and the two ways to start."""
+        raw = str(self.settings().get("matter_dir") or "").strip()
+        if raw:  # a folder is set, but it is not a case yet
+            path = os.path.abspath(os.path.expanduser(raw))
+            head = f"{path} is not set up as a case folder yet. Two ways to start:"
+            ways = [f"- /matter init {path}: set that folder up as your case. Files already there are kept.",
+                    DEMO_WAY]
+        else:
+            head = "No case folder is set up yet. Two ways to start:"
+            ways = [DEMO_WAY, "- /matter init ~/cases/my-case: a folder for your own case. Your files stay "
+                              "on this computer."]
+        return "\n".join([WELCOME, "", head, *ways, "", THEN_ASK])
+
+    def _check(self, rel: str) -> str:
+        """/matter check: the draft's cites (the citation guard's block), then its quotations and
+        record page cites against the registered documents (the quote guard's check, offline)."""
+        md = resolve_matter(self.settings().get("matter_dir"))
+        res = self.tools.matter_cite_check({"path": rel})
+        parts = [res["report"]] if res["report"] else []
+        try:
+            with open(draft_path(md, rel), "rb") as f:
+                text = f.read().decode("utf-8", "replace")
+            quotes = _quote_guard.quotecheck.check_text(md, text, use_pdftotext=_quote_guard.USE_PDFTOTEXT)
+        except Exception as e:  # noqa: BLE001 - the cite report above still goes out
+            quotes = []
+            parts.append(f"_Quotations could not be checked: {_guard._short(e)}_")
+        if quotes:
+            parts.append(self._quote_text(quotes))
+        return "\n\n".join(parts) or "No citations or quotations found."
+
+    @staticmethod
+    def _quote_text(results) -> str:
+        qc = _quote_guard.quotecheck
+        rows = sorted(results, key=lambda r: _QUOTE_ORDER.index(r.verdict) if r.verdict in _QUOTE_ORDER else 9)
+        bad = sum(1 for r in rows if r.verdict in qc.PROBLEMS)
+        out = [f"**Quotations and page cites: {bad} of {len(rows)} to fix**" if bad else
+               f"**Quotations and page cites: {len(rows)}**"]
+        for r in rows:
+            said = qc.describe(r)
+            said = said[len(r.verdict) + 2:] if said.startswith(r.verdict + ": ") else said
+            out.append(f"- {_QUOTE_MARK.get(r.verdict, '⚠')} **{r.verdict}**: {said}")
+        out.append("_Exact means the words are in the registered document on that page, not that they "
+                   "prove the point. Can't check means there was no record text to compare against._")
+        return "\n".join(out)
+
     def _grant_text(self) -> str:
         s = self.settings()
-        md, caller = s["matter_dir"] or None, s["caller_id"]
-        return ("A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
-                "grant an agent writes). These work from any folder:\n"
+        caller, lead = s["caller_id"], ""
+        try:
+            md = resolve_matter(s["matter_dir"])
+        except MatterError as e:
+            # No case yet: say how to get one, and print no line that would fail on this folder.
+            md = None
+            lead = (f"{e} There is nothing to copy yet: once you have a case, /matter grant prints the "
+                    "two lines below with your folder in place of <case folder>.\n\n")
+        how = ("This is what they will look like:" if md is None else
+               "Copy each line into a terminal; they work from any folder:")
+        return (lead +
+                "A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
+                f"grant an agent writes). {how}\n"
                 f"  {_guard.grant_command('case', md, caller)}\n"
-                "    case cites (CourtListener): asks you to type yes, then for your free key, which this "
-                "plugin reads too (a COURTLISTENER_TOKEN in this plugin's settings is used first)\n"
+                "    case cites (CourtListener): asks you to type yes, then for your free key (get one at "
+                f"{_guard.KEY_URL}), which this plugin reads too (a COURTLISTENER_TOKEN in this plugin's "
+                "settings is used first)\n"
                 f"  {_guard.grant_command('statute', md, caller)}\n"
                 "    statute and code cites (Corpus): asks you to type ACTIVATE")
 
@@ -289,21 +375,56 @@ class Plugin:
         return (f"Set the case folder to {folder} in Settings > Plugins > corpus-open "
                 "(this Hermes can't save it from here).")
 
+    @staticmethod
+    def _inside_case(folder: str) -> str | None:
+        """The case folder strictly above `folder`, if any. A case inside a case is one the rest of
+        the kit treats as a boundary, and selecting it would switch the plugin off the real case.
+        Both the path as given and its real location are walked, so a link into a case is caught,
+        and "a case" is what resolve_matter accepts: a folder holding `.matter/`."""
+        def walk(start: str) -> str | None:
+            cur = os.path.dirname(start)
+            while True:
+                if os.path.isdir(os.path.join(cur, ".matter")):
+                    return cur
+                up = os.path.dirname(cur)
+                if up == cur:
+                    return None
+                cur = up
+        return walk(folder) or walk(os.path.realpath(folder))
+
+    @staticmethod
+    def _nested_refusal(folder: str, root: str, retry: str) -> str:
+        return (f"{folder} is inside the case at {root}, so it can't be a case of its own. "
+                f"Pick a folder outside every case: {retry}")
+
     def _init(self, rest: str) -> str:
         if not rest:
             return "Usage: /matter init <folder> (made if missing; files already there are kept)"
         from ..matterkit import cases
         folder = os.path.abspath(os.path.expanduser(rest))
+        root = self._inside_case(folder)
+        if root:
+            return self._nested_refusal(folder, root, "/matter init <new folder>")
         with contextlib.redirect_stdout(io.StringIO()):
             docs = cases.init(folder)
-        return (f"Case folder ready: {folder} ({docs} documents registered). " + self._select(folder) +
-                " Put files in its folders, then ask me to register them (matter_ingest_path).")
+        return "\n".join([
+            f"Case folder ready: {folder} ({docs} documents registered). " + self._select(folder),
+            "Next:",
+            f"1. Copy your papers into it. Anything filed with the court or sent by the other side goes "
+            f"in {os.path.join(folder, 'Filings')}; your proof (letters, photos, records) goes in "
+            f"{os.path.join(folder, 'Evidence')}.",
+            '2. Say "register my files". Each one is recorded with a fingerprint, so a later change '
+            "shows up.",
+            '3. Ask "what\'s due in my case?" or "check my draft".'])
 
     def _demo(self, rest: str) -> str:
-        from ..matterkit import cases, store
+        from ..matterkit import cases, facts, store
         from ..matterkit import deadlines as dl
         from ..matterkit import ingest as ing
         folder = os.path.abspath(os.path.expanduser(rest))
+        root = self._inside_case(folder)
+        if root:
+            return self._nested_refusal(folder, root, "/matter demo <new folder>")
         if os.path.exists(folder) and (not os.path.isdir(folder) or os.listdir(folder)):
             return (f"{folder} already has files, so the demo won't write there. "
                     "Pick another folder: /matter demo <new folder>")
@@ -312,18 +433,37 @@ class Plugin:
         with contextlib.redirect_stdout(io.StringIO()):
             cases.init(folder)
             with contextlib.closing(store.connect(folder)) as conn:
-                ing.ingest_paths(conn, folder, [folder])
-                dl.add(conn, "Answer to complaint (demo)", (today - _dt.timedelta(days=3)).isoformat(),
-                       "plugin:corpus-open-demo", rule="synthetic demo date")
-                dl.add(conn, "Initial disclosures (demo)", (today + _dt.timedelta(days=7)).isoformat(),
-                       "plugin:corpus-open-demo", rule="synthetic demo date")
+                # The draft stays unregistered: a registered file is a source, and the source guard
+                # would then stop the agent from ever editing it. The folder's README is not a case
+                # paper either.
+                ing.ingest_paths(conn, folder, [folder],
+                                 exclude=(os.path.dirname(DEMO_DRAFT) + "/", "README.md"))
+                dl.add(conn, "Initial disclosures (demo)", (today - _dt.timedelta(days=3)).isoformat(),
+                       DEMO_BY, rule="synthetic demo date")
+                dl.add(conn, "Response to motion to dismiss (demo)", (today + _dt.timedelta(days=7)).isoformat(),
+                       DEMO_BY, rule="synthetic demo date")
+                for text, label, sources in DEMO_FACTS:
+                    facts.add(conn, folder, text, label, list(sources), by=DEMO_BY)
         with open(os.path.join(folder, ".matter", "docket.json"), "w", encoding="utf-8") as f:
             json.dump({"entries": {"12": DEMO_DECLARATION}}, f, indent=2)
-        return (f"Made a synthetic demo case at {folder}: a made-up complaint, evidence memo and a "
-                "three-page declaration filed as Doc. 12, registered and hashed, and two made-up deadlines "
-                "(one overdue). Nothing in it is real. " + self._select(folder) + " Try /matter, ask me "
-                "what's due, or ask me to quote Doc. 12 in a draft: the quote guard checks every "
-                "quotation against the record before it is written.")
+        return "\n".join([
+            f"Made a practice case at {folder}. It is synthetic. Nothing in it is real.",
+            "",
+            "In it: a complaint, an evidence memo and a three-page declaration (Doc. 12), each recorded "
+            "with a fingerprint; two deadlines, one already overdue; four labeled facts, one with nothing "
+            "to back it up; and a draft with three planted mistakes: a case that does not exist, a "
+            "quotation that is not in the record, and a quotation cited to the wrong page.",
+            "",
+            self._select(folder),
+            "",
+            "Try these:",
+            "- /matter: the case at a glance",
+            f"- /matter check {DEMO_DRAFT}: finds the two bad quotations now, and the made-up case once "
+            "case law lookups are on (/matter grant)",
+            '- ask "what\'s due in my case?"',
+            "- ask me to add a quotation from Doc. 12 to the draft: one that is not in the record is "
+            "refused before it is written. Ask for an edit to one part of the draft: rewriting the whole "
+            "file is refused while the planted bad quotations are still in it"])
 
     # -- Deadline Watch -------------------------------------------------------------------------
     def _watch_text(self) -> str:
@@ -418,6 +558,9 @@ class Plugin:
         for r in rows:
             flag = " **OVERDUE**" if dl.is_overdue(r["due_date"], r["state"], today=self.today()) else ""
             out.append(f"- {r['due_date']} · {r['label']}{flag} ({r['confidence']}, {r['verification_status']})")
+        # Deadline Watch's rule: only a hard, verified-official date counts as confirmed.
+        if any(not (r["confidence"] == "hard" and r["verification_status"] == "verified-official") for r in rows):
+            out.append(UNCONFIRMED)
         return "\n".join(out)
 
     @staticmethod

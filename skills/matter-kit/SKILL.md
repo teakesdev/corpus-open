@@ -10,6 +10,30 @@ A matter is a directory of source documents plus a derived `.matter/` store.
 makes every substantive claim either traceable to a hashed document or visibly
 unsupported — that visibility is the product.
 
+## Inside Hermes (the corpus-open plugin)
+
+If you have tools named `matter_status`, `matter_ingest_path`, `matter_cite_check`
+and the like, you are running inside Hermes with the plugin, and the person is
+probably not a programmer. Use those tools and point the person to the `/matter`
+commands. The terminal commands in the rest of this file are for other setups.
+
+- **No case folder yet** (a tool says so): tell the person to type `/matter demo`
+  for a made-up practice case, or `/matter init <folder>` for their own.
+- **"Register my files"**: call `matter_ingest_path` on a folder inside the case
+  (`Filings`, `Evidence`, `Correspondence`) or on one file, not on the case folder
+  itself. Leave working drafts unregistered: a registered file is a source and
+  can't be edited afterwards.
+- **Cites or statutes "not looked up"**: you cannot turn lookups on, and must not
+  try. Tell the person, once, to type `/matter grant`. It prints the two lines to
+  copy into a terminal, written for this computer. Do not write out a
+  `python3 … matter.py …` line for them yourself: the `python3` on many computers
+  is too old to run the kit, and `/matter grant` names one that works.
+- **Checking a draft**: `matter_brief_check` and `matter_cite_check` on the file,
+  or tell the person about `/matter check <file>`.
+- Do not run `matter.py` with `python3` in a terminal to do what a `matter_*` tool
+  does. If you need a kit command that has no tool, use the interpreter that
+  `/matter grant` prints.
+
 ## Setup
 
 ```bash
@@ -176,6 +200,9 @@ missing, tell the person in plain words, one time, what the reply says:
 > open the case, click "Case law lookups", then "Turn on". To check citations,
 > also paste your free CourtListener key there (CourtListener's API page has
 > it). Or run `python3 matter.py courtlistener on <case folder>` once.
+
+Inside Hermes, say this instead: "Type `/matter grant`. It prints the two lines
+that turn lookups on, ready to copy into a terminal."
 
 Then carry on with the work that doesn't need lookups. Answers are saved in the
 case: repeating a search or re-checking a draft reads them back without sending
