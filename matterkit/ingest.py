@@ -88,10 +88,10 @@ def abs_path(path: str) -> str:
 
 def is_within_matter(path: str, matter_dir: str) -> bool:
     """True iff abspath(path) is the matter root or a descendant (no .. escape)."""
-    abs_path = os.path.abspath(path)
+    abs_p = os.path.abspath(path)
     abs_matter = os.path.abspath(matter_dir)
     try:
-        rel = os.path.relpath(abs_path, abs_matter)
+        rel = os.path.relpath(abs_p, abs_matter)
     except ValueError:
         return False
     if rel == os.curdir:

@@ -132,6 +132,15 @@ class TestRound1P3s(PluginCase):
         self.assertEqual((r["result"]["added"], r["result"]["recorded_as"]), (1, "Evidence/a.md"))
         self.assertIn("case folder itself", p.command("check /" + self.dir))
 
+    def test_a_double_slash_case_setting_still_registers(self):
+        write(os.path.join(self.dir, "Evidence", "a.md"), "synthetic\n")
+        self.plugin(matter_dir="/" + self.dir)
+        r = self.call("matter_ingest_path", {"path": "Evidence/a.md"})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["result"]["added"], r["result"]["recorded_as"]), (1, "Evidence/a.md"))
+        r = self.call("matter_ingest_path", {"path": "Evidence"})
+        self.assertTrue(r["ok"], r)
+
     def test_notes_cut_a_double_slash_root(self):
         self.assertEqual(ing.case_relative_notes("  ! not found: /x/case/E/a.md\n", "//x/case"),
                          ["not found: E/a.md"])

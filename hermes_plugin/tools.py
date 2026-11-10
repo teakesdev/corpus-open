@@ -47,7 +47,7 @@ def resolve_matter(raw: str | None) -> str:
     slash commands that start a case, not a setting or a terminal command."""
     if not raw or not str(raw).strip():
         raise MatterError("No case folder is set up yet. " + HOW_TO_START)
-    path = os.path.abspath(os.path.expanduser(str(raw).strip()))
+    path = ing.abs_path(os.path.expanduser(str(raw).strip()))
     if not os.path.isdir(os.path.join(path, ".matter")):
         raise MatterError(f"{path} is not set up as a case folder yet. Type /matter init {path} to set "
                           "it up (files already there are kept), or /matter demo to try a made-up case.")
