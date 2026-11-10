@@ -5,8 +5,9 @@ api_version: 1
 description: >-
   Corpus Open's matter kit inside Hermes. A citation guard lists every case, statute and
   code cite under each reply with what CourtListener, Corpus and your case file hold at it
-  (FOUND, NOT FOUND, NAME DIFFERS, IN CORPUS), so a made-up cite is flagged before it reaches
-  a filing. Twelve tools read and keep a local case folder (labeled facts with sources,
+  (NO SUCH VOLUME, FOUND, NOT FOUND, NAME DIFFERS, IN CORPUS), so a made-up cite is flagged
+  before it reaches a filing; a cite whose volume or year cannot exist is flagged with no
+  lookup at all. Twelve tools read and keep a local case folder (labeled facts with sources,
   deadlines and triggers, brief check, counsel packet, court rules, hash verification), a
   deadline brief opens each session, /matter shows status, deadlines and the packet, and in
   Hermes Desktop a Case pane shows deadlines (passed first), a tamper badge for the case's files
