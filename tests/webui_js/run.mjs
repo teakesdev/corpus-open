@@ -4,7 +4,7 @@
 // so the order requests finish in is the test's to choose.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { A, B, Ev, boot, byText, caseHash } from "./dom.mjs";
+import { A, B, Ev, boot, byText, caseHash, fixtureHandler } from "./dom.mjs";
 
 // node identity without assert.equal, which would print both whole DOM trees when it fails
 const same = (a, b, msg) => assert.ok(a === b, msg);
@@ -296,4 +296,59 @@ test("markdown table: the report's own shape renders end to end", async () => {
   assert.equal(tds[1].textContent, "The notice said “pay | vacate”");
   assert.equal(tds[2].querySelectorAll("br").length, 1);
   assert.equal(tds[3].textContent, "QUOTE FOUND: “pay | vacate”");
+});
+
+// --- cite check by default: the new-case form's two first-run questions ---
+
+function openNewCase(env) {
+  byText(env.document.body, "button", "New case").click();
+  return env.document.getElementById("new-case-name").closest("form");
+}
+
+test("new case: asks for a key only when there is none, and search stays off unless ticked", async () => {
+  const env = await boot();
+  await env.flush();
+  const form = openNewCase(env);
+  assert.ok(env.document.getElementById("new-case-key"), "no key on this computer, so the form should offer the key field");
+  const search = env.document.getElementById("new-case-search");
+  assert.equal(search.checked, false, "search must start unticked");
+  assert.match(form.textContent, /only bare citations/);
+  env.document.getElementById("new-case-name").value = "Gamma v. Town";
+  form.dispatchEvent(new Ev("submit"));
+  await env.flush();
+  env.only("POST", /^\/cases$/).respond({ case: { id: "c".repeat(16), title: "Gamma v. Town", rel: "Gamma v. Town", parent_id: null } });
+  await env.flush();
+  assert.equal(env.find("POST", /courtlistener-key/).length, 0, "an empty key box sends nothing");
+  assert.equal(env.find("POST", /\/caselaw$/).length, 0, "search was not ticked, so nothing turns it on");
+});
+
+test("new case: a typed key and a ticked search box are each sent once, after the case exists", async () => {
+  const env = await boot();
+  await env.flush();
+  const form = openNewCase(env);
+  env.document.getElementById("new-case-name").value = "Gamma v. Town";
+  env.document.getElementById("new-case-key").value = "synthetic-key-0000";
+  env.document.getElementById("new-case-search").checked = true;
+  form.dispatchEvent(new Ev("submit"));
+  await env.flush();
+  assert.equal(env.find("POST", /courtlistener-key/).length, 0, "nothing else goes before the case is made");
+  env.only("POST", /^\/cases$/).respond({ case: { id: "c".repeat(16), title: "Gamma v. Town", rel: "Gamma v. Town", parent_id: null } });
+  await env.flush();
+  const key = env.only("POST", /^\/courtlistener-key$/);
+  assert.deepEqual(key.json(), { key: "synthetic-key-0000" });
+  key.respond({ key: "settings" });
+  await env.flush();
+  const on = env.only("POST", new RegExp(`^/cases/${"c".repeat(16)}/caselaw$`));
+  assert.deepEqual(on.json(), { on: true });
+});
+
+test("new case: no key field when this computer already has one", async () => {
+  const handler = (req) => (req.method === "GET" && req.path === "/session"
+    ? { status: 200, body: { workspace: "/synthetic/workspace", operator: "tester", folders: ["Evidence"], layers: ["30s"], courtlistener_key: "settings" } }
+    : fixtureHandler(req));
+  const env = await boot({ handler });
+  await env.flush();
+  openNewCase(env);
+  assert.equal(env.document.getElementById("new-case-key"), null);
+  assert.ok(env.document.getElementById("new-case-search"));
 });

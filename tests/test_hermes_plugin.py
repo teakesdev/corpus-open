@@ -21,7 +21,7 @@ from unittest import mock
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
 
-from matterkit import cases, citelookup, consent, store  # noqa: E402
+from matterkit import caselaw, cases, citelookup, consent, statutelookup, store  # noqa: E402
 
 PKG = "corpus_open_hermes_test"
 
@@ -188,7 +188,7 @@ class PluginCase(unittest.TestCase):
     def grant_all(self):
         consent.save_grants(self.dir, [
             grant(citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE),
-            grant("corpus-search", "corpuslaw.us", "query_text")])
+            grant(statutelookup.PROVIDER, statutelookup.ENDPOINT, statutelookup.PAYLOAD_TYPE)])
 
     def call(self, name, args=None):
         return json.loads(self.ctx.tools[name][2](args or {}))
@@ -230,7 +230,11 @@ class TestCitationGuard(PluginCase):
         self.assertIsNone(p.on_reply(response_text="Your hearing is Tuesday.", session_id="s"))
         self.assertIsNone(p.on_reply(response_text=""))
 
-    def test_without_grants_nothing_is_sent_and_the_reply_says_how_to_grant(self):
+    def test_turned_off_nothing_is_sent_and_the_reply_says_how_to_turn_on(self):
+        # A new case has both cite checks on by default (2026-11-09 design), so "nothing is sent" is now
+        # a case a person turned off.
+        caselaw.turn_off(self.dir)
+        caselaw.decline(self.dir, statutelookup.PROVIDER)
         p = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN})
         out = p.on_reply(response_text=REPLY)
         self.assertTrue(out.startswith(REPLY))
@@ -341,11 +345,13 @@ class TestCitationGuard(PluginCase):
         self.assertEqual(self.posted, [])
 
     def test_an_agent_grant_is_inert(self):
+        # An agent's grant cannot undo a person's off.
+        caselaw.turn_off(self.dir)
         g = grant(citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE)
         g["kind"] = "agent"
-        consent.save_grants(self.dir, [g])
+        consent.save_grants(self.dir, consent.load_grants(self.dir) + [g])
         block = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}).on_reply(response_text=REPLY)
-        self.assertIn("looking up case law is not turned on for this case", block)
+        self.assertIn("looking up case law was turned off for this case by a person", block)
         self.assertEqual(self.posted, [])
 
     def test_a_failing_source_never_breaks_the_reply(self):
@@ -615,8 +621,9 @@ class TestFirstRun(PluginCase):
         kit_cli = shlex.quote(os.path.join(KIT, "matter.py"))
         py = shlex.quote(sys.executable)  # the Python running the plugin, never a bare `python3`
         self.assertIn(f"{py} {kit_cli} courtlistener on {shlex.quote(spaced)}", out)
-        self.assertIn(f"{py} {kit_cli} consent activate {shlex.quote(spaced)} --scope corpus-search "
-                      "--caller hermes", out)
+        self.assertIn(f"{py} {kit_cli} consent activate {shlex.quote(spaced)} --scope statute-lookup", out)
+        self.assertIn(f"{py} {kit_cli} courtlistener off {shlex.quote(spaced)}", out)
+        self.assertIn(f"{py} {kit_cli} consent decline {shlex.quote(spaced)} --scope statute-lookup", out)
         self.assertNotIn("python3 matter.py", out)
 
     def test_init_makes_the_case_and_selects_it(self):

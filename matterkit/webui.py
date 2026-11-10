@@ -301,7 +301,11 @@ def _store(app, case, write=False):
 def h_session(app, req, case):
     return {"operator": req.identity.name, "workspace": os.path.basename(app.workspace) or app.workspace,
             "api": "v0", "folders": list(cases.FOLDERS), "labels": sorted(store.VALID_STATUS),
-            "layers": list(LAYERS), "max_upload_bytes": app.max_upload}
+            "layers": list(LAYERS), "max_upload_bytes": app.max_upload,
+            # Whether this computer has a CourtListener key (where from, never the key): the new-case
+            # form asks for one only when there is none.
+            "courtlistener_key": credentials.courtlistener_token_source(),
+            "courtlistener_key_url": caselaw.KEY_URL}
 
 
 def h_cases(app, req, case):
@@ -589,7 +593,7 @@ def h_caselaw_set(app, req, case):
         if on:
             caselaw.turn_on(pin.path, req.identity.name, "web-ui")
         else:
-            caselaw.turn_off(pin.path)
+            caselaw.turn_off(pin.path, req.identity.name, "web-ui")
         pin.check()
         return {"caselaw": caselaw.state(pin.path)}
 

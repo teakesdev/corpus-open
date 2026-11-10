@@ -217,14 +217,29 @@ function renderNewCase(box, open) {
   }
   const input = el("input", { type: "text", id: "new-case-name", maxlength: 80, autocomplete: "off" });
   const err = el("p", { class: "error", role: "alert" });
+  // The two first-run questions (design 2026-11-09 §2): the key, only when this computer has none, and
+  // whether to turn case law search on. Cite checking is on either way.
+  const keyInput = state.session && state.session.courtlistener_key ? null
+    : el("input", { type: "password", id: "new-case-key", autocomplete: "off", spellcheck: "false", placeholder: "Paste your CourtListener key" });
+  const search = el("input", { type: "checkbox", id: "new-case-search" });
   const form = el("form", {
     onsubmit: async (e) => {
       e.preventDefault();
       err.textContent = "";
       try {
         const { case: made } = await api("POST", "/cases", { name: input.value.trim() });
+        const notes = [];
+        if (keyInput && keyInput.value.trim()) {
+          try {
+            await api("POST", "/courtlistener-key", { key: keyInput.value });
+            state.session.courtlistener_key = "settings";
+          } catch (ex) { notes.push(`Key not saved: ${ex.message}`); }
+        }
+        if (search.checked) {
+          try { await api("POST", `/cases/${made.id}/caselaw`, { on: true }); } catch (ex) { notes.push(`Search not turned on: ${ex.message}`); }
+        }
         await loadCases();
-        toast(`Created ${made.title}.`);
+        toast([`Created ${made.title}.`, ...notes].join(" "));
         go(caseHref(made.id));
       } catch (ex) { err.textContent = ex.message; }
     },
@@ -232,6 +247,12 @@ function renderNewCase(box, open) {
   el("label", { for: "new-case-name", text: "Case folder name" }),
   input,
   el("p", { class: "hint", text: "For example: Smith v. City of Example. Letters, numbers, spaces and . , ( ) & ' - are fine." }),
+  el("p", { class: "hint", text: "Citation checks are on for every case: only bare citations such as 550 U.S. 544 or 42 U.S.C. § 2000e-3(a) are sent, to CourtListener and Corpus. You can turn them off under Case law lookups." }),
+  keyInput && el("div", { class: "field" }, el("label", { for: "new-case-key", text: "Your CourtListener key (free, optional)" }), keyInput,
+    el("p", { class: "hint", text: "Checking case citations needs one. It is kept on this computer, never in a case folder. " },
+      el("a", { href: state.session.courtlistener_key_url, target: "_blank", rel: "noopener noreferrer", text: "Get a free key at CourtListener" }))),
+  el("label", { class: "choice" }, search,
+    el("span", { text: "Also let my AI agents search case law for this case. Search words are sent to CourtListener, and they can describe your facts." })),
   err,
   el("div", { class: "row" }, el("button", { class: "btn", type: "submit", text: "Create case" }),
     el("button", { class: "btn quiet", type: "button", text: "Cancel", onclick: () => renderNewCase(clear(box), false) })));

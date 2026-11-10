@@ -23,7 +23,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_hermes_plugin import (KIT, REPLY, TOKEN, PluginCase, cases, citelookup, consent, grant,  # noqa: E402
-                                guard, hp, store)
+                                guard, hp, statutelookup, store)
 
 DRAFT = "Drafts/response_draft_synthetic.md"
 DECLARATION = "Filings/12-declaration_synthetic.md"
@@ -146,6 +146,12 @@ class TestPlainReasons(PluginCase):
         return [ln for ln in block.splitlines() if ln.startswith("_") and "not looked up" in ln]
 
     def test_no_grant_reads_as_plain_words(self):
+        # A new case has both checks on by default, so "no grant" is now a person's grant for other
+        # callers only.
+        case = grant(citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE)
+        law = grant(statutelookup.PROVIDER, statutelookup.ENDPOINT, statutelookup.PAYLOAD_TYPE)
+        case["authorized_callers"] = law["authorized_callers"] = ["another-agent"]
+        consent.save_grants(self.dir, [case, law])
         block = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}).on_reply(response_text=REPLY)[len(REPLY):]
         notes = self.notes(block)
         self.assertEqual(len(notes), 2, block)
@@ -160,7 +166,7 @@ class TestPlainReasons(PluginCase):
 
     def test_a_used_up_daily_limit_says_so(self):
         case = grant(citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE)
-        law = grant("corpus-search", "corpuslaw.us", "query_text")
+        law = grant(statutelookup.PROVIDER, statutelookup.ENDPOINT, statutelookup.PAYLOAD_TYPE)
         case["daily_budget"] = law["daily_budget"] = 0
         consent.save_grants(self.dir, [case, law])
         block = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN}).on_reply(response_text=REPLY)[len(REPLY):]
@@ -381,7 +387,7 @@ class TestFoundRunningInsideHermes(PluginCase):
         self.assertIn("<case folder>", out)  # no command that would fail on a folder that is not a case
         self.assertNotIn(f"courtlistener on {shlex.quote(plain)}", out)
         # A case that exists gets the two lines and nothing in front of them.
-        self.assertTrue(self.plugin().command("grant").startswith("A person turns on cite checks"))
+        self.assertTrue(self.plugin().command("grant").startswith("Cite checks are on for every case"))
 
 
 class TestSkillInsideHermes(unittest.TestCase):

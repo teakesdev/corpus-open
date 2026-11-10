@@ -2,7 +2,8 @@
 
 Every handler takes (args, **kwargs), returns a JSON string and never raises, as Hermes asks.
 Nothing here files, sends or contacts anyone. The one network path is matter_cite_check, which
-goes through the guard and so through the kit's consent grants.
+goes through the guard and so through the kit's consent grants (the case's default for bare cites,
+or a person's own).
 """
 from __future__ import annotations
 
@@ -129,7 +130,8 @@ SCHEMAS = {
         "matter_cite_check",
         "Check every citation in a text or in a draft file inside the case folder: case cites against "
         "CourtListener, statute and code cites against Corpus, plus what the case file's own authority "
-        "ledger says. Sends only the bare cites, and only when the case folder holds a person's grant. "
+        "ledger says. Sends only the bare cites (case cites only once a CourtListener key is set), and not "
+        "for a check a person turned off for the case. "
         "Run it before any citation goes into a filing or a letter.",
         {"text": {"type": "string"}, "path": {"type": "string"}}),
     "matter_verify": _schema(

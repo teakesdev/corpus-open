@@ -14,11 +14,14 @@ What a plugin adds that a skill or an MCP server can't:
   or the case store, and a command that looks like it would goes to the person's approval;
 - /matter, a slash command for the case's status, deadlines, packet and cite checks;
 - the matter tools, reading the case folder chosen in Hermes's own settings form, with tokens
-  read through Hermes's secret store.
+  read through Hermes's secret store (agent.secret_scope.get_secret, catalog rule 11).
 
-Nothing here files or contacts anyone. Network calls happen only for cite checks, only with the
-bare cites, and only after a person grants them in the case folder (RFC 0001). Deadline Watch
-messages leave only through a cron job a person creates, and each one is logged in the case.
+Nothing here files or contacts anyone. Network calls happen only for cite checks and carry only
+the bare cites: case cites to CourtListener once a key is set, statute and code cites to Corpus.
+Both checks are on for a case unless a person turns them off in the case folder, and off sticks
+(RFC 0001 as amended by the 2026-11-09 design); citation_guard: local keeps every cite on this
+computer. Deadline Watch messages leave only through a cron job a person creates, and each one is
+logged in the case.
 """
 from __future__ import annotations
 
@@ -76,6 +79,21 @@ WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
 WATCH_USAGE = ("Usage: /matter watch (the check, now) | /matter watch on [HH:MM] (each morning, through Hermes "
                "cron) | /matter watch off")
 _HHMM = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
+# What leaves the computer, in the words the decisions file (2026-11-10, extension 2) asks for.
+WHAT_LEAVES = ("Cite checks are on for every case unless a person turns them off. Only bare cites leave "
+               "this computer:\n"
+               "- Bare case cites such as 550 U.S. 544 go to CourtListener, only when a key is set.\n"
+               "- Bare statute and code cites such as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us).\n"
+               "Nothing else goes anywhere. Each check can be turned off per case, and off sticks.")
+# Catalog rule 11: the key goes in through Hermes's own settings, never into a chat.
+KEY_IN_HERMES = (f"The key is free: get one at {_guard.KEY_URL}, then add it in Hermes, and never paste it "
+                 "into a chat:\n"
+                 "- Hermes Desktop: Settings > Plugins > corpus-open > courtlistener_token, then Save settings.\n"
+                 "- Hermes CLI: hermes config set COURTLISTENER_TOKEN <your key>\n"
+                 "Hermes keeps it in your profile's .env file. If cites still say there is no key, restart "
+                 "Hermes.")
+_STATE_WORDS = {"default": "on (the default)", "on": "on (a person turned it on)",
+                "declined": "turned off for this case by a person", "off": "off"}
 GUARD_MODES = ("lookup", "local", "off")
 DEFAULTS = {
     "matter_dir": "",
@@ -89,6 +107,15 @@ DEFAULTS = {
 OFF = (False, "off", "false", "no", "0", 0)
 CHECKED_MEMORY = 256  # replies this process appended a block to, remembered to skip a replay
 SECRET_ENV = {"courtlistener_token": "COURTLISTENER_TOKEN", "corpus_api_key": "CORPUS_API_KEY"}
+
+
+def _secret_route() -> bool:
+    """Whether this Hermes has the secret route catalog rule 11 names (agent.secret_scope.get_secret)."""
+    try:
+        from agent.secret_scope import get_secret  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def _secret(name: str) -> str | None:
@@ -109,9 +136,10 @@ def _digest(text: str) -> bytes:
 
 
 class Plugin:
-    def __init__(self, ctx, secret=_secret, today=None):
+    def __init__(self, ctx, secret=_secret, today=None, secret_route=_secret_route):
         self.ctx = ctx
         self.secret = secret
+        self.secret_route = secret_route
         self.today = today or _dt.date.today
         self.tools = Tools(self.settings, self.run_guard)
         self._checked: dict = {}  # sha256 of each reply on_reply returned, oldest first
@@ -169,6 +197,14 @@ class Plugin:
     # -- citation guard -------------------------------------------------------------------------
     def run_guard(self, text: str, matter_dir: str | None) -> _guard.Check:
         s = self.settings()
+        if matter_dir and s["citation_guard"] == "lookup":
+            # A case made before cite checks were on by default gets its default on first use; a case a
+            # person turned off keeps its declined record (consent.ensure_defaults never writes over it).
+            try:
+                from ..matterkit import consent
+                consent.ensure_defaults(matter_dir)
+            except Exception:  # noqa: BLE001 - an unwritable folder: the lookups say why they did not run
+                pass
         return _guard.check_text(
             text, matter_dir=matter_dir, caller_id=str(s["caller_id"]),
             lookup=s["citation_guard"] == "lookup",
@@ -177,12 +213,16 @@ class Plugin:
             max_statutes=s["max_statute_checks"])
 
     def courtlistener_token(self) -> str | None:
-        """Hermes's secret first; else the key `matter.py courtlistener on` / `courtlistener key` saved
-        (or COURTLISTENER_TOKEN in the environment), so the one switch also works inside Hermes."""
+        """Hermes's secret first (catalog rule 11). When Hermes has that route, the only other place is
+        the key Matter Kit saved (`matter.py courtlistener key`, its browser UI): never a bare
+        environment variable, which under multiplexing can be another profile's. A Hermes without the
+        route keeps the old way (COURTLISTENER_TOKEN in the environment, then the saved key)."""
         token = self.secret(SECRET_ENV["courtlistener_token"])
         if token:
             return token
         from ..matterkit import credentials
+        if self.secret_route():
+            return credentials.saved_courtlistener_token() or None
         return credentials.courtlistener_token() or None
 
     def on_reply(self, response_text: str = "", **kwargs) -> str | None:
@@ -345,6 +385,8 @@ class Plugin:
         return "\n".join(out)
 
     def _grant_text(self) -> str:
+        """What leaves by default, this case's checks, where the CourtListener key goes in Hermes
+        (never the chat), and the terminal lines a person runs to turn each check off or back on."""
         s = self.settings()
         caller, lead = s["caller_id"], ""
         try:
@@ -353,18 +395,34 @@ class Plugin:
             # No case yet: say how to get one, and print no line that would fail on this folder.
             md = None
             lead = (f"{e} There is nothing to copy yet: once you have a case, /matter grant prints the "
-                    "two lines below with your folder in place of <case folder>.\n\n")
-        how = ("This is what they will look like:" if md is None else
-               "Copy each line into a terminal; they work from any folder:")
-        return (lead +
-                "A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
-                f"grant an agent writes). {how}\n"
-                f"  {_guard.grant_command('case', md, caller)}\n"
-                "    case cites (CourtListener): asks you to type yes, then for your free key (get one at "
-                f"{_guard.KEY_URL}), which this plugin reads too (a COURTLISTENER_TOKEN in this plugin's "
-                "settings is used first)\n"
-                f"  {_guard.grant_command('statute', md, caller)}\n"
-                "    statute and code cites (Corpus): asks you to type ACTIVATE")
+                    "lines below with your folder in place of <case folder>.\n\n")
+        how = "This is what the lines will look like:" if md is None else "Each line works from any folder:"
+        out = [lead + WHAT_LEAVES]
+        if md:
+            from ..matterkit import caselaw, citelookup, statutelookup
+            out += ["", "This case:",
+                    f"- Case cites: {_STATE_WORDS[caselaw.check_label(md, citelookup.PROVIDER)]}",
+                    f"- Statute and code cites: {_STATE_WORDS[caselaw.check_label(md, statutelookup.PROVIDER)]}",
+                    f"- Search: {'on' if caselaw.search_on(md) else 'off'}"]
+        if self.courtlistener_token():
+            out += ["", "CourtListener key: set."]
+        else:
+            out += ["", "CourtListener key: not set, so case cites are listed but not looked up. Statute and "
+                        "code cites need no key.", KEY_IN_HERMES]
+        out += ["", "A person turns a check off or back on in a terminal (the kit refuses a change an agent "
+                    f"writes). {how}",
+                f"  {_guard.grant_command('case-off', md, caller)}",
+                "    case cites off for this case (case law search too)",
+                f"  {_guard.grant_command('statute-off', md, caller)}",
+                "    statute and code cites off for this case",
+                f"  {_guard.grant_command('case', md, caller)}",
+                "    case cites back on, and case law search with them: asks you to type yes. Search sends "
+                "words that can describe your facts.",
+                f"  {_guard.grant_command('statute', md, caller)}",
+                "    statute and code cites back on: asks you to type ACTIVATE",
+                "To keep every cite on this computer in every case, set citation_guard to local in this "
+                "plugin's settings."]
+        return "\n".join(out)
 
     def _select(self, folder: str) -> str:
         """Point the plugin at folder. Returns a sentence saying whether that happened."""
@@ -415,7 +473,10 @@ class Plugin:
             f"{os.path.join(folder, 'Evidence')}.",
             '2. Say "register my files". Each one is recorded with a fingerprint, so a later change '
             "shows up.",
-            '3. Ask "what\'s due in my case?" or "check my draft".'])
+            '3. Ask "what\'s due in my case?" or "check my draft".',
+            "Cite checks are on for this case: only bare case, statute and code cites are sent, and case "
+            "cites need a free CourtListener key, added in Hermes's settings. /matter grant shows what is "
+            "sent and how to turn each check off."])
 
     def _demo(self, rest: str) -> str:
         from ..matterkit import cases, facts, store
@@ -458,8 +519,10 @@ class Plugin:
             "",
             "Try these:",
             "- /matter: the case at a glance",
-            f"- /matter check {DEMO_DRAFT}: finds the two bad quotations now, and the made-up case once "
-            "case law lookups are on (/matter grant)",
+            (f"- /matter check {DEMO_DRAFT}: finds the two bad quotations and the made-up case"
+             if self.courtlistener_token() else
+             f"- /matter check {DEMO_DRAFT}: finds the two bad quotations now, and the made-up case once a "
+             "CourtListener key is set (/matter grant)"),
             '- ask "what\'s due in my case?"',
             "- ask me to add a quotation from Doc. 12 to the draft: one that is not in the record is "
             "refused before it is written. Ask for an edit to one part of the draft: rewriting the whole "

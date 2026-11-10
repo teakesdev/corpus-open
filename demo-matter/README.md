@@ -29,7 +29,8 @@ so it can still be edited. Then:
 
 - `/matter` shows the case at a glance.
 - `/matter check Drafts/response_draft_synthetic.md` finds the two bad quotations. It also flags
-  the made-up case once case law lookups are on (`/matter grant`).
+  the made-up case once a free CourtListener key is set (`/matter grant` shows where it goes in
+  Hermes). Only the bare cites are sent.
 - Ask "what's due in my case?"
 
 ## Try it from a terminal

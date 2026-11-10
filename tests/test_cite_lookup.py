@@ -18,7 +18,7 @@ from unittest import mock
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
 
-from matterkit import briefcheck, cases, citelookup, consent, store  # noqa: E402
+from matterkit import briefcheck, caselaw, cases, citelookup, consent, store  # noqa: E402
 from matterkit.adapters import courtlistener_citations as clc  # noqa: E402
 
 DRAFT = """# Response in opposition
@@ -818,11 +818,22 @@ class TestCLI(Matter):
         self.assertIn("1 found cite(s) could not be recorded", err)
         self.assertIn("not written: several store rows", out)
 
-    def test_refused_without_grant(self):
-        with mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
+    def test_refused_when_a_person_turned_it_off(self):
+        # Case cite checking is on by default (design 2026-11-09), so a refusal now needs a person's off.
+        caselaw.turn_off(self.dir)
+        env = {"COURTLISTENER_TOKEN": TOKEN, "MATTER_KIT_CONFIG": os.path.join(self._tmp.name, "cfg")}
+        with mock.patch.dict(os.environ, env), mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
             code, _, err = run_cli("cite", "lookup", self.dir, self.draft)
         self.assertNotEqual(code, 0)
         self.assertIn("refused", err)
+        self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
+
+    def test_on_by_default_but_nothing_is_sent_without_a_key(self):
+        env = {"COURTLISTENER_TOKEN": "", "MATTER_KIT_CONFIG": os.path.join(self._tmp.name, "cfg")}
+        with mock.patch.dict(os.environ, env), mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
+            code, _, err = run_cli("cite", "lookup", self.dir, self.draft)
+        self.assertNotEqual(code, 0)
+        self.assertIn("key", err)
         self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
 
     def test_lookup_and_record(self):
@@ -843,7 +854,7 @@ class TestCLI(Matter):
     def test_consent_propose_cite_lookup_scope(self):
         code, _, _ = run_cli("consent", "propose", self.dir, "--scope", "cite-lookup")
         self.assertEqual(code, 0)
-        (g,) = consent.load_grants(self.dir)
+        (g,) = [g for g in consent.load_grants(self.dir) if g["kind"] == "agent"]  # beside the case defaults
         self.assertEqual((g["provider"], g["endpoints"], g["payload_types"], g["kind"]),
                          (citelookup.PROVIDER, [citelookup.ENDPOINT], [citelookup.PAYLOAD_TYPE], "agent"))
 

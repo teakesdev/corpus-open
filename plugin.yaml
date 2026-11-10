@@ -1,5 +1,5 @@
 name: corpus-open
-version: "0.5.0"
+version: "0.6.0"
 manifest_version: 2
 api_version: 1
 description: >-
@@ -11,8 +11,11 @@ description: >-
   deadline brief opens each session, /matter shows status, deadlines and the packet, and in
   Hermes Desktop a Case pane shows deadlines (passed first), a tamper badge for the case's files
   and how many facts have no source.
-  Network calls are only cite checks, carry only the bare cites, and run only after a person
-  grants them in the case folder; nothing is filed, sent or shared.
+  Network calls are only cite checks, on by default for each case: bare case cites such as
+  550 U.S. 544 go to CourtListener, only when a key is set, and bare statute and code cites such
+  as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us). Nothing else goes anywhere. Each check
+  can be turned off per case, and off sticks; citation_guard local keeps every cite on this
+  computer. Nothing is filed, sent or shared.
 author: Corpus (teakesdev)
 license: Apache-2.0
 homepage: https://github.com/teakesdev/corpus-open
@@ -41,19 +44,22 @@ config_schema:
     type: str
     default: ""
     description: >-
-      Your case folder, made with `python3 matter.py init <folder>`. The tools, the deadline
-      brief and cite-check grants all read it.
+      Your case folder, made with /matter init or /matter demo. The tools, the deadline brief
+      and the cite checks (on by default, turned off per case there) all read it.
   citation_guard:
     type: str
     default: lookup
     choices: [lookup, local, "off"]
     description: >-
-      lookup checks cites on CourtListener and Corpus once the case folder holds your grant;
-      local lists cites without any network call; off turns the guard off.
+      lookup sends bare cites to CourtListener (case cites, once a key is set) and Corpus
+      (statute and code cites) unless a person turned that check off for the case; local lists
+      cites without any network call; off turns the guard off.
   caller_id:
     type: str
     default: hermes
-    description: The caller name your consent grants authorize (matter.py consent activate --caller).
+    description: >-
+      The name this plugin uses in the case's lookup log and consent checks. The cite checks
+      cover every caller; only a grant a person limited to named callers looks at it.
   deadline_window_days:
     type: int
     default: 14
@@ -80,8 +86,9 @@ config_schema:
     env: COURTLISTENER_TOKEN
     required: false
     description: >-
-      Free CourtListener API token for case cites. Optional when you saved the key with
-      `matter.py courtlistener on` or `matter.py courtlistener key`; this one is used first.
+      Free CourtListener API key for checking case cites (get one at
+      https://www.courtlistener.com/profile/api/). Without it case cites are listed but not looked
+      up; statute and code cites need no key. Hermes keeps it in your profile's .env file.
   corpus_api_key:
     type: secret
     env: CORPUS_API_KEY

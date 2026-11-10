@@ -37,6 +37,13 @@ def courtlistener_token() -> str:
     return os.environ.get("COURTLISTENER_TOKEN", "").strip() or _stored()
 
 
+def saved_courtlistener_token() -> str:
+    """Only the key Matter Kit saved (`matter.py courtlistener key`, the browser UI), never the
+    environment: what the Hermes plugin falls back to when Hermes has its own secret route, since a
+    bare environment read there can be another profile's key."""
+    return _stored()
+
+
 def courtlistener_token_source() -> str | None:
     """'environment', 'settings' or None. Never the key itself."""
     if os.environ.get("COURTLISTENER_TOKEN", "").strip():

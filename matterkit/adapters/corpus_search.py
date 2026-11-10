@@ -18,6 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .. import statutelookup
 from ..citations import now_iso
 from ..consent import ConsentError
 from ..search import SearchQuery, SearchResult, log_egress
@@ -187,6 +188,30 @@ class CorpusSearchAdapter:
                 },
             ))
         return out
+
+
+class CorpusStatuteLookupAdapter(CorpusSearchAdapter):
+    """The statute and code cite check (decisions 2026-11-10, extension 1): law.search for one bare
+    cite under the citation_strings grant a case has by default. matterkit.statutelookup decides what
+    the query may be: whatever the caller passes is re-parsed there, and anything that is not one
+    statute or code cite is refused before the grant is even read. No free text, no node lookups."""
+    provider = statutelookup.PROVIDER
+    payload_type = statutelookup.PAYLOAD_TYPE
+
+    def search(self, query: SearchQuery, caller_id: str) -> list[SearchResult]:
+        from .. import consent
+        q = statutelookup.payload(query.text)  # ValueError for anything but one parsed cite
+        juris = statutelookup.jurisdiction(query.jurisdiction)
+        consent.authorize(self.matter_dir, self.provider, self.endpoint, self.payload_type, caller_id)
+        log_egress(self.matter_dir, self.provider, self.endpoint, self.payload_type, q)
+        args: dict = {"query": q, "limit": statutelookup.LIMIT}
+        if juris:
+            args["jurisdiction"] = juris
+        return self._parse_hits(self._call_tool("law.search", args), q)
+
+    def get_node(self, node_id: str, caller_id: str) -> SearchResult:
+        raise ConsentError("the statute check sends bare cites only; a Corpus node lookup needs a person's "
+                           "corpus-search grant")
 
 
 def _first_line(text: str) -> str:

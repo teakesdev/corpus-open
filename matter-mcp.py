@@ -92,14 +92,14 @@ TOOLS = [
                      "properties": {"cite": {"type": "string"}, "pack": {"type": "string", "description": "pack id"}}}},
     {"name": "matter.correspondence_list", "description": "Read the custodian notice ledger, including status, exhibit hashes, confirmation dates, and receipt evidence. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "matter.caselaw_status", "description": "Whether case law lookups (CourtListener search and cite checking) are on for this case, today's use against the daily limit, and whether a CourtListener key is saved. When they are off, the text says exactly how the person turns them on: tell them that in plain words. Read-only. No network.",
+    {"name": "matter.caselaw_status", "description": "Which lookups are on for this case, today's use against each daily limit, and whether a CourtListener key is saved. Case cite checking (bare case cites to CourtListener) and statute and code cite checking (bare cites to Corpus, corpuslaw.us) are on for every case unless a person turned them off; case law search (query words to CourtListener) is on only when a person turned it on. The text says exactly how the person turns each on or off: tell them that in plain words. Read-only. No network.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "matter.search", "description": "Search CourtListener's case law (court opinions) for a question or phrase, e.g. 'inherent authority to manage docket'. Sends only the query text; returns case names, citations, CourtListener links and snippets. Results are leads, not good law and not source-checked: read the opinion before relying on one. Needs case law lookups turned on by the person (if off, the reply explains how; pass that on). Uses the saved CourtListener key when there is one. A search asked before is answered from the case's saved lookups: nothing is sent and it works even with lookups off.",
+    {"name": "matter.search", "description": "Search CourtListener's case law (court opinions) for a question or phrase, e.g. 'inherent authority to manage docket'. Sends only the query text; returns case names, citations, CourtListener links and snippets. Results are leads, not good law and not source-checked: read the opinion before relying on one. Needs case law search turned on by the person: it is off by default (if off, the reply explains how; pass that on). Uses the saved CourtListener key when there is one. A search asked before is answered from the case's saved lookups: nothing is sent and it works even with lookups off.",
      "inputSchema": {"type": "object", "required": ["query"],
                      "properties": {"query": {"type": "string"},
                                     "limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "default 5"},
                                     "fresh": {"type": "boolean", "description": "ask CourtListener again instead of using the answer saved in this case (default false)"}}}},
-    {"name": "matter.cite_lookup", "description": "Check every case citation in a Markdown or text draft inside MATTER_DIR against CourtListener: is each cite real, and does the case name match? Sends only the bare citations (e.g. '550 U.S. 544'), never the draft's text. Returns the report; first line gives exit=0 (all found and matching), 1 (a cite not found or a name differs: check by hand), 2 (needs a human). record=true adds found cases to the matter's authorities as 'resolved' (not good law). Needs case law lookups turned on and a CourtListener key (if not, the reply explains how; pass that on). One request covers a whole short draft; max_requests above 1 waits about a minute between requests. Cites CourtListener answered before come from the case's saved lookups and are not sent again.",
+    {"name": "matter.cite_lookup", "description": "Check every case citation in a Markdown or text draft inside MATTER_DIR against CourtListener: is each cite real, and does the case name match? Sends only the bare citations (e.g. '550 U.S. 544'), never the draft's text. Returns the report; first line gives exit=0 (all found and matching), 1 (a cite not found or a name differs: check by hand), 2 (needs a human). record=true adds found cases to the matter's authorities as 'resolved' (not good law). Case cite checking is on for every case unless a person turned it off; it needs a CourtListener key (if it is off or there is no key, the reply explains how; pass that on). One request covers a whole short draft; max_requests above 1 waits about a minute between requests. Cites CourtListener answered before come from the case's saved lookups and are not sent again.",
      "inputSchema": {"type": "object", "required": ["path"],
                      "properties": {"path": {"type": "string"},
                                     "max_requests": {"type": "integer", "minimum": 1, "maximum": 3, "description": "default 1"},
@@ -134,10 +134,11 @@ def _readable_in_matter(path: str) -> str:
     return candidate
 
 
-def _off_reply(err) -> str:
-    """Lookups refused (off, a limit reached, no key): say so in words the agent can pass on."""
+def _off_reply(err, on) -> str:
+    """Lookups refused (off, a limit reached, no key): say so in words the agent can pass on. `on` is
+    whether the check asked for is on for the case; when it is off, the status says why and how."""
     from matterkit import caselaw
-    why = "" if not caselaw.is_on(MATTER_DIR) else f" {err}"
+    why = f" {err}" if on(MATTER_DIR) else ""
     return f"Nothing was sent.{why}\n\n{caselaw.describe(MATTER_DIR)}"
 
 
@@ -183,7 +184,7 @@ def call(name: str, args: dict):
         try:
             rows = caselaw.search(MATTER_DIR, "agent", query, limit=limit, fresh=bool(args.get("fresh")))
         except ConsentError as e:
-            return _off_reply(e)
+            return _off_reply(e, caselaw.search_on)
         saved = rows and rows[0].provenance.get("saved")
         out = [f"{len(rows)} CourtListener result(s) for {query!r} (leads only: not source-checked, not good law)"
                + (f"; saved in this case {str(rows[0].provenance.get('retrieved_at'))[:10]}, nothing sent"
@@ -206,7 +207,7 @@ def call(name: str, args: dict):
                 report = caselaw.lookup_draft(MATTER_DIR, path, "agent", max_requests=max_requests,
                                              fresh=bool(args.get("fresh")))
         except ConsentError as e:
-            return _off_reply(e)
+            return _off_reply(e, caselaw.cite_check_on)
         if args.get("record"):
             report.recorded = citelookup.record(store.connect(MATTER_DIR), report.results, by)
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
