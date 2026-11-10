@@ -378,16 +378,19 @@ class Plugin:
     @staticmethod
     def _inside_case(folder: str) -> str | None:
         """The case folder strictly above `folder`, if any. A case inside a case is one the rest of
-        the kit treats as a boundary, and selecting it would switch the plugin off the real case."""
-        from ..matterkit import cases
-        cur = os.path.dirname(folder)
-        while True:
-            if cases.is_case(cur):
-                return cur
-            up = os.path.dirname(cur)
-            if up == cur:
-                return None
-            cur = up
+        the kit treats as a boundary, and selecting it would switch the plugin off the real case.
+        Both the path as given and its real location are walked, so a link into a case is caught,
+        and "a case" is what resolve_matter accepts: a folder holding `.matter/`."""
+        def walk(start: str) -> str | None:
+            cur = os.path.dirname(start)
+            while True:
+                if os.path.isdir(os.path.join(cur, ".matter")):
+                    return cur
+                up = os.path.dirname(cur)
+                if up == cur:
+                    return None
+                cur = up
+        return walk(folder) or walk(os.path.realpath(folder))
 
     @staticmethod
     def _nested_refusal(folder: str, root: str, retry: str) -> str:

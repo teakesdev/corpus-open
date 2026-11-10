@@ -41,6 +41,7 @@ recorded file is a source, and the agent can no longer edit it.
 
 ```bash
 PY=$(command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3.10)
+: "${PY:?no Python 3.10 or newer found. Install one from https://www.python.org/downloads/ and run these lines again}"
 cp -R demo-matter ~/cases/practice
 "$PY" matter.py init ~/cases/practice
 "$PY" matter.py ingest ~/cases/practice --exclude Drafts/ --exclude README.md

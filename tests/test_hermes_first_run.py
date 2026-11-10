@@ -12,15 +12,17 @@ What could go wrong, and so what these tests pin:
 - `/matter check` lists cites only, though the README says it checks quotations too.
 """
 import os
+import io
 import shlex
 import sys
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from test_hermes_plugin import (KIT, REPLY, TOKEN, PluginCase, citelookup, consent, grant, guard,  # noqa: E402
-                                hp, store)
+from test_hermes_plugin import (KIT, REPLY, TOKEN, PluginCase, cases, citelookup, consent, grant,  # noqa: E402
+                                guard, hp, store)
 
 DRAFT = "Drafts/response_draft_synthetic.md"
 DECLARATION = "Filings/12-declaration_synthetic.md"
@@ -406,10 +408,6 @@ class TestSkillInsideHermes(unittest.TestCase):
         self.assertIn("/matter grant", self.section("Case law lookups"))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestDemoReadme(unittest.TestCase):
     """DeepSeek r1 P2-1 and P3-8: the practice case's own README is what a newcomer reads next."""
 
@@ -426,3 +424,69 @@ class TestDemoReadme(unittest.TestCase):
         self.assertTrue(ingest)
         for ln in ingest:
             self.assertIn("--exclude Drafts/", ln)
+
+    def test_the_picker_says_what_to_do_when_there_is_no_new_python(self):
+        # DeepSeek r2 N1: with no python3.10+ the recipe ran an empty command.
+        self.assertIn('"${PY:?', self.text)
+
+
+class TestRoundTwo(PluginCase):
+    """DeepSeek r2 N2-N4 and the link-out read it flagged."""
+
+    def test_check_on_the_case_folder_itself_is_words(self):
+        p = self.plugin()
+        for path in (".", self.dir):
+            out = p.command(f"check {path}")
+            self.assertIn("Name one file", out)
+            self.assertNotIn("matter-relative", out)
+        self.assertNotIn("matter-relative", self.call("matter_cite_check", {"path": "."})["error"])
+
+    def test_check_does_not_follow_a_link_out_of_the_case(self):
+        outside = os.path.join(self._tmp.name, "secret.md")
+        with open(outside, "w", encoding="utf-8") as f:
+            f.write("Smith v. Jones, 123 F.4th 456 (2024).\n")
+        os.symlink(outside, os.path.join(self.dir, "Evidence", "link.md"))
+        out = self.plugin().command("check Evidence/link.md")
+        self.assertIn("outside the case folder", out)
+        self.assertNotIn("123 F.4th 456", out)
+
+    def test_ingest_of_a_subcase_says_so(self):
+        p = self.plugin()
+        sub = os.path.join(self.dir, "Filings", "subcase")
+        with redirect_stdout(io.StringIO()):
+            cases.init(sub)
+        with open(os.path.join(sub, "paper.md"), "w", encoding="utf-8") as f:
+            f.write("synthetic\n")
+        for path in ("Filings/subcase", "Filings/subcase/paper.md"):
+            r = self.call("matter_ingest_path", {"path": path})
+            self.assertFalse(r["ok"], path)
+            self.assertIn("its own case", r["error"])
+
+    def test_ingest_of_a_dangling_link_says_so(self):
+        self.plugin()
+        os.symlink(os.path.join(self._tmp.name, "gone.md"), os.path.join(self.dir, "Evidence", "gone.md"))
+        r = self.call("matter_ingest_path", {"path": "Evidence/gone.md"})
+        self.assertFalse(r["ok"])
+        self.assertIn("link", r["error"])
+
+    def test_demo_through_a_link_into_the_case_is_refused(self):
+        p = self.plugin()
+        esc = os.path.join(self._tmp.name, "esc")
+        os.symlink(os.path.join(self.dir, "Filings"), esc)
+        out = p.command(f"demo {os.path.join(esc, 'practice')}")
+        self.assertIn("inside the case at", out)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "Filings", "practice")))
+        self.assertEqual(p.settings()["matter_dir"], self.dir)
+
+    def test_init_under_a_case_whose_store_is_a_link_is_refused(self):
+        p = self.plugin()
+        alias = os.path.join(self._tmp.name, "alias")
+        os.makedirs(alias)
+        os.symlink(os.path.join(self.dir, ".matter"), os.path.join(alias, ".matter"))
+        out = p.command(f"init {os.path.join(alias, 'Evidence', 'new')}")
+        self.assertIn(f"inside the case at {alias}", out)
+        self.assertFalse(os.path.exists(os.path.join(alias, "Evidence", "new")))
+
+
+if __name__ == "__main__":
+    unittest.main()
