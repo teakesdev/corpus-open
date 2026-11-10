@@ -102,6 +102,42 @@ class TestRegisterMyFiles(PluginCase):
         self.assertIn("drafts unregistered", said)
 
 
+    def test_a_path_that_is_not_there_is_named_not_reported_as_done(self):
+        # DeepSeek r1 P2-2: a missing folder came back ok with 0 added, so the agent reported success.
+        self.plugin()
+        r = self.call("matter_ingest_path", {"path": "CasePapers"})
+        self.assertFalse(r["ok"])
+        self.assertIn("CasePapers", r["error"])
+        self.assertIn("Filings", r["error"])
+        self.assertNotIn("Errno", r["error"])
+
+
+class TestNoCaseInsideACase(PluginCase):
+    """DeepSeek r1 P3-1: an empty folder inside a real case was taken as a new case, which made a
+    nested case and switched the plugin away from the real one."""
+
+    def test_demo_inside_a_case_is_refused_and_the_case_stays_selected(self):
+        p = self.plugin()
+        inner = os.path.join(self.dir, "Filings", "practice")
+        os.makedirs(inner)
+        out = p.command(f"demo {inner}")
+        self.assertIn(f"inside the case at {self.dir}", out)
+        self.assertFalse(os.path.exists(os.path.join(inner, ".matter")))
+        self.assertEqual(os.listdir(inner), [])
+        self.assertEqual(p.settings()["matter_dir"], self.dir)
+
+    def test_init_inside_a_case_is_refused(self):
+        p = self.plugin()
+        inner = os.path.join(self.dir, "Evidence", "new")
+        out = p.command(f"init {inner}")
+        self.assertIn(f"inside the case at {self.dir}", out)
+        self.assertFalse(os.path.exists(inner))
+        self.assertEqual(p.settings()["matter_dir"], self.dir)
+
+    def test_init_on_the_case_itself_still_works(self):
+        self.assertIn("Case folder ready", self.plugin().command(f"init {self.dir}"))
+
+
 class TestPlainReasons(PluginCase):
     def notes(self, block):
         return [ln for ln in block.splitlines() if ln.startswith("_") and "not looked up" in ln]
@@ -304,6 +340,18 @@ class TestCheckCommand(PluginCase):
         self.assertIn("Quotations could not be checked: boom", out)
 
 
+    def test_a_path_that_is_not_a_file_gets_words_not_errno(self):
+        # DeepSeek r1 P3-2.
+        p = self.plugin()
+        out = p.command("check Drafts/nope.md")
+        self.assertIn("There is no Drafts/nope.md in the case folder", out)
+        self.assertNotIn("Errno", out)
+        out = p.command("check Filings")
+        self.assertIn("Filings is a folder", out)
+        self.assertNotIn("Errno", out)
+        self.assertNotIn("Errno", self.call("matter_cite_check", {"path": "Drafts/nope.md"})["error"])
+
+
 class TestFoundRunningInsideHermes(PluginCase):
     """Faults the first live run inside Hermes (v0.23.0, 2026-11-09) turned up."""
 
@@ -320,6 +368,8 @@ class TestFoundRunningInsideHermes(PluginCase):
         self.assertIn("/matter demo", out)
         self.assertIn("/matter init", out)
         self.assertIn("<case folder>", out)
+        self.assertIn("nothing to copy yet", out)  # DeepSeek r1 P3-4
+        self.assertNotIn("Copy each line", out)
         plain = os.path.join(self._tmp.name, "just a folder")
         os.makedirs(plain)
         out = self.plugin(matter_dir=plain).command("grant")
@@ -358,3 +408,21 @@ class TestSkillInsideHermes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDemoReadme(unittest.TestCase):
+    """DeepSeek r1 P2-1 and P3-8: the practice case's own README is what a newcomer reads next."""
+
+    def setUp(self):
+        with open(os.path.join(KIT, "demo-matter", "README.md"), encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_no_bare_python3_command(self):
+        for line in self.text.splitlines():
+            self.assertFalse(line.lstrip().startswith("python3 "), line)
+
+    def test_terminal_recipe_leaves_the_draft_unregistered(self):
+        ingest = [ln for ln in self.text.splitlines() if "matter.py ingest" in ln]
+        self.assertTrue(ingest)
+        for ln in ingest:
+            self.assertIn("--exclude Drafts/", ln)

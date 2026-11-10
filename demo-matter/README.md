@@ -34,12 +34,16 @@ so it can still be edited. Then:
 
 ## Try it from a terminal
 
-Needs Python 3.10 or newer. Copy the folder first, so this one stays clean:
+Needs Python 3.10 or newer. On a Mac, the `python3` that comes with the system is 3.9 and will
+not run the kit, so the first line picks a newer one. Copy the folder first, so this one stays
+clean. The ingest line leaves the draft and this README unrecorded, as `/matter demo` does: a
+recorded file is a source, and the agent can no longer edit it.
 
 ```bash
+PY=$(command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3.10)
 cp -R demo-matter ~/cases/practice
-python3 matter.py init ~/cases/practice
-python3 matter.py ingest ~/cases/practice
-python3 matter.py status ~/cases/practice
-python3 matter.py packet ~/cases/practice --layer 3min
+"$PY" matter.py init ~/cases/practice
+"$PY" matter.py ingest ~/cases/practice --exclude Drafts/ --exclude README.md
+"$PY" matter.py status ~/cases/practice
+"$PY" matter.py packet ~/cases/practice --layer 3min
 ```

@@ -24,6 +24,17 @@ class MatterError(ValueError):
     pass
 
 
+def draft_path(md: str, rel: str) -> str:
+    """A file inside the case folder to read, or a MatterError a newcomer can act on (not an errno)."""
+    p = inside(md, rel)
+    if os.path.isdir(p):
+        raise MatterError(f"{rel} is a folder. Name one file in it, for example a draft in Drafts.")
+    if not os.path.isfile(p):
+        raise MatterError(f"There is no {rel} in the case folder. Check the name, or type /matter to "
+                          "see the case.")
+    return p
+
+
 def resolve_matter(raw: str | None) -> str:
     """The configured case folder, expanded and checked to be a matter. When there is none, the
     message is read by people (from /matter) and by the agent (from a tool), so it names the two
@@ -228,7 +239,7 @@ class Tools:
         if args.get("path"):
             if md is None:
                 raise MatterError("path needs a case folder; pass text instead or set matter_dir")
-            p = inside(md, args["path"])
+            p = draft_path(md, args["path"])
             if p.lower().endswith((".docx", ".pdf", ".doc")):
                 raise MatterError("cite check reads Markdown or text; pass the .md copy or the text itself")
             with open(p, "rb") as f:
@@ -274,6 +285,10 @@ class Tools:
             raise MatterError("Name a folder inside the case folder (for example Filings or Evidence) or one "
                               "file. The case folder itself can't be registered in one call.")
         cand = inside(md, raw)
+        if not os.path.exists(cand):
+            # The kit prints "not found" and counts nothing, which reads to the agent as done.
+            raise MatterError(f"There is no {raw} in the case folder. Name a folder that is there (for "
+                              "example Filings or Evidence) or one file.")
         with contextlib.redirect_stdout(io.StringIO()), contextlib.closing(store.connect(md)) as conn:
             added, skipped, excluded = ing.ingest_paths(conn, md, [cand])
         return {"added": added, "skipped": skipped, "excluded": excluded}

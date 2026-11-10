@@ -35,7 +35,7 @@ import shutil
 from . import guard as _guard
 from . import quote_guard as _quote_guard
 from . import source_guard as _source_guard
-from .tools import SCHEMAS, TOOLSET, MatterError, Tools, inside, resolve_matter
+from .tools import SCHEMAS, TOOLSET, MatterError, Tools, draft_path, resolve_matter
 
 PLUGIN_ID = "corpus-open"
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -319,7 +319,7 @@ class Plugin:
         res = self.tools.matter_cite_check({"path": rel})
         parts = [res["report"]] if res["report"] else []
         try:
-            with open(inside(md, rel), "rb") as f:
+            with open(draft_path(md, rel), "rb") as f:
                 text = f.read().decode("utf-8", "replace")
             quotes = _quote_guard.quotecheck.check_text(md, text, use_pdftotext=_quote_guard.USE_PDFTOTEXT)
         except Exception as e:  # noqa: BLE001 - the cite report above still goes out
@@ -352,10 +352,13 @@ class Plugin:
         except MatterError as e:
             # No case yet: say how to get one, and print no line that would fail on this folder.
             md = None
-            lead = f"{e} After that, /matter grant prints the two lines below with your folder in them.\n\n"
+            lead = (f"{e} There is nothing to copy yet: once you have a case, /matter grant prints the "
+                    "two lines below with your folder in place of <case folder>.\n\n")
+        how = ("This is what they will look like:" if md is None else
+               "Copy each line into a terminal; they work from any folder:")
         return (lead +
                 "A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
-                "grant an agent writes). Copy each line into a terminal; they work from any folder:\n"
+                f"grant an agent writes). {how}\n"
                 f"  {_guard.grant_command('case', md, caller)}\n"
                 "    case cites (CourtListener): asks you to type yes, then for your free key (get one at "
                 f"{_guard.KEY_URL}), which this plugin reads too (a COURTLISTENER_TOKEN in this plugin's "
@@ -372,11 +375,33 @@ class Plugin:
         return (f"Set the case folder to {folder} in Settings > Plugins > corpus-open "
                 "(this Hermes can't save it from here).")
 
+    @staticmethod
+    def _inside_case(folder: str) -> str | None:
+        """The case folder strictly above `folder`, if any. A case inside a case is one the rest of
+        the kit treats as a boundary, and selecting it would switch the plugin off the real case."""
+        from ..matterkit import cases
+        cur = os.path.dirname(folder)
+        while True:
+            if cases.is_case(cur):
+                return cur
+            up = os.path.dirname(cur)
+            if up == cur:
+                return None
+            cur = up
+
+    @staticmethod
+    def _nested_refusal(folder: str, root: str, retry: str) -> str:
+        return (f"{folder} is inside the case at {root}, so it can't be a case of its own. "
+                f"Pick a folder outside every case: {retry}")
+
     def _init(self, rest: str) -> str:
         if not rest:
             return "Usage: /matter init <folder> (made if missing; files already there are kept)"
         from ..matterkit import cases
         folder = os.path.abspath(os.path.expanduser(rest))
+        root = self._inside_case(folder)
+        if root:
+            return self._nested_refusal(folder, root, "/matter init <new folder>")
         with contextlib.redirect_stdout(io.StringIO()):
             docs = cases.init(folder)
         return "\n".join([
@@ -394,6 +419,9 @@ class Plugin:
         from ..matterkit import deadlines as dl
         from ..matterkit import ingest as ing
         folder = os.path.abspath(os.path.expanduser(rest))
+        root = self._inside_case(folder)
+        if root:
+            return self._nested_refusal(folder, root, "/matter demo <new folder>")
         if os.path.exists(folder) and (not os.path.isdir(folder) or os.listdir(folder)):
             return (f"{folder} already has files, so the demo won't write there. "
                     "Pick another folder: /matter demo <new folder>")
@@ -431,7 +459,8 @@ class Plugin:
             "case law lookups are on (/matter grant)",
             '- ask "what\'s due in my case?"',
             "- ask me to add a quotation from Doc. 12 to the draft: one that is not in the record is "
-            "refused before it is written"])
+            "refused before it is written. Ask for an edit to one part of the draft: rewriting the whole "
+            "file is refused while the planted bad quotations are still in it"])
 
     # -- Deadline Watch -------------------------------------------------------------------------
     def _watch_text(self) -> str:
