@@ -90,6 +90,35 @@ def is_within_matter(path: str, matter_dir: str) -> bool:
     return not _invalid_rel(rel)
 
 
+def resolve_in_matter(path: str, matter_dir: str):
+    """`path` as a path under matter_dir, or None when it is outside. A relative path joins the
+    matter root. An absolute path that is outside as written but whose folder is, once links are
+    resolved, inside the matter's real location (a case set up through a link, or /var vs
+    /private/var on a Mac) is mapped back under matter_dir. Only the folder part is resolved: a
+    link at the last step keeps its own name, so later link checks still see it."""
+    root = os.path.abspath(matter_dir)
+    cand = os.path.abspath(path if os.path.isabs(path) else os.path.join(root, path))
+    if is_within_matter(cand, root):
+        return cand
+    if not os.path.isabs(path):
+        return None
+    real_root = os.path.realpath(root)
+    if os.path.realpath(cand) == real_root:
+        return root
+    head, leaf = os.path.split(cand)
+    real_head = os.path.realpath(head)
+    if not is_within_matter(real_head, real_root):
+        return None
+    return os.path.normpath(os.path.join(root, os.path.relpath(real_head, real_root), leaf))
+
+
+def reads_inside(path: str, matter_dir: str) -> bool:
+    """True if reading `path` reads bytes inside the matter's real location: a link is followed
+    only when its target is inside too. A path that does not exist is not refused here."""
+    return (not os.path.lexists(path)
+            or is_within_matter(os.path.realpath(path), os.path.realpath(matter_dir)))
+
+
 def _links_out(fp: str, matter_dir: str) -> bool:
     """True if a link makes fp's bytes live outside matter_dir, or inside a nested matter (whose
     files belong to its own store). A path with no link resolves inside and is never refused."""
