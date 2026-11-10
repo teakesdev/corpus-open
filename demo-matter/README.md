@@ -28,8 +28,9 @@ with a fingerprint, and adds two deadlines and four labeled facts. The draft is 
 so it can still be edited. Then:
 
 - `/matter` shows the case at a glance.
-- `/matter check Drafts/response_draft_synthetic.md` finds the two bad quotations. It also flags
-  the made-up case once case law lookups are on (`/matter grant`).
+- `/matter check Drafts/response_draft_synthetic.md` finds all three. The made-up case shows as
+  `NO SUCH VOLUME` with no lookup at all, because F.4th has no volume 812. With case law lookups on
+  (`/matter grant`), the real case is checked against CourtListener too.
 - Ask "what's due in my case?"
 
 ## Try it from a terminal

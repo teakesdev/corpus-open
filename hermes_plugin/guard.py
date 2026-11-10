@@ -18,13 +18,14 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 
-from ..matterkit import authority, citations, citelookup, store
+from ..matterkit import authority, citations, citelookup, citescreen, store
 from ..matterkit.consent import ConsentError
 
 # Statute/code outcomes (case outcomes are citelookup's own words).
 IN_CORPUS, NOT_MATCHED, NOT_LOOKED_UP = "IN CORPUS", "NOT MATCHED IN CORPUS", citelookup.NOT_LOOKED_UP
 
-PROBLEM = (citelookup.NOT_FOUND, citelookup.NAME_DIFFERS, citelookup.UNKNOWN_REPORTER, citelookup.AMBIGUOUS)
+PROBLEM = (*citescreen.LABELS,  # cites the offline screen says cannot exist as written
+           citelookup.NOT_FOUND, citelookup.NAME_DIFFERS, citelookup.UNKNOWN_REPORTER, citelookup.AMBIGUOUS)
 GOOD = (citelookup.FOUND, IN_CORPUS)
 
 LIMITS = ("Found means a source holds something at that cite. It does not mean it says what this "
@@ -202,6 +203,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
 
     # Case cites -------------------------------------------------------------------------------
     cites = citelookup.draft_cites(text)
+    screened = _screen(text)  # cites that cannot exist as written, known with no lookup
     payloads = citelookup.payloads(cites)
     answers, stopped = [], None
     why = None
@@ -248,7 +250,8 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                 detail = "not looked up"
             for w in r.warnings:
                 detail += f" ⚠ {w}"
-            result.rows.append(Row("case", r.cite.display, r.outcome, detail.strip(), url,
+            outcome, detail = _screened(r, screened.get(r.cite.sent), detail.strip())
+            result.rows.append(Row("case", r.cite.display, outcome, detail, url,
                                    _ledger(conn, r.cite.sent)))
 
     # Statute and code cites -------------------------------------------------------------------
@@ -309,6 +312,29 @@ def _short(e: Exception, limit: int = 240) -> str:
         return s
     head = s[:limit]
     return (head[:head.rfind(" ")] if " " in head else head).rstrip(" ,;:(—-") + "…"
+
+
+def _screen(text: str) -> dict:
+    """The offline screen's findings for the text's case cites (citescreen); none if the screen fails."""
+    try:
+        return citescreen.screen_text(text)
+    except Exception:  # noqa: BLE001 - the screen must never cost a reply its citation block
+        return {}
+
+
+def _screened(r, finding, detail: str) -> tuple:
+    """A case row's (outcome, detail) once the offline screen has spoken. CourtListener outranks the
+    table: an opinion at the cite (FOUND, NAME DIFFERS, AMBIGUOUS) keeps CourtListener's outcome and
+    the contradiction is logged. NOT FOUND and the like keep their outcome and add the screen's
+    sentence; a cite that was not looked up takes the screen's label (NO SUCH VOLUME...)."""
+    if finding is None:
+        return r.outcome, detail
+    if r.cluster or r.candidates:
+        citescreen.contradicted(r.cite.sent, finding, (r.cluster or r.candidates[0]).get("date_filed"))
+        return r.outcome, detail
+    if r.outcome == citelookup.NOT_LOOKED_UP:
+        return finding.label, finding.text
+    return r.outcome, f"{detail} {finding.text}".strip()
 
 
 _MARK = {citelookup.FOUND: "✓", IN_CORPUS: "✓", citelookup.NOT_LOOKED_UP: "·"}
