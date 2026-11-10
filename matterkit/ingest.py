@@ -1,6 +1,7 @@
 """Ingest files into the matter store: hash, classify, register. Sources are never modified."""
 import hashlib
 import os
+import re
 import sqlite3
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".matter"}
@@ -103,13 +104,44 @@ def resolve_in_matter(path: str, matter_dir: str):
     if not os.path.isabs(path):
         return None
     real_root = os.path.realpath(root)
-    if os.path.realpath(cand) == real_root:
+    if _same_dir(os.path.realpath(cand), real_root):
         return root
     head, leaf = os.path.split(cand)
-    real_head = os.path.realpath(head)
-    if not is_within_matter(real_head, real_root):
+    rel = _rel_under(os.path.realpath(head), real_root)
+    if rel is None:
         return None
-    return os.path.normpath(os.path.join(root, os.path.relpath(real_head, real_root), leaf))
+    return os.path.normpath(os.path.join(root, rel, leaf))
+
+
+def _same_dir(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _rel_under(real_head: str, real_root: str):
+    """real_head (no links left in it) relative to real_root, or None when it is not under it. The
+    folders are compared as folders on the disk, not as spellings, so a disk that ignores capital
+    letters (the Mac default) finds "/cases/CASE/evidence" under "/cases/case"."""
+    if is_within_matter(real_head, real_root):
+        return os.path.relpath(real_head, real_root)
+    cur = real_head
+    while True:
+        if _same_dir(cur, real_root):
+            return os.path.relpath(real_head, cur)
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def case_relative_notes(printed: str, matter_dir: str) -> list:
+    """The "  ! reason: /abs/path" lines ingest_paths printed, as "reason: rel/path" for a reply:
+    only the leading marker is dropped, and the matter root is cut only where a path starts (after
+    a space or at the start), never from the middle of a name."""
+    lead = re.compile(r"(?:(?<=\s)|^)" + re.escape(os.path.abspath(matter_dir) + os.sep))
+    return [lead.sub("", ln.strip()[2:]) for ln in printed.splitlines() if ln.strip().startswith("! ")]
 
 
 def reads_inside(path: str, matter_dir: str) -> bool:

@@ -8,6 +8,7 @@ contacts anyone. The one thing that leaves the machine is a case law lookup
 lookups on for the case; no tool here can turn them on.
 """
 import contextlib
+import io
 import json
 import os
 import sys
@@ -75,7 +76,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["text"],
                      "properties": {"text": {"type": "string"},
                                     "document_sha256": {"type": "string"}}}},
-    {"name": "matter.ingest_path", "description": "Hash and register one path that must resolve inside MATTER_DIR. Refuses path escape. Returns added/skipped/excluded. No network.",
+    {"name": "matter.ingest_path", "description": "Hash and register one path that must resolve inside MATTER_DIR. Refuses path escape. Returns added/skipped/excluded, notes (why each excluded file was left out) and recorded_as (the case-relative name facts cite). No network.",
      "inputSchema": {"type": "object", "required": ["path"],
                      "properties": {"path": {"type": "string"}}}},
     {"name": "matter.verify", "description": "Re-hash the store against files under MATTER_DIR. Returns absolute root= plus ok/changed/missing. MISSING/CHANGED is a blocker. No network.",
@@ -118,6 +119,8 @@ def _resolve_in_matter(path: str) -> str:
     candidate = ing.resolve_in_matter(path, abs_matter)
     if candidate is None:
         raise ValueError("path escapes MATTER_DIR")
+    if candidate == abs_matter:
+        raise ValueError("that is the case folder itself (MATTER_DIR); name a folder or a file in it")
     try:
         ing.to_rel_path(candidate, abs_matter)
     except ValueError as e:
@@ -156,9 +159,14 @@ def call(name: str, args: dict):
     if name == "matter.ingest_path":
         candidate = _resolve_in_matter(args.get("path", ""))
         conn = store.connect(MATTER_DIR)
-        with contextlib.redirect_stdout(sys.stderr):  # ingest prints "! ..." notes; stdout is the JSON-RPC channel
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):  # ingest prints "! ..." notes; stdout is the JSON-RPC channel
             added, skipped, excluded = ing.ingest_paths(conn, MATTER_DIR, [candidate])
-        return json.dumps({"added": added, "skipped": skipped, "excluded": excluded})
+        sys.stderr.write(said.getvalue())
+        # notes say why each excluded file was left out; recorded_as is the name facts cite.
+        return json.dumps({"added": added, "skipped": skipped, "excluded": excluded,
+                           "notes": ing.case_relative_notes(said.getvalue(), MATTER_DIR),
+                           "recorded_as": ing.to_rel_path(candidate, os.path.abspath(MATTER_DIR))})
     if name == "matter.brief_check":
         from matterkit import briefcheck
         report = briefcheck.check(MATTER_DIR, _readable_in_matter(args["path"]),
