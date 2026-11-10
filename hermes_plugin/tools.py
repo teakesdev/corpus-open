@@ -218,7 +218,7 @@ class Tools:
         from ..matterkit import briefcheck
         md = self._dir()
         with contextlib.redirect_stdout(io.StringIO()):
-            report = briefcheck.check(md, inside(md, args.get("path", "")), use_pdftotext=True,
+            report = briefcheck.check(md, draft_path(md, args.get("path", "")), use_pdftotext=True,
                                       mode=args.get("mode") or "brief")
         return {"exit": report.exit_code, "summary": report.summary(), "report": report.render()}
 
@@ -294,6 +294,9 @@ class Tools:
         # The kit prints why it skipped a path and counts nothing, which reads to the agent as done.
         if os.path.islink(cand) and not os.path.exists(cand):
             raise MatterError(f"{raw} is a link to a file that is no longer there. Register the file itself.")
+        if os.path.islink(cand) and ing._links_out(cand, md):
+            raise MatterError(f"{raw} is a link to a file outside the case folder (or into a subcase), so it "
+                              "is not registered. Copy the file into the case folder instead.")
         sub = ing.nested_matter_root(cand, md)
         if sub:
             raise MatterError(f"{os.path.relpath(sub, md)} is its own case (a subcase). Register its papers "

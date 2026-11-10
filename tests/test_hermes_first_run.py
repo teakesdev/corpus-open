@@ -13,6 +13,7 @@ What could go wrong, and so what these tests pin:
 """
 import os
 import io
+import json
 import shlex
 import sys
 import unittest
@@ -419,6 +420,12 @@ class TestDemoReadme(unittest.TestCase):
         for line in self.text.splitlines():
             self.assertFalse(line.lstrip().startswith("python3 "), line)
 
+    def test_the_recipe_makes_the_cases_folder_first(self):
+        # DeepSeek r3 R3-2: with no ~/cases, cp failed and the practice case came out empty.
+        lines = self.text.splitlines()
+        cp = next(i for i, ln in enumerate(lines) if ln.startswith("cp -R demo-matter"))
+        self.assertTrue(any("mkdir -p" in ln and "cases" in ln for ln in lines[:cp]))
+
     def test_terminal_recipe_leaves_the_draft_unregistered(self):
         ingest = [ln for ln in self.text.splitlines() if "matter.py ingest" in ln]
         self.assertTrue(ingest)
@@ -486,6 +493,42 @@ class TestRoundTwo(PluginCase):
         out = p.command(f"init {os.path.join(alias, 'Evidence', 'new')}")
         self.assertIn(f"inside the case at {alias}", out)
         self.assertFalse(os.path.exists(os.path.join(alias, "Evidence", "new")))
+
+
+
+class TestRoundThree(PluginCase):
+    """DeepSeek r3 R3-1, R3-3, R3-4."""
+
+    def outside(self, name="secret.md"):
+        path = os.path.join(self._tmp.name, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("SECRET-WORDS See Smith v. Jones, 123 F.4th 456 (2024).\n")
+        return path
+
+    def test_brief_check_does_not_follow_a_link_out_of_the_case(self):
+        self.plugin()
+        os.symlink(self.outside(), os.path.join(self.dir, "Evidence", "link.md"))
+        r = self.call("matter_brief_check", {"path": "Evidence/link.md"})
+        self.assertFalse(r["ok"])
+        self.assertIn("outside the case folder", r["error"])
+        self.assertNotIn("SECRET-WORDS", json.dumps(r))
+
+    def test_ingest_of_a_link_out_of_the_case_says_so(self):
+        self.plugin()
+        os.symlink(self.outside(), os.path.join(self.dir, "Evidence", "out.md"))
+        r = self.call("matter_ingest_path", {"path": "Evidence/out.md"})
+        self.assertFalse(r["ok"])
+        self.assertIn("outside the case folder", r["error"])
+
+    def test_a_dangling_link_inside_a_named_folder_is_skipped_not_errno(self):
+        self.plugin()
+        with open(os.path.join(self.dir, "Evidence", "real.md"), "w", encoding="utf-8") as f:
+            f.write("synthetic\n")
+        os.symlink(os.path.join(self.dir, "Evidence", "gone-in.md"), os.path.join(self.dir, "Evidence", "dang.md"))
+        r = self.call("matter_ingest_path", {"path": "Evidence"})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["result"]["added"], 1)
+        self.assertEqual(r["result"]["excluded"], 1)
 
 
 if __name__ == "__main__":
