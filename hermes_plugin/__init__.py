@@ -35,6 +35,7 @@ import shutil
 from . import guard as _guard
 from . import quote_guard as _quote_guard
 from . import source_guard as _source_guard
+from . import terminal as _terminal
 from .tools import SCHEMAS, TOOLSET, MatterError, Tools, draft_path, resolve_matter
 
 PLUGIN_ID = "corpus-open"
@@ -258,14 +259,23 @@ class Plugin:
 
     # -- /matter --------------------------------------------------------------------------------
     def command(self, raw_args: str = "", **kwargs) -> str:
+        """/matter. Hermes's classic terminal prints a command's answer as typed, so there the
+        Markdown marks come out; every other surface gets the Markdown."""
+        out = self._answer(raw_args)
+        return _terminal.plain_text(out) if kwargs.get("platform") in _terminal.PLAIN_PLATFORMS else out
+
+    def _answer(self, raw_args: str = "") -> str:
         parts = (raw_args or "").strip().split(None, 1)
         sub = parts[0].lower() if parts else ""
         rest = parts[1].strip() if len(parts) > 1 else ""
         try:
             if sub in ("", "status"):
-                if self._matter_or_none() is None:
+                md = self._matter_or_none()
+                if md is None:
                     return self._welcome()
-                return self._unwrap(self.tools.handler("matter_status")({})) + "\n\n" + self._deadline_text()
+                status = self._unwrap(self.tools.handler("matter_status")({}))
+                # The heading names the folder: ~/cases/x reads better than the whole home path.
+                return status.replace(md, _terminal.tilde(md), 1) + "\n\n" + self._deadline_text()
             if sub == "deadlines":
                 return self._deadline_text()
             if sub == "packet":
@@ -371,7 +381,7 @@ class Plugin:
         setter = getattr(self.ctx, "set_config", None)
         if callable(setter):
             setter("matter_dir", folder)
-            return f"The plugin now uses {folder} as your case folder."
+            return f"The plugin now uses {_terminal.tilde(folder)} as your case folder."
         return (f"Set the case folder to {folder} in Settings > Plugins > corpus-open "
                 "(this Hermes can't save it from here).")
 
@@ -407,12 +417,13 @@ class Plugin:
             return self._nested_refusal(folder, root, "/matter init <new folder>")
         with contextlib.redirect_stdout(io.StringIO()):
             docs = cases.init(folder)
+        shown = _terminal.tilde(folder)  # for reading; the setting keeps the full path
         return "\n".join([
-            f"Case folder ready: {folder} ({docs} documents registered). " + self._select(folder),
+            f"Case folder ready: {shown} ({docs} documents registered). " + self._select(folder),
             "Next:",
             f"1. Copy your papers into it. Anything filed with the court or sent by the other side goes "
-            f"in {os.path.join(folder, 'Filings')}; your proof (letters, photos, records) goes in "
-            f"{os.path.join(folder, 'Evidence')}.",
+            f"in {os.path.join(shown, 'Filings')}; your proof (letters, photos, records) goes in "
+            f"{os.path.join(shown, 'Evidence')}.",
             '2. Say "register my files". Each one is recorded with a fingerprint, so a later change '
             "shows up.",
             '3. Ask "what\'s due in my case?" or "check my draft".'])
@@ -447,7 +458,7 @@ class Plugin:
         with open(os.path.join(folder, ".matter", "docket.json"), "w", encoding="utf-8") as f:
             json.dump({"entries": {"12": DEMO_DECLARATION}}, f, indent=2)
         return "\n".join([
-            f"Made a practice case at {folder}. It is synthetic. Nothing in it is real.",
+            f"Made a practice case at {_terminal.tilde(folder)}. It is synthetic. Nothing in it is real.",
             "",
             "In it: a complaint, an evidence memo and a three-page declaration (Doc. 12), each recorded "
             "with a fingerprint; two deadlines, one already overdue; four labeled facts, one with nothing "
