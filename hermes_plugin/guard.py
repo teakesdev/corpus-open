@@ -89,6 +89,26 @@ def not_allowed(kind: str, e: Exception) -> str:
                 "Type /matter grant to see how to turn it on.")
     return f"{cites} were not looked up: {_short(e)}"
 
+
+CORPUS_KEY_URL = "https://corpuslaw.us/settings"
+
+
+def corpus_trouble(e: Exception, has_key: bool) -> str:
+    """Why Corpus gave no answer, in words for the person reading the block. Corpus allows a set
+    number of searches a month without a key, counted per network, and its own text for a used-up
+    allowance is written for an agent ("send it as `Authorization: Bearer <key>`"), so that one is
+    said here instead. Any other failure keeps the error's own first line."""
+    lead = "Statute and code cites were not looked up: "
+    if "quota" in str(e).lower():
+        if has_key:
+            return (f"{lead}the lookups allowed on your Corpus key are used up for now. {CORPUS_KEY_URL} "
+                    "shows your count and your choices.")
+        return (f"{lead}this month's free Corpus lookups from your network are used up. They start over "
+                f"next month. A free Corpus key raises the limit: get one at {CORPUS_KEY_URL} and add it "
+                "in Hermes's settings for this plugin (CORPUS_API_KEY), never in a chat.")
+    return lead + _short(e)
+
+
 # Code-name prefix -> Corpus jurisdiction code. Unknown codes search every jurisdiction.
 _JURIS = [
     (r"U\.\s?S\.\s?C|C\.\s?F\.\s?R|Pub\.\s?L", "US"),
@@ -283,7 +303,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
             except ConsentError as e:
                 why = not_allowed("statute", e)
             except Exception as e:  # noqa: BLE001
-                why = f"Statute and code cites were not looked up: {_short(e)}"
+                why = corpus_trouble(e, bool(corpus_api_key))
         from ..matterkit.search import SearchQuery
         for i, cite in enumerate(statutes):
             row = Row("statute", cite, NOT_LOOKED_UP, "not looked up", None, _ledger(conn, cite))
@@ -305,7 +325,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                 except ConsentError as e:
                     why = not_allowed("statute", e)
                 except Exception as e:  # noqa: BLE001
-                    why = f"Statute and code cites were not looked up: {_short(e)}"
+                    why = corpus_trouble(e, bool(corpus_api_key))
             elif adapter is not None and why is None:
                 result.note(f"Only the first {max_statutes} statute cites were looked up.")
             result.rows.append(row)
