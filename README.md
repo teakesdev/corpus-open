@@ -47,8 +47,16 @@ Quotations and page cites: 2 of 3 to fix
 - ✓ exact: “Plaintiff received no written warnings before January 5, 2026.” (Doc. 12 at 2) is at p. 2
 ```
 
+<p align="center">
+  <img src="docs/media/01-matter-check.png" alt="/matter check in the Hermes terminal: the made-up case flagged NO SUCH VOLUME, the statute IN CORPUS, and the two bad quotations caught" width="100%">
+</p>
+
 Next, ask the agent to add a quotation from Doc. 12 to the draft. If the words are not in that
 document, the write is refused before it happens.
+
+<p align="center">
+  <img src="docs/media/02-quote-guard-refused.png" alt="Hermes reports that the quote check blocked the write: the quoted words are on no page of Doc. 12, and the draft is unchanged" width="100%">
+</p>
 
 When you are ready for your own case, type `/matter init ~/cases/my-case`. It makes the folder
 and says what to do next: copy your papers into it, then say "register my files".
@@ -93,6 +101,11 @@ brief check, a packet for a lawyer who might take the case, court rules, file fi
 the `/matter` command, and a Case pane in Hermes Desktop. The details are under
 [Hermes plugin](#hermes-plugin-citation-guard-source-guard-deadline-brief-deadline-watch-matter)
 below.
+
+<p align="center">
+  <img src="docs/media/05-case-pane.png" alt="The Case pane in Hermes Desktop: source files intact, 3 documents, 4 facts with 1 lacking a source, and two deadlines, one passed" width="49%">
+  <img src="docs/media/04-deadlines.png" alt="/matter deadlines in the Hermes terminal: one overdue deadline and one due next week, both marked unverified" width="49%">
+</p>
 
 ## What leaves your computer
 
