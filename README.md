@@ -394,8 +394,13 @@ the MCP server above can't:
   the end), **not found**, or **can't check** (no text for that document, it changed since it was
   registered, or the quotation cites case law or nothing). A not found or wrong page refuses the
   write and tells the agent what is wrong and where the words really are; exact and can't check
-  pass. Exact means the words are in the registered document on that page, not that they prove
-  the point. The `quote_guard` setting turns it off.
+  pass. A `terminal` command or `execute_code` run that looks like it changes files and names a
+  draft is checked the same way on its own text, read as the text it would write, and refused
+  before it runs, even when the source guard would only have asked about the same command. A
+  command that builds its text in pieces, encodes it, or writes through a file
+  it doesn't name is not caught: this catches an agent's mistakes; it is not a sandbox. Exact means
+  the words are in the registered document on that page, not that they prove the point. The
+  `quote_guard` setting turns it off.
 - **Deadline brief.** On a session's first turn, overdue deadlines and those due within
   `deadline_window_days` go to the agent, so it raises them before anything else.
 - **Deadline Watch.** `/matter watch on [HH:MM]` writes a small script to Hermes's `scripts/`

@@ -176,24 +176,27 @@ class Plugin:
     # -- source guard -------------------------------------------------------------------------------
     def on_tool_call(self, tool_name: str = "", args=None, task_id: str = "", **kwargs):
         """pre_tool_call. Never raises: Hermes blocks every tool call when this hook raises."""
-        matter_dir, settings = None, None
+        # The source guard answers first, and its refusal is final. Its approval is only a question,
+        # which a person may answer yes and which nobody is asked with approvals turned off, so the
+        # quote check still runs and its refusal wins over the question.
+        matter_dir, settings, hit = None, None, None
         try:
             settings = self.settings()
             matter_dir = settings.get("matter_dir") or None
             if settings["source_guard"]:
                 hit = _source_guard.check(tool_name, args, matter_dir=matter_dir)
-                if hit:
-                    return hit
         except Exception:  # noqa: BLE001
             hit = _source_guard.fallback(tool_name, args, matter_dir)
-            if hit:
-                return hit
+        if isinstance(hit, dict) and hit.get("action") == "block":
+            return hit
         try:  # quote guard: a quotation or page cite the record doesn't hold may not reach a draft
             if settings and settings["quote_guard"]:
-                return _quote_guard.check(tool_name, args, matter_dir=matter_dir)
-        except Exception:  # noqa: BLE001 - when the check itself fails, the write goes through
-            return None
-        return None
+                refused = _quote_guard.check(tool_name, args, matter_dir=matter_dir)
+                if refused:
+                    return refused
+        except Exception:  # noqa: BLE001 - when the check itself fails, the source guard's answer stands
+            pass
+        return hit or None
 
     # -- citation guard -------------------------------------------------------------------------
     def run_guard(self, text: str, matter_dir: str | None) -> _guard.Check:

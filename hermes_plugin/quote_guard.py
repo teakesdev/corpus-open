@@ -13,6 +13,14 @@ and hunks follow Hermes's patch parser.
   draft don't block it. When neither matches, Hermes writes nothing, so neither does the check.
 - patch, V4A mode: each Update hunk applied to the draft the same way, checking the sentences its
   added lines touch, with the hunk's context lines as context; an Add File's whole text.
+- terminal and execute_code: a command or program that looks like it changes files (the source
+  guard's own test) and names a text file in a case is checked on its own text, read as the text it
+  writes: shell quotes and escapes undone, each quoted word and here-document taken as a paragraph
+  of its own, and a Python program (execute_code, python -c, a python here-document) read by its
+  string values. A problem stops the call, and the message sends the agent to patch or write_file.
+  A command that builds its text in pieces, encodes it, or writes through a file whose name is not
+  in the command is not caught: this guards against an agent that is trying to help; it is not a
+  sandbox.
 
 A "not found" or "wrong page" blocks the write, and the message tells the agent what is wrong and,
 for a wrong page, where the words really are. "Exact" and "can't check" pass; `/matter check` still
@@ -20,9 +28,12 @@ lists what could not be checked. Paths are resolved by the source guard's own ru
 """
 from __future__ import annotations
 
+import ast
+import io
 import logging
 import os
 import re
+import tokenize
 
 from ..matterkit import quotecheck
 from . import source_guard as _sg
@@ -45,13 +56,25 @@ _OPS = (("update", re.compile(r"\*\*\*\s*Update\s+File:\s*(.+)")),
         ("add", re.compile(r"\*\*\*\s*Add\s+File:\s*(.+)")),
         ("delete", re.compile(r"\*\*\*\s*Delete\s+File:\s*(.+)")),
         ("move", re.compile(r"\*\*\*\s*Move\s+File:\s*(.+?)\s*->\s*(.+)")))
+# Reading a command's text as the text it writes.
+_HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([^\s;&|<>()'\"`]+))")
+_SH_OPS = ";&|()<>`\n"
+_DASH_C = re.compile(r"-[A-Za-z]*c")
+_PYTHON = re.compile(r"(?:^|/)python[\d.]*$")
+_SHELL = re.compile(r"(?:^|/)(?:ba|da|k|z)?sh$")
+_ESCAPES = re.compile(r"'\\''|\\([nt\"'\\])")
+_MATCHING = "Matching ignores case, curly quotes and dashes; ellipses and [brackets] mark changes."
 
 
 def check(tool_name, args, matter_dir: str | None = None, use_pdftotext: bool | None = None) -> dict | None:
     """The pre_tool_call directive for one call, or None to let it run."""
-    if not isinstance(args, dict) or tool_name not in _sg.FILE_TOOLS:
+    if not isinstance(args, dict):
         return None
     pdf = USE_PDFTOTEXT if use_pdftotext is None else use_pdftotext
+    if isinstance(tool_name, str) and tool_name in _sg.CODE_TOOLS:
+        return _check_code(tool_name, args.get(_sg.CODE_TOOLS[tool_name]), matter_dir, pdf)
+    if tool_name not in _sg.FILE_TOOLS:
+        return None
     for raw, text, regions in _writes(tool_name, args, matter_dir):
         target = _target(raw, matter_dir)
         if target is None or not text or len(text) > MAX_CHARS:
@@ -62,6 +85,175 @@ def check(tool_name, args, matter_dir: str | None = None, use_pdftotext: bool | 
         if problems:
             return {"action": "block", "message": _message(root, path, problems)}
     return None
+
+
+# -- terminal commands and execute_code ----------------------------------------------------------
+def _check_code(tool_name, text, matter_dir, pdf):
+    """A command or program that looks like it changes files and names a draft: its text, read as
+    the text it writes, is checked the way a whole draft is."""
+    if not isinstance(text, str) or not text.strip() or len(text) > MAX_CHARS:
+        return None
+    shell = tool_name == "terminal"
+    if not _sg._looks_like_write(text, shell):
+        return None
+    for token in _sg._TOKEN.findall(text)[:_sg.MAX_TOKENS]:
+        target = _target(token, matter_dir)
+        if target:
+            break
+    else:
+        return None
+    root, path = target
+    written = _shell_text(text) if shell else _python_text(text)
+    if written is None:
+        written = _unescape(text)
+    problems = [r for r in quotecheck.check_text(root, written, regions=None, use_pdftotext=pdf)
+                if r.verdict in quotecheck.PROBLEMS]
+    if problems:
+        return {"action": "block", "message": _code_message(tool_name, root, path, problems)}
+    return None
+
+
+def _unescape(text):
+    """\\n, \\t, \\", \\' and \\\\ read as printf and echo -e read them, and the shell's '\\'' as '."""
+    return _ESCAPES.sub(lambda m: {"n": "\n", "t": "\t", None: "'"}.get(m.group(1), m.group(1)), text)
+
+
+def _shell_text(cmd, depth=0):
+    """What a shell command writes, as text: quoting and escapes undone, and each quoted word and
+    each here-document set off as a paragraph of its own, so the command around a sentence (the
+    redirect after it, say) is not read as part of it. A python -c program or python here-document
+    is read as Python, and an sh -c command as a command."""
+    out, words, docs = [], [], []  # docs: here-documents whose bodies start after this line
+    buf, quoted, i, n = [], False, 0, len(cmd)
+
+    def end_word():
+        nonlocal buf, quoted
+        if buf or quoted:
+            word = "".join(buf)
+            text = _word_text(word, words, depth)
+            out.append(f"\n\n{text}\n\n" if quoted else text + " ")
+            words.append(word)
+        buf, quoted = [], False
+
+    while i < n:
+        c = cmd[i]
+        if c == "'":
+            j = cmd.find("'", i + 1)
+            j = n if j < 0 else j
+            buf.append(cmd[i + 1:j])
+            quoted, i = True, j + 1
+        elif c == '"':
+            quoted, i = True, i + 1
+            while i < n and cmd[i] != '"':
+                if cmd[i] == "\\" and cmd[i + 1:i + 2] in ('"', "\\", "$", "`", "\n"):
+                    buf.append("" if cmd[i + 1] == "\n" else cmd[i + 1])
+                    i += 2
+                else:
+                    buf.append(cmd[i])
+                    i += 1
+            i += 1
+        elif cmd.startswith("$'", i):  # escapes kept for _unescape; \' does not close it
+            quoted, i = True, i + 2
+            while i < n and cmd[i] != "'":
+                step = 2 if cmd[i] == "\\" else 1
+                buf.append(cmd[i:i + step])
+                i += step
+            i += 1
+        elif c == "\\":
+            buf.append("" if cmd[i + 1:i + 2] == "\n" else cmd[i + 1:i + 2])
+            i += 2
+        elif c == "#" and not buf and not quoted:  # a comment, to the end of the line
+            j = cmd.find("\n", i)
+            i = n if j < 0 else j
+        elif c in " \t":
+            end_word()
+            i += 1
+        elif cmd.startswith("<<", i) and not cmd.startswith("<<<", i) and (m := _HEREDOC.match(cmd, i)):
+            end_word()
+            delim = next(g for g in m.groups()[1:] if g is not None)
+            docs.append((m.group(1) == "-", delim, any(_PYTHON.search(w) for w in words)))
+            i = m.end()
+        elif c in _SH_OPS:  # a paragraph break too, so a redirect is not read into unquoted words
+            end_word()
+            out.append(f"\n\n{c} ")
+            if c not in "<>":
+                words.clear()  # a new command
+            i += 1
+            if c == "\n" and docs:
+                i = _here_docs(cmd, i, docs, out)
+                docs.clear()
+        else:
+            buf.append(c)
+            i += 1
+    end_word()
+    return "".join(out)
+
+
+def _here_docs(cmd, i, docs, out):
+    """Append the bodies of the here-documents opened on the line just ended, each as a paragraph;
+    return where the command goes on."""
+    for strip_tabs, delim, python in docs:
+        lines = []
+        while i < len(cmd):
+            j = cmd.find("\n", i)
+            j = len(cmd) if j < 0 else j
+            line, i = cmd[i:j], j + 1
+            if strip_tabs:
+                line = line.lstrip("\t")
+            if line == delim:
+                break
+            lines.append(line)
+        body = "\n".join(lines)
+        out.append("\n\n" + ((_python_text(body) if python else None) or body) + "\n\n")
+    return i
+
+
+def _word_text(word, words, depth):
+    """A shell word as what it is handed to reads it: python -c's program as Python, sh -c's as a
+    command, anything else with printf's and echo -e's escapes."""
+    if len(words) >= 2 and _DASH_C.fullmatch(words[-1]):
+        if any(_PYTHON.search(w) for w in words[:-1]):
+            text = _python_text(word)
+            if text is not None:
+                return text
+        elif depth < 2 and any(_SHELL.search(w) for w in words[:-1]):
+            return _shell_text(word, depth + 1)
+    return _unescape(word)
+
+
+def _python_text(code):
+    """Python code with each string literal (adjacent ones joined, as Python joins them) replaced by
+    its value, set off as a paragraph, so the quotes around a file name are not read as a
+    quotation; None when the code can't be tokenized. F-strings are left as written."""
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
+    except Exception:  # noqa: BLE001 - tokenize raises several kinds on text it can't read
+        return None
+    starts = [0] + [m.end() for m in re.finditer("\n", code)]
+    spans, joined = [], False  # spans: [start, end, value]
+    for t in tokens:
+        if t.type == tokenize.STRING:
+            try:
+                value = ast.literal_eval(t.string)
+            except Exception:  # noqa: BLE001
+                joined = False
+                continue
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", "replace")
+            end = starts[t.end[0] - 1] + t.end[1]
+            if joined:
+                spans[-1][1:] = [end, spans[-1][2] + value]
+            else:
+                spans.append([starts[t.start[0] - 1] + t.start[1], end, value])
+            joined = True
+        elif t.type not in (tokenize.NL, tokenize.COMMENT):
+            joined = False
+    out, last = [], 0
+    for a, b, value in spans:
+        out += [code[last:a], "\n\n", value, "\n\n"]
+        last = b
+    out.append(code[last:])
+    return "".join(out)
 
 
 # -- what a call writes --------------------------------------------------------------------------
@@ -299,6 +491,18 @@ def _message(root, path, problems) -> str:
              "does not support:"]
     lines += [f"- {quotecheck.describe(r)}" for r in problems]
     lines.append("Quote the document's exact words, cite the page where they really are, or take the "
-                 "quotation out, then write again. Matching ignores case, curly quotes and dashes; ellipses "
-                 "and [brackets] mark changes.")
+                 "quotation out, then write again. " + _MATCHING)
+    return "\n".join(lines)
+
+
+def _code_message(tool_name, root, path, problems) -> str:
+    what = "command" if tool_name == "terminal" else "code"
+    rel = os.path.relpath(path, root)
+    lines = [f"corpus-open quote check: this {what} was not run. It looks like it writes to the draft "
+             f"{rel}, and it holds {len(problems)} quotation(s) or page cite(s) that the case record at "
+             f"{root} does not support:"]
+    lines += [f"- {quotecheck.describe(r)}" for r in problems]
+    lines.append("Quote the document's exact words, cite the page where they really are, or take the "
+                 "quotation out, then make the change with patch or write_file, which check the draft as "
+                 "it would read. " + _MATCHING)
     return "\n".join(lines)
