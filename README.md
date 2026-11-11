@@ -426,6 +426,8 @@ the MCP server above can't:
   Desktop look the same to a command, so all three get the plain form. The citation block under
   a reply is plain in the terminal too, because Hermes prints what a plugin adds under a streamed
   reply as typed; there a link reads as the cite and then its address in angle brackets.
+  `/matter intake` prints a short intake checklist (case folder, facts, deadlines, papers, cite
+  checks, draft), each step done or not from what the case folder holds, and the next step.
   `/matter init <folder>` makes a case folder, points the plugin at it and says what to do next.
   `/matter demo [folder]` makes a practice case (default `~/cases/corpus-open-demo`): three source
   files recorded with a hash, two made-up deadlines (one overdue), four labeled facts (one with no
@@ -433,7 +435,9 @@ the MCP server above can't:
   quotation that is not in the record, and a quotation cited to the wrong page. It never writes
   into a folder that already has files.
 - **Skill.** The plugin registers the `matter-kit` skill (`corpus-open:matter-kit`), which teaches
-  the agent the labeling rules for facts and sources.
+  the agent the labeling rules for facts and sources, and the `case-intake` skill, a first
+  interview, one question at a time, that records what the person says as facts with no source
+  and ends with `/matter intake`.
 - **Case pane (Hermes Desktop).** A pane beside the chat (`desktop/plugin.js`) shows the case at a
   glance: open deadlines with passed ones first, a tamper badge that re-hashes every registered
   file against the hash taken when it was added (Intact / Tampered / Files missing), and how many

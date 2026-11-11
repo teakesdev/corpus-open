@@ -19,6 +19,8 @@ commands. The terminal commands in the rest of this file are for other setups.
 
 - **No case folder yet** (a tool says so): tell the person to type `/matter demo`
   for a made-up practice case, or `/matter init <folder>` for their own.
+- **Starting a case**: follow the case-intake skill. `/matter intake` shows what
+  the case folder still lacks.
 - **"Register my files"**: call `matter_ingest_path` on a folder inside the case
   (`Filings`, `Evidence`, `Correspondence`) or on one file, not on the case folder
   itself. Leave working drafts unregistered: a registered file is a source and
