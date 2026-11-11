@@ -9,15 +9,21 @@ plugin command's answer. What could go wrong, and so what these tests pin:
 - A surface that draws Markdown (Desktop, Telegram) loses its formatting.
 - The status line shows the whole home path where `~/cases/...` would do, or shortens a folder
   that only starts with the same letters as the home folder.
+- The citation block under a model's reply shows its marks. The terminal streams the reply, then
+  prints what a plugin added under it as typed (seen live 2026-11-10), so the block has to come
+  plain there, while the model's own words, which Hermes draws itself, are not touched.
+- A web link shows as `[words](address)`, which nobody can read or click in a terminal.
 """
+import io
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from test_hermes_plugin import PluginCase, hp  # noqa: E402
+from test_hermes_plugin import REPLY, TOKEN, PluginCase, cases, hp  # noqa: E402
 
 DRAFT = "Drafts/response_draft_synthetic.md"
 DECLARATION = "Filings/12-declaration_synthetic.md"
@@ -67,6 +73,19 @@ class TestPlainText(unittest.TestCase):
                      "__init__.py and _private",
                      "see _one word_ in a line",  # only a whole-line note is italic in this plugin
                      ""):
+            self.assertEqual(self.plain(text), text, text)
+
+    def test_a_web_link_becomes_its_words_and_its_address(self):
+        self.assertEqual(
+            self.plain("- ✓ **FOUND** · [Smith v. Jones, 123 F.4th 456]"
+                       "(https://www.courtlistener.com/opinion/9001/smith-v-jones/): Smith v. Jones"),
+            "- ✓ FOUND · Smith v. Jones, 123 F.4th 456 "
+            "<https://www.courtlistener.com/opinion/9001/smith-v-jones/>: Smith v. Jones")
+        self.assertEqual(self.plain("[a](http://a.example/x) and [b c](https://b.example/y_z)"),
+                         "a <http://a.example/x> and b c <https://b.example/y_z>")
+        # Only a web address: brackets a person wrote, and a link to a file, stay as typed.
+        for text in ("rows[0](x)", "[sic] (see above)", f"[the declaration]({DECLARATION})",
+                     "[1](a) https://example.com/x", "[] (https://example.com)"):
             self.assertEqual(self.plain(text), text, text)
 
     def test_only_a_string_is_changed(self):
@@ -134,6 +153,75 @@ class TestMatterInTheTerminal(PluginCase):
         out = self.plugin(matter_dir="").command("", platform="cli")
         self.assertIn("/matter demo", out)
         self.assertEqual(marks(out), [])
+
+
+class TestTheBlockUnderAReply(PluginCase):
+    """The citation block the plugin puts under a model's reply (the `transform_llm_output` hook).
+    Hermes hands the hook the session's platform: "cli" for the classic terminal."""
+    # What a model writes, with every mark this plugin's plain form takes out.
+    MODEL = "**Must fix:**\n\n# What I found\n\n_One note._\n\nRun `/matter check` again.\n\n" + REPLY
+
+    def reply(self, text=REPLY, **kw):
+        # A case of its own each time: a case's permission here allows ten lookups a day, and a
+        # reply that runs out of them reads differently.
+        self.cases = getattr(self, "cases", 0) + 1
+        self.dir = os.path.join(self._tmp.name, f"matter-{self.cases}")
+        with redirect_stdout(io.StringIO()):
+            cases.init(self.dir)
+        self.grant_all()
+        p = self.plugin(secrets={"COURTLISTENER_TOKEN": TOKEN})
+        return p, p.on_reply(response_text=text, **kw)
+
+    def test_the_terminal_gets_the_block_without_marks(self):
+        self.assertTrue(marks(self.reply()[1][len(REPLY):]))  # the marks are there to take out
+        for platform in hp._terminal.PLAIN_PLATFORMS:
+            block = self.reply(platform=platform)[1][len(REPLY):]
+            self.assertEqual(marks(block), [], platform)
+            self.assertNotIn("](", block, platform)
+            for words in ("\n\n---\nCitation check: 2 of 4 to check by hand\n",
+                          "- ✓ FOUND · Smith v. Jones, 123 F.4th 456 <https://www.courtlistener.com/opinion/9001/",
+                          "- ⚠ NOT FOUND · Doe v. Roe Corp., 501 U.S. 1001",
+                          "- ✓ IN CORPUS · Miss. Code Ann. § 89-7-27 "
+                          "<https://corpuslaw.us/code/37495c6b-7c51-4053-b24b-9a966a1a4492>",
+                          "Proceedings against tenant holding over",
+                          "NOT MATCHED IN CORPUS · Miss. Code Ann. § 89-8-99",
+                          "Checked by Corpus Open; not legal advice."):
+                self.assertIn(words, block, platform)
+            self.assertLess(block.index("NOT FOUND"), block.index("✓ FOUND"))  # problems still first
+
+    def test_the_models_own_words_are_not_touched(self):
+        _p, out = self.reply(self.MODEL, platform="cli")
+        self.assertTrue(out.startswith(self.MODEL + "\n\n---\n"), out[:200])
+        self.assertEqual(marks(out[len(self.MODEL):]), [])
+
+    def test_other_surfaces_keep_their_markdown(self):
+        base = self.reply()[1]
+        self.assertIn("✓ **FOUND** · [Smith v. Jones, 123 F.4th 456](https://", base)
+        for platform in ("desktop", "telegram", "discord", "tui", "api_server", "", None):
+            self.assertEqual(self.reply(platform=platform)[1], base, platform)
+        self.assertEqual(self.reply(session_id="s", model="m", turn_id="t")[1], base)
+
+    def test_a_replay_of_the_plain_reply_is_not_checked_again(self):
+        p, out = self.reply(platform="cli")
+        lookups = len(self.posted)
+        self.assertIsNone(p.on_reply(response_text=out, platform="cli"))
+        self.assertEqual(len(self.posted), lookups)
+
+    def test_a_reply_with_no_cites_is_left_alone(self):
+        self.assertIsNone(self.reply("Your hearing is Tuesday.", platform="cli")[1])
+
+    def test_the_practice_draft_in_the_terminal(self):
+        # What the first live reply showed with its marks on (2026-11-10).
+        target = os.path.join(self._tmp.name, "demo")
+        p = self.plugin(matter_dir="", citation_guard="local")
+        p.command(f"demo {target}")
+        with open(os.path.join(target, DRAFT), encoding="utf-8") as f:
+            text = f.read()
+        block = p.on_reply(response_text=text, platform="cli")[len(text):]
+        self.assertEqual(marks(block), [])
+        self.assertIn("Citation check: 1 of 3 to check by hand", block)
+        self.assertIn("- ⚠ NO SUCH VOLUME · Harlow v. Demo Freight Lines, Inc., 812 F.4th 1099: "
+                      "F.4th has no volume 812", block)
 
 
 class TestHomeFolder(PluginCase):

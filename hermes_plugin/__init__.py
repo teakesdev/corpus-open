@@ -227,7 +227,9 @@ class Plugin:
         return credentials.courtlistener_token() or None
 
     def on_reply(self, response_text: str = "", **kwargs) -> str | None:
-        """transform_llm_output: append the citation check under a reply that cites anything."""
+        """transform_llm_output: append the citation check under a reply that cites anything.
+        Hermes's terminal prints what is added under a reply as typed, so there the block comes
+        without its Markdown marks; the reply itself is never changed."""
         try:
             if self.settings()["citation_guard"] == "off" or not response_text:
                 return None
@@ -239,6 +241,8 @@ class Plugin:
             block = _guard.render(check)
             if not block:
                 return None
+            if kwargs.get("platform") in _terminal.PLAIN_PLATFORMS:
+                block = _terminal.plain_text(block)
             out = response_text + "\n" + block
             self._checked[_digest(out)] = None
             while len(self._checked) > CHECKED_MEMORY:
