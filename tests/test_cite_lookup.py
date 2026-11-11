@@ -592,6 +592,18 @@ class TestAdapter(Matter):
         self.assertEqual(len(self.calls), 3)
         self.assertEqual(clock.sleeps, [61.0, 61.0])
 
+    def test_a_throttled_lookup_says_when_to_try_again(self):
+        consent.save_grants(self.dir, [grant()])
+        said = {}
+        for name, err in (("a wait", clc.Throttled("about 13 hours 42 minutes from now", when="in about 13 hours 42 minutes")),
+                          ("a time", clc.Throttled("2026-11-01T12:00:00Z"))):
+            def post(url, fields, token, err=err):
+                raise err
+            clock = FakeClock()
+            said[name] = self.adapter(post=post, clock=clock, sleep=clock.sleep).lookup(["1 F.3d 1"])[1]
+        self.assertEqual(said["a wait"], "CourtListener throttled the lookup; try again in about 13 hours 42 minutes")
+        self.assertEqual(said["a time"], "CourtListener throttled the lookup; try again after 2026-11-01T12:00:00Z")
+
     def test_throttled_stops_without_retry(self):
         consent.save_grants(self.dir, [grant()])
 
@@ -710,6 +722,31 @@ class TestTransport(unittest.TestCase):
                 clc.post_form(url, {"text": "1 F.3d 1"}, TOKEN)
             t.join(timeout=2)
             self.assertEqual(ctx.exception.until, "2026-11-01T12:00:00Z")
+
+    def test_429_with_only_retry_after_says_the_wait_in_words(self):
+        # What CourtListener sent on 2026-11-10 once a key's lookups for the day were used up: no
+        # wait_until in the body, only Retry-After: 49345. "49345 seconds" is no use to a person.
+        url, _, t = self._reply(429, b'{"detail": "Request was throttled."}', headers=[("Retry-After", "49345")])
+        with self.assertRaises(clc.Throttled) as ctx:
+            clc.post_form(url, {"text": "1 F.3d 1"}, TOKEN)
+        t.join(timeout=2)
+        self.assertEqual(ctx.exception.when, "in about 13 hours 42 minutes")
+        self.assertNotIn("49345", str(ctx.exception))
+
+    def test_429_with_a_date_in_retry_after_keeps_the_date(self):
+        url, _, t = self._reply(429, b"", headers=[("Retry-After", "Wed, 11 Nov 2026 13:40:00 GMT")])
+        with self.assertRaises(clc.Throttled) as ctx:
+            clc.post_form(url, {"text": "1 F.3d 1"}, TOKEN)
+        t.join(timeout=2)
+        self.assertEqual(ctx.exception.when, "after Wed, 11 Nov 2026 13:40:00 GMT")
+
+    def test_wait_words(self):
+        for seconds, words in ((1, "1 second"), (45, "45 seconds"), (90, "about 2 minutes"),
+                               (600, "about 10 minutes"), (5400, "about 1 hour 30 minutes"),
+                               (7200, "about 2 hours"), ("49345", "about 13 hours 42 minutes")):
+            self.assertEqual(clc.wait_words(seconds), words, seconds)
+        for junk in ("", "soon", "Wed, 11 Nov 2026 13:40:00 GMT", -5, None):
+            self.assertEqual(clc.wait_words(junk), "", junk)
 
     def test_rejected_token_is_not_echoed(self):
         url, _, t = self._reply(401, b'{"detail": "Invalid token."}')
