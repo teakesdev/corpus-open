@@ -48,7 +48,7 @@ Quotations and page cites: 2 of 3 to fix
 ```
 
 <p align="center">
-  <img src="docs/media/01-matter-check.png" alt="/matter check in the Hermes terminal: the made-up case flagged NO SUCH VOLUME, the statute IN CORPUS, and the two bad quotations caught" width="100%">
+  <img src="docs/media/01-matter-check.png" alt="/matter check in the Hermes terminal with a CourtListener key: the made-up case NOT FOUND and flagged as an impossible volume, Ashcroft v. Iqbal FOUND, the statute IN CORPUS, and the two bad quotations caught" width="100%">
 </p>
 
 Next, ask the agent to add a quotation from Doc. 12 to the draft. If the words are not in that
