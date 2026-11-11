@@ -19,7 +19,7 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 
-from ..matterkit import authority, citations, citelookup, citescreen, store
+from ..matterkit import authority, citations, citelookup, citescreen, statutelookup, store
 from ..matterkit.consent import ConsentError
 
 # Statute/code outcomes (case outcomes are citelookup's own words).
@@ -177,9 +177,18 @@ def _heading_cite(heading: str) -> str:
     return re.split(r"\s+[—–-]\s+", heading, maxsplit=1)[0]
 
 
+def _as_sent(cite: str) -> str:
+    """The cite as it is sent to Corpus: without a trailing year or publisher note in parentheses."""
+    try:
+        return statutelookup.payload(cite)
+    except ValueError:
+        return cite
+
+
 def match_statute(cite: str, hits: list) -> tuple | None:
-    """The first Corpus hit whose citation is this cite. Returns (heading, url) or None."""
-    want = _norm(cite)
+    """The first Corpus hit whose citation is this cite, compared as the cite is sent to Corpus (so a
+    trailing year in parentheses does not stop a match). Returns (heading, url) or None."""
+    want = _norm(_as_sent(cite))
     for h in hits:
         if _norm(_heading_cite(h.citation)) == want:
             return h.citation, (h.provenance or {}).get("url")
