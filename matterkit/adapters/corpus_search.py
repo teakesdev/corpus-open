@@ -241,7 +241,9 @@ def _extract_hits(text: str) -> list[dict]:
     # form 1: node_id blocks
     blocks = re.split(r"(?m)^(?=\d+\.\s)", text)
     node_pat = re.compile(r"node_id:\s*([0-9a-fA-F-]{36})")
-    head_pat = re.compile(r"^\d+\.\s+(.+?)\.\s*$")
+    # The numbered heading line. Its last full stop, when it has one, is dropped; United States Code
+    # headings have none ("29 U.S.C. § 2615 — Prohibited acts").
+    head_pat = re.compile(r"^\d+\.\s+(.+?)\.?\s*$")
     for block in blocks:
         m = node_pat.search(block)
         if not m:

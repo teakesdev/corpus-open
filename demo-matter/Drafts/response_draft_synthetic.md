@@ -16,6 +16,6 @@ She also swore that "the plant manager ordered the file changed to hide the firi
 
 A complaint survives a motion to dismiss when it states a claim that is plausible on its face. Ashcroft v. Iqbal, 556 U.S. 662, 678 (2009).
 
-Federal law forbids firing a worker for opposing an unlawful practice. 42 U.S.C. § 2000e-3(a).
+Federal law forbids firing a worker for opposing an unlawful practice. 29 U.S.C. § 2615.
 
 A falsified personnel file alone defeats dismissal. Harlow v. Demo Freight Lines, Inc., 812 F.4th 1099, 1104 (5th Cir. 2023).

@@ -244,7 +244,7 @@ class TestPlugin(GuardCase):
         out = self.plugin().command(f"check {DRAFT_REL}")
         self.assertIn(f"**NO SUCH VOLUME** · Harlow v. Demo Freight Lines, Inc., {HARLOW}", out)
         self.assertIn("there is no CourtListener key yet", out)  # so no case cite was sent
-        self.assertEqual(self.asked, [{"query": "42 U.S.C. § 2000e-3(a)", "limit": 5, "jurisdiction": "US"}])
+        self.assertEqual(self.asked, [{"query": "29 U.S.C. § 2615", "limit": 5, "jurisdiction": "US"}])
         self.asked.clear()
         self.plugin(citation_guard="local").command(f"check {DRAFT_REL}")
         self.assertEqual(self.asked, [])

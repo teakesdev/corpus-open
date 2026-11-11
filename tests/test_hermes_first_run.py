@@ -295,7 +295,7 @@ class TestStoryDemo(PluginCase):
     def test_check_finds_every_planted_mistake(self):
         p = self.demo(citation_guard="local")
         out = p.command(f"check {DRAFT}")
-        for cite in ("Ashcroft v. Iqbal, 556 U.S. 662", "812 F.4th 1099", "42 U.S.C. § 2000e-3(a)"):
+        for cite in ("Ashcroft v. Iqbal, 556 U.S. 662", "812 F.4th 1099", "29 U.S.C. § 2615"):
             self.assertIn(cite, out)
         self.assertIn("Quotations and page cites: 2 of 3 to fix", out)
         lines = [ln for ln in out.splitlines() if ln.startswith("- ") and ("“" in ln)]
