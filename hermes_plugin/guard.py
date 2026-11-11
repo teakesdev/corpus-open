@@ -143,8 +143,12 @@ class Check:
             self.notes.append(text)
 
 
+# Dash look-alikes: the United States Code prints "§ 2000e–3" with an en dash, briefs write a hyphen.
+_DASHES = re.compile("[\u2010-\u2015\u2212]")
+
+
 def _norm(cite: str) -> str:
-    return re.sub(r"[\s.,]+", "", cite).lower()
+    return re.sub(r"[\s.,]+", "", _DASHES.sub("-", cite)).lower()
 
 
 def jurisdiction(cite: str) -> str | None:
@@ -192,6 +196,25 @@ def match_statute(cite: str, hits: list) -> tuple | None:
     for h in hits:
         if _norm(_heading_cite(h.citation)) == want:
             return h.citation, (h.provenance or {}).get("url")
+    return None
+
+
+_SUBSECTIONS = re.compile(r"(?:\([0-9A-Za-z]{1,4}\))+$")
+
+
+def match_section(cite: str, hits: list) -> tuple | None:
+    """For a cite to a subsection ("§ 2000e-3(a)(1)"), the first Corpus hit whose citation is the
+    section it sits in. Returns (heading, url, subsection) or None. Only trailing markers are cut, so
+    a parenthesis inside a CFR number ("§ 1.1031(a)-1") stays part of the number. Corpus holds
+    sections, so this says the section exists; it does not check the subsection's text."""
+    sent = _as_sent(cite)
+    m = _SUBSECTIONS.search(sent)
+    if not m or not sent[:m.start()].rstrip():
+        return None
+    want = _norm(sent[:m.start()])
+    for h in hits:
+        if _norm(_heading_cite(h.citation)) == want:
+            return h.citation, (h.provenance or {}).get("url"), m.group(0)
     return None
 
 
@@ -322,11 +345,19 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                                           caller_id)
                     result.sent["corpus"] = result.sent.get("corpus", 0) + 1
                     m = match_statute(cite, hits)
+                    sub = None
+                    if not m:
+                        ms = match_section(cite, hits)
+                        if ms:
+                            m, sub = ms[:2], ms[2]
                     if m:
                         heading, url = m
                         title = heading[len(_heading_cite(heading)):].strip(" —–-")
-                        row.outcome, row.detail, row.url = IN_CORPUS, (f"Corpus: {title}" if title else
-                                                                       "Corpus holds this section"), url
+                        detail = f"Corpus: {title}" if title else "Corpus holds this section"
+                        if sub:
+                            detail += (f". Corpus holds {_heading_cite(heading)}; subsection {sub} not "
+                                       "checked against its text")
+                        row.outcome, row.detail, row.url = IN_CORPUS, detail, url
                     else:
                         row.outcome = NOT_MATCHED
                         row.detail = ("Corpus returned no section with this exact cite. It may be outside "
