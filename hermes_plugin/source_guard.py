@@ -328,11 +328,16 @@ def _check_paths(raws: list, matter_dir: str | None) -> dict | None:
     return pending
 
 
+def _looks_like_write(text: str, shell: bool) -> bool:
+    """Whether a command's text (shell) or a program's looks like it changes files. A guess from
+    its words; the quote guard uses the same one."""
+    if _PY_WRITE.search(text) or _SHELL_WRITE.search(text):
+        return True
+    return shell and bool(_REDIRECT.search(_REDIRECT_NOISE.sub(" ", text)))
+
+
 def _check_text(text: str, matter_dir: str | None, shell: bool) -> dict | None:
-    writes = bool(_PY_WRITE.search(text) or _SHELL_WRITE.search(text))
-    if shell and not writes:
-        writes = bool(_REDIRECT.search(_REDIRECT_NOISE.sub(" ", text)))
-    if not writes:
+    if not _looks_like_write(text, shell):
         return None
     seen, unreadable, memo, home = set(), None, {}, _home_roots(matter_dir)
     for tok in _TOKEN.findall(text)[:MAX_TOKENS]:
