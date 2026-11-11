@@ -2,7 +2,7 @@
 """matter.py — CLI for the matter-kit case store.
 
 Usage:
-  matter.py init <case-dir>
+  matter.py init <case-dir>   # on a terminal, asks for your CourtListener key and whether to turn search on
   matter.py ingest <case-dir> [paths...] [--exclude SUBSTR]...
   matter.py verify <case-dir>
   matter.py watch <case-dir>   # the morning check: overdue, due in 0/1/3/7 days, changed files
@@ -54,13 +54,22 @@ Usage:
   matter.py party add <dir> --name NAME --role agency --capacity custodian
   matter.py correspondence add|list|render|manifest|export|status <dir> ...
   matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
+                        [--offline]   # never writes the store; checks the draft's case cites on CourtListener
+                        # (bare cites, at most one request; a saved answer first); --offline sends nothing
   matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N] [--fresh]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
-                        # sends the draft's case cites, nothing else, to CourtListener; needs case
-                        # law lookups turned on and a CourtListener key
-  matter.py courtlistener on|off|status <dir>   # one switch for search + cite lookup (asks you to type yes)
+                        # sends the draft's case cites, nothing else, to CourtListener; on by default
+                        # unless a person turned it off; needs a CourtListener key
+                        # By default every case checks bare case cites on CourtListener (once a key is
+                        # set) and bare statute and code cites on Corpus (corpuslaw.us); nothing else
+                        # is sent. Case law search stays off until a person turns it on.
+  matter.py courtlistener on|off|status <dir>   # on: search + case cite checks (asks you to type yes);
+                                                # off: both, and case cite checks stay off
   matter.py courtlistener key [--forget]        # save your free CourtListener key (outside every case folder)
-  matter.py consent propose|activate <dir> [--scope search|cite-lookup] [--caller ID]...   # narrower grants
+  matter.py consent decline <dir> --scope statute-lookup|cite-lookup|search|corpus-search
+                                                # turn one off for the case; it stays off
+  matter.py consent propose|activate <dir> [--scope search|cite-lookup|statute-lookup|corpus-search] [--caller ID]...
+                                                # narrower grants; activate asks you to type ACTIVATE
   matter.py docket suggest <dir>
   matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
                         [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]
@@ -89,6 +98,30 @@ def cmd_init(args):
     d = args.case_dir
     n = cases.init(d)
     print(f"initialized {d} (.matter/matter.db, {n} documents registered)")
+    # A person at a terminal is asked two things, once (design 2026-11-09 §2). Scripts, tests and
+    # pipes are asked nothing: cite checking is on and search is off.
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        import getpass
+        from matterkit import caselaw
+
+        def ask_key():
+            try:
+                return getpass.getpass("key: ")
+            except (EOFError, KeyboardInterrupt):
+                return ""
+        caselaw.first_run(d, getpass.getuser(), ask=_tty_answer, ask_key=ask_key)
+
+
+def _tty_answer(question):
+    """Ask on the controlling terminal (a pipe on stdin cannot answer); "" when there is none."""
+    try:
+        with open("/dev/tty", "w", encoding="utf-8") as out:
+            out.write(question + " ")
+            out.flush()
+        with open("/dev/tty", encoding="utf-8") as inp:
+            return inp.readline()
+    except (OSError, KeyboardInterrupt):
+        return ""
 
 
 def cmd_ingest(args):
@@ -469,12 +502,14 @@ def existing_draft(case_dir, path):
 
 
 def cmd_brief(args):
-    """brief check: tie every cite, quotation and factual sentence in a draft to the store.
-    Read-only. Exit 1 = blocking findings, 2 = items a human must check, 0 = all tied."""
+    """brief check: tie every cite, quotation and factual sentence in a draft to the store, and check
+    the draft's case cites on CourtListener (bare cites only; --offline sends nothing). Never writes the
+    store. Exit 1 = blocking findings, 2 = items a human must check, 0 = all tied."""
     from matterkit import briefcheck
+    cites = briefcheck.CiteCheck(caller_id=os.environ.get("USER", "human"), offline=args.offline)
     try:
         report = briefcheck.check(args.case_dir, draft_path(args.case_dir, args.draft), use_pdftotext=not args.no_pdftotext,
-                                  docket_path=args.docket, mode=args.mode)
+                                  docket_path=args.docket, mode=args.mode, cites=cites)
     except (ValueError, FileNotFoundError) as e:
         sys.exit(f"brief check refused: {e}")
     text = report.render()
@@ -785,13 +820,25 @@ def cmd_auth_stage(args):
 
 
 def cmd_consent(args):
-    """consent propose|activate. --scope search: the R2 search adapter (query_text to the host);
+    """consent propose|activate|decline. --scope search: the R2 search adapter (query_text to the host);
     --scope cite-lookup: bare case cites to the citation-lookup URL, and nothing else;
-    --scope corpus-search: query_text (a statute cite, for the Hermes citation guard) to corpuslaw.us."""
+    --scope statute-lookup: bare statute and code cites to corpuslaw.us, and nothing else;
+    --scope corpus-search: query_text (free text) to corpuslaw.us.
+    cite-lookup and statute-lookup are on by default; decline turns a scope off for the case and it
+    stays off until a person activates it (or, for cite-lookup, runs `courtlistener on`)."""
+    import getpass
     from matterkit import caselaw, consent
     scopes = dict(caselaw.SCOPES)
+    scopes["statute-lookup"] = caselaw.STATUTE_SCOPE
     scopes["corpus-search"] = ("corpus-search", ["corpuslaw.us"], ["query_text"], 50)
     provider, endpoints, payloads, budget = scopes[args.scope]
+    if args.sub == "decline":
+        if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
+            sys.exit(f"refused: {args.case_dir} is not a case folder (no .matter/)")
+        caselaw.decline(args.case_dir, provider, args.issuer or getpass.getuser(), "cli")
+        print(f"{args.scope} is off for this case and stays off, whatever the default, until a person turns it "
+              f"on again (`matter.py consent activate {args.case_dir} --scope {args.scope}`).")
+        return
     if args.sub == "propose":
         g = consent.stage_proposal(
             args.case_dir, provider, endpoints, payloads, args.as_user, daily_budget=budget)
@@ -799,9 +846,12 @@ def cmd_consent(args):
               "(authorizes no one until human TTY activate)")
     elif args.sub == "activate":
         try:
+            # statute-lookup carries bare statute cites only, like the default it replaces, so a person
+            # turning it back on opens it to every caller unless they name callers.
+            callers = args.caller or ([consent.ANY_CALLER] if args.scope == "statute-lookup" else [])
             g = consent.activate_human_grant(
                 args.case_dir, provider, endpoints, payloads, args.issuer, daily_budget=budget,
-                authorized_callers=args.caller or [])
+                authorized_callers=callers)
         except consent.ConsentError as e:
             sys.exit(f"refused: {e}")
         print(f"activated human grant issuer={g['created_by']!r} "
@@ -825,16 +875,18 @@ def cmd_courtlistener(args):
         print(caselaw.describe(args.case_dir))
         return
     if args.sub == "off":
-        n = caselaw.turn_off(args.case_dir)
-        print("Case law lookups are off for this case." if n else "Case law lookups were already off.")
+        caselaw.turn_off(args.case_dir, args.issuer or getpass.getuser(), "cli")
+        print("Case cite checking and case law search are off for this case, and stay off until a person "
+              "runs `matter.py courtlistener on` for it. (Statute and code cites: "
+              "`matter.py consent decline <case folder> --scope statute-lookup`.)")
         return
     print(caselaw.WHAT_IS_SENT)
     try:
-        consent.confirm_on_tty(f"Turn on case law lookups for {os.path.abspath(args.case_dir)}?", word="yes")
+        consent.confirm_on_tty(f"Turn on case law search for {os.path.abspath(args.case_dir)}?", word="yes")
     except consent.ConsentError as e:
         sys.exit(f"refused: {e}")
     caselaw.turn_on(args.case_dir, args.issuer or getpass.getuser(), "tty")
-    print("Case law lookups are on. Your agents can now search and check citations for this case.")
+    print("Case law lookups are on. Your agents can now search case law and check case cites for this case.")
     if not credentials.courtlistener_token():
         _ask_and_save_key(optional=True)
 
@@ -1049,6 +1101,9 @@ def main():
     p.add_argument("--docket", help="docket map JSON to use instead of <dir>/.matter/docket.json")
     p.add_argument("--mode", choices=["brief", "complaint"], default="brief",
                    help="complaint: allegations need no record cite; cites, authorities and sourced quotes still checked")
+    p.add_argument("--offline", action="store_true",
+                   help="send nothing: case cites with no saved CourtListener answer are marked NOT VERIFIED "
+                        "(by default their bare cites, nothing else, go to CourtListener in at most one request)")
     p.set_defaults(fn=cmd_brief)
 
     p = sub.add_parser("docket"); p.add_argument("sub", choices=["suggest"]); p.add_argument("case_dir")
@@ -1228,9 +1283,9 @@ def main():
     p.add_argument("--layer", default="3min", choices=["30s", "3min", "15min"])
     p.add_argument("--out"); p.set_defaults(fn=cmd_packet)
 
-    p = sub.add_parser("consent"); p.add_argument("sub", choices=["propose", "activate"])
+    p = sub.add_parser("consent"); p.add_argument("sub", choices=["propose", "activate", "decline"])
     p.add_argument("case_dir")
-    p.add_argument("--scope", choices=["search", "cite-lookup", "corpus-search"], default="search")
+    p.add_argument("--scope", choices=["search", "cite-lookup", "statute-lookup", "corpus-search"], default="search")
     p.add_argument("--as-user", dest="as_user", default="agent")
     p.add_argument("--issuer", default=os.environ.get("USER", "human"))
     p.add_argument("--caller", action="append", default=[])
@@ -1239,7 +1294,7 @@ def main():
     p = sub.add_parser("courtlistener", help="Turn case law lookups on or off for a case, or save your key")
     p.add_argument("sub", choices=["on", "off", "status", "key"])
     p.add_argument("case_dir", nargs="?", default=".")
-    p.add_argument("--issuer", help="on: who is turning it on; default your login name")
+    p.add_argument("--issuer", help="on/off: who is turning it on or off; default your login name")
     p.add_argument("--forget", action="store_true", help="key: remove the saved key")
     p.set_defaults(fn=cmd_courtlistener)
 

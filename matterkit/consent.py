@@ -21,11 +21,24 @@ all be forged by a compromised agent. The kit honestly provides:
         own call graph refuses," never "the system cannot egress."
 
 Payload sensitivity ladder: citation_strings < query_text < passage_text <
-document_text. citation_strings are bare case cites ("123 F.4th 456"), each
-line checked against a strict pattern before it is sent (matterkit.citelookup);
-a grant for them authorizes nothing else. Query text is itself matter-derived;
+document_text. citation_strings are bare citations: case cites ("123 F.4th 456"),
+each line checked against a strict pattern before it is sent
+(matterkit.citelookup), and statute or code cites ("42 U.S.C. § 2000e-3(a)"),
+each one re-parsed by the kit before it is sent (matterkit.statutelookup); a
+grant for them authorizes nothing else. Query text is itself matter-derived;
 passage/document payloads are excluded from any default grant pattern and
 refuse at call time when not granted.
+
+CASE DEFAULTS (2026-11-10): a case nobody has chosen for gets two grants of
+kind "default", one per CASE_DEFAULTS provider, open to every caller and
+covering citation_strings only. `authorize` honors a default grant only for a
+CASE_DEFAULTS provider and endpoint, only for a sensitivity-0 payload, and
+never while that provider has a "declined" record. A person turns a check off
+by writing a declined record (`courtlistener off`, `consent decline`, the
+browser UI's Turn off); `revoke` keeps it, `ensure_defaults` never writes over
+it, and only a person's own grant (write_human_grant) removes it. Agent
+proposals are not a choice: they neither stop nor replace the default. Nothing
+here changes how a person's own grant is checked.
 """
 import datetime as _dt
 import json
@@ -33,8 +46,20 @@ import os
 
 SENSITIVITY = {"citation_strings": 0, "query_text": 1, "passage_text": 2, "document_text": 3}
 ANY_CALLER = "*"
-TURN_ON_HINT = ("A person turns case law lookups on once per case: in Matter Kit's browser window open the "
-                "case, then Case law lookups, then Turn on; or run `matter.py courtlistener on <case folder>`.")
+DEFAULT, DECLINED = "default", "declined"  # grant kinds besides "human" and "agent"
+DEFAULT_ISSUER, DEFAULT_VIA = "matter-kit default", "case-default"
+# The bare-citation checks a case gets until a person turns them off: provider -> (endpoints, daily
+# budget). Each carries citation_strings and nothing else. matterkit.citelookup and
+# matterkit.statutelookup name the same providers and endpoints (a test keeps them in step); they are
+# spelled out here so this module imports nothing of the kit's.
+CASE_DEFAULTS = {
+    "courtlistener-citation-lookup": (["www.courtlistener.com/api/rest/v4/citation-lookup/"], 100),
+    "corpus-statute-lookup": (["corpuslaw.us"], 50),
+}
+TURN_ON_HINT = ("Checking bare case and statute cites is on for a case until a person turns it off; case law "
+                "search, and anything else, needs a person to turn it on. To turn case law lookups on: in "
+                "Matter Kit's browser window open the case, then Case law lookups, then Turn on case law search; "
+                "or run `matter.py courtlistener on <case folder>`.")
 
 
 class ConsentError(PermissionError):
@@ -78,6 +103,8 @@ def _today_usage(matter_dir: str, provider: str) -> int:
             rec = json.loads(line)
         except ValueError:
             continue
+        if not isinstance(rec, dict) or rec.get("event"):  # a note, not a request
+            continue
         if rec.get("provider") == provider and str(rec.get("ts", "")).startswith(today):
             n += 1
     return n
@@ -117,7 +144,9 @@ def authorize(matter_dir: str, provider: str, endpoint: str, payload_type: str,
     if payload_type not in SENSITIVITY:
         raise ConsentError(f"unknown payload type {payload_type!r}")
     refusals: list[str] = []
-    for g in load_grants(matter_dir):
+    grants = load_grants(matter_dir)
+    turned_off = any(g.get("provider") == provider and g.get("kind") == DECLINED for g in grants)
+    for g in grants:
         if g.get("provider") != provider:
             continue
         if endpoint not in (g.get("endpoints") or []):
@@ -125,10 +154,19 @@ def authorize(matter_dir: str, provider: str, endpoint: str, payload_type: str,
         if payload_type not in (g.get("payload_types") or []):
             refusals.append(f"payload {payload_type!r} outside grant scope")
             continue
-        ok, why = _identity_ok(g, caller_id)
-        if not ok:
-            refusals.append(why)
-            continue
+        if g.get("kind") == DEFAULT:
+            # The case's own default: bare citations to a CASE_DEFAULTS endpoint, every caller,
+            # and only while no person has turned it off. Never anything a person issued.
+            if endpoint not in CASE_DEFAULTS.get(provider, ([], 0))[0] or SENSITIVITY[payload_type] != 0:
+                refusals.append("a case's default covers bare citations only")
+                continue
+            if turned_off:
+                continue  # the declined record speaks for itself below
+        else:
+            ok, why = _identity_ok(g, caller_id)
+            if not ok:
+                refusals.append(why)
+                continue
         exp = g.get("expires")
         if exp:
             try:
@@ -143,6 +181,8 @@ def authorize(matter_dir: str, provider: str, endpoint: str, payload_type: str,
             refusals.append(f"daily budget ({budget}) exhausted for provider {provider!r}")
             continue  # another human grant for this provider may still allow it
         return g
+    if turned_off:
+        refusals.insert(0, "turned off for this case by a person")
     detail = "; ".join(dict.fromkeys(refusals)) if refusals else "no matching grant"
     raise ConsentError(
         f"no valid grant for {provider}/{endpoint}/{payload_type} "
@@ -220,7 +260,8 @@ def write_human_grant(matter_dir: str, provider: str, endpoints: list[str],
                       authorized_callers: list[str] | None = None) -> dict:
     """Record a grant a person has just confirmed (at the terminal or with the browser UI's button).
     Callers must have confirmed with the person first: this function asks no one. It replaces the
-    provider's staged proposals and earlier human grants, so turning on twice leaves one grant."""
+    provider's staged proposals, earlier human grants, its case default and a person's earlier
+    "declined" record, so turning on twice leaves one grant and turning back on undoes an off."""
     from .citations import now_iso
     g = {
         "provider": provider,
@@ -235,19 +276,77 @@ def write_human_grant(matter_dir: str, provider: str, endpoints: list[str],
         "status": "active",
     }
     grants = [x for x in load_grants(matter_dir) if x.get("provider") != provider
-              or not ((x.get("kind") == "agent" and x.get("status") == "proposal") or x.get("kind") == "human")]
+              or not ((x.get("kind") == "agent" and x.get("status") == "proposal")
+                      or x.get("kind") in ("human", DEFAULT, DECLINED))]
     grants.append(g)
     save_grants(matter_dir, grants)
     return g
 
 
 def revoke(matter_dir: str, providers: list[str]) -> int:
-    """Turn off: drop every grant (human or proposed) for these providers. Returns how many."""
+    """Drop every grant (human, default or proposed) for these providers. Returns how many. A
+    person's "declined" record stays: revoking never brings a case default back."""
     grants = load_grants(matter_dir)
-    keep = [g for g in grants if g.get("provider") not in providers]
+    keep = [g for g in grants if g.get("provider") not in providers or g.get("kind") == DECLINED]
     if len(keep) != len(grants):
         save_grants(matter_dir, keep)
     return len(grants) - len(keep)
+
+
+def declined(matter_dir: str, provider: str) -> bool:
+    """A person turned this provider's check off for the case."""
+    return any(g.get("provider") == provider and g.get("kind") == DECLINED for g in load_grants(matter_dir))
+
+
+def chosen(matter_dir: str, provider: str) -> bool:
+    """Someone has decided about this provider for the case: a person's grant, a person's off, or the
+    default already written. An agent's inert proposal decides nothing."""
+    return any(g.get("provider") == provider and g.get("kind") in ("human", DEFAULT, DECLINED)
+               for g in load_grants(matter_dir))
+
+
+def write_declined(matter_dir: str, provider: str, by: str, via: str) -> dict:
+    """Record that a person turned this provider off for the case, and drop its grants. The caller
+    acts for the person (a command they ran, a button they pressed). Turning off twice leaves one record."""
+    from .citations import now_iso
+    rec = {"provider": provider, "kind": DECLINED, "created_by": by, "created_at": now_iso(),
+           "activated_via": via}
+    grants = [g for g in load_grants(matter_dir) if g.get("provider") != provider]
+    grants.append(rec)
+    save_grants(matter_dir, grants)
+    return rec
+
+
+def ensure_defaults(matter_dir: str, providers=None, note: bool = True) -> list[dict]:
+    """Give each CASE_DEFAULTS provider nobody has chosen for its default grant, once. Returns what
+    was written. Never touches a provider a person has granted or declined. With `note`, each
+    grant written gets a line in the egress log (an "event" line, which no daily limit counts):
+    an existing case is put on its default on first use, and the log says when."""
+    from .citations import now_iso
+    if not os.path.isdir(os.path.join(matter_dir, ".matter")):
+        return []  # not a case folder: never make one here
+    grants = load_grants(matter_dir)
+    written = []
+    for provider in (CASE_DEFAULTS if providers is None else providers):
+        endpoints, budget = CASE_DEFAULTS[provider]
+        if any(g.get("provider") == provider and g.get("kind") in ("human", DEFAULT, DECLINED) for g in grants):
+            continue
+        g = {"provider": provider, "endpoints": list(endpoints), "payload_types": ["citation_strings"],
+             "daily_budget": budget, "created_by": DEFAULT_ISSUER, "kind": DEFAULT,
+             "authorized_callers": [ANY_CALLER], "created_at": now_iso(), "activated_via": DEFAULT_VIA,
+             "status": "active"}
+        grants.append(g)
+        written.append(g)
+    if not written:
+        return []
+    save_grants(matter_dir, grants)
+    if note:
+        with open(egress_path(matter_dir), "a") as f:
+            for g in written:
+                f.write(json.dumps({"ts": g["created_at"], "event": "case-default-written",
+                                    "grant_provider": g["provider"], "endpoint": g["endpoints"][0],
+                                    "payload_type": "citation_strings"}) + "\n")
+    return written
 
 
 def activate_human_grant(matter_dir: str, provider: str, endpoints: list[str],

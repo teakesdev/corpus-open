@@ -217,14 +217,29 @@ function renderNewCase(box, open) {
   }
   const input = el("input", { type: "text", id: "new-case-name", maxlength: 80, autocomplete: "off" });
   const err = el("p", { class: "error", role: "alert" });
+  // The two first-run questions (design 2026-11-09 §2): the key, only when this computer has none, and
+  // whether to turn case law search on. Cite checking is on either way.
+  const keyInput = state.session && state.session.courtlistener_key ? null
+    : el("input", { type: "password", id: "new-case-key", autocomplete: "off", spellcheck: "false", placeholder: "Paste your CourtListener key" });
+  const search = el("input", { type: "checkbox", id: "new-case-search" });
   const form = el("form", {
     onsubmit: async (e) => {
       e.preventDefault();
       err.textContent = "";
       try {
         const { case: made } = await api("POST", "/cases", { name: input.value.trim() });
+        const notes = [];
+        if (keyInput && keyInput.value.trim()) {
+          try {
+            await api("POST", "/courtlistener-key", { key: keyInput.value });
+            state.session.courtlistener_key = "settings";
+          } catch (ex) { notes.push(`Key not saved: ${ex.message}`); }
+        }
+        if (search.checked) {
+          try { await api("POST", `/cases/${made.id}/caselaw`, { on: true }); } catch (ex) { notes.push(`Search not turned on: ${ex.message}`); }
+        }
         await loadCases();
-        toast(`Created ${made.title}.`);
+        toast([`Created ${made.title}.`, ...notes].join(" "));
         go(caseHref(made.id));
       } catch (ex) { err.textContent = ex.message; }
     },
@@ -232,6 +247,12 @@ function renderNewCase(box, open) {
   el("label", { for: "new-case-name", text: "Case folder name" }),
   input,
   el("p", { class: "hint", text: "For example: Smith v. City of Example. Letters, numbers, spaces and . , ( ) & ' - are fine." }),
+  el("p", { class: "hint", text: "Citation checks are on for every case: only bare citations such as 550 U.S. 544 or 42 U.S.C. § 2000e-3(a) are sent, to CourtListener and Corpus. You can turn them off under Case law lookups." }),
+  keyInput && el("div", { class: "field" }, el("label", { for: "new-case-key", text: "Your CourtListener key (free, optional)" }), keyInput,
+    el("p", { class: "hint", text: "Checking case citations needs one. It is kept on this computer, never in a case folder. " },
+      el("a", { href: state.session.courtlistener_key_url, target: "_blank", rel: "noopener noreferrer", text: "Get a free key at CourtListener" }))),
+  el("label", { class: "choice" }, search,
+    el("span", { text: "Also let my AI agents search case law for this case. Search words are sent to CourtListener, and they can describe your facts." })),
   err,
   el("div", { class: "row" }, el("button", { class: "btn", type: "submit", text: "Create case" }),
     el("button", { class: "btn quiet", type: "button", text: "Cancel", onclick: () => renderNewCase(clear(box), false) })));
@@ -703,7 +724,12 @@ async function viewBrief(panel, c) {
 }
 
 // --- case law lookups: the person's one switch, their CourtListener key, and today's use ---
-const SCOPE_NAMES = { "search": "Case law search", "cite-lookup": "Citation checks" };
+// The three checks a case has (design 2026-11-09): the two cite checks are on by default, search only
+// when a person turns it on. The server's on/off route switches search and case cite checking together.
+const SCOPE_NAMES = { "cite-lookup": "Case cites, to CourtListener", "statutes": "Statute and code cites, to Corpus (corpuslaw.us)",
+  "search": "Case law search, to CourtListener" };
+const checkWords = (s) => (s.state === "declined" ? "off for this case (a person turned it off)"
+  : !s.on ? "off" : s.by_default ? "on by default" : "on");
 
 async function viewCaselaw(panel, c, alive) {
   const box = el("div");
@@ -711,16 +737,27 @@ async function viewCaselaw(panel, c, alive) {
   const draw = (cl) => {
     if (!alive()) return;
     const busy = (btn) => { btn.disabled = true; };
-    const sw = el("button", { class: "btn", type: "button", text: cl.on ? "Turn off" : "Turn on",
-      onclick: async () => {
-        busy(sw);
-        try {
-          draw((await api("POST", `/cases/${c.id}/caselaw`, { on: !cl.on })).caselaw);
-          toast(cl.on ? "Case law lookups are off for this case." : "Case law lookups are on for this case.");
-        } catch (ex) { toast(ex.message); sw.disabled = false; }
-      } });
-    const usage = el("ul", {}, Object.entries(cl.scopes).map(([k, s]) => el("li", {
-      text: `${SCOPE_NAMES[k] || k}: ${s.used_today} used today` + (s.daily_limit != null ? ` of ${s.daily_limit} a day` : "") })));
+    const cite = cl.scopes["cite-lookup"];
+    const switchButton = (on, label, done) => {
+      const b = el("button", { class: "btn", type: "button", text: label,
+        onclick: async () => {
+          busy(b);
+          try {
+            draw((await api("POST", `/cases/${c.id}/caselaw`, { on })).caselaw);
+            toast(done);
+          } catch (ex) { toast(ex.message); b.disabled = false; }
+        } });
+      return b;
+    };
+    const offButton = cite.on && (cl.search_on
+      ? switchButton(false, "Turn off citation checks and search", "Case cite checks and case law search are off for this case.")
+      : switchButton(false, "Turn off citation checks", "Case cite checks are off for this case."));
+    const onButton = !cl.search_on && (cite.on
+      ? switchButton(true, "Turn on case law search", "Case law search is on for this case.")
+      : switchButton(true, "Turn on case law search and citation checks", "Case law search and case cite checks are on for this case."));
+    const row = (k, s) => el("li", { text: `${SCOPE_NAMES[k]}: ${checkWords(s)}`
+      + (s.on ? ` · ${s.used_today} used today` + (s.daily_limit != null ? ` of ${s.daily_limit} a day` : "") : "") });
+    const usage = el("ul", {}, row("cite-lookup", cite), row("statutes", cl.statutes), row("search", cl.scopes.search));
     const keyInput = el("input", { id: "cl-key", type: "password", autocomplete: "off", spellcheck: "false",
       placeholder: "Paste your CourtListener key" });
     const keyForm = el("form", { class: "form-panel",
@@ -749,11 +786,14 @@ async function viewCaselaw(panel, c, alive) {
       : cl.key ? "Your key is saved on this computer (only your user account can read it, and it is never put in a case folder)."
       : "No key yet. Search and citation checks both need one: it's free. Sign up or sign in at CourtListener, open the API page, copy the key and paste it here.";
     clear(box).append(
-      el("section", {}, el("h2", { text: cl.on ? "Case law lookups are on" : "Case law lookups are off" }),
-        el("p", { class: "lede", text: cl.what_is_sent }),
-        el("p", { text: cl.on ? "Your AI agents can search case law and check the citations in your drafts for this case without asking again. Turn it off any time."
-          : "Turn this on once and your AI agents can search case law and check the citations in your drafts for this case." }),
-        sw, cl.on ? usage : null,
+      el("section", {}, el("h2", { text: `Cite checking: ${checkWords(cite)}` }),
+        el("p", { class: "lede", text: cl.by_default }),
+        usage,
+        cite.on && !cl.key ? el("p", { text: "Case cites are listed in brief check but not looked up until a CourtListener key is saved below." }) : null,
+        offButton || null, onButton || null,
+        onButton ? el("p", { text: cl.what_is_sent }) : null,
+        el("p", { text: "Statute and code cite checks are turned off for a case in a terminal: "
+          + "matter.py consent decline <case folder> --scope statute-lookup" }),
         el("p", { text: `Saved in this case: ${cl.saved.searches} search${cl.saved.searches === 1 ? "" : "es"} and `
           + `${cl.saved.cites} citation answer${cl.saved.cites === 1 ? "" : "s"}. Asking these again sends nothing, even with lookups off.` })),
       el("section", {}, el("h2", { text: "CourtListener key" }),

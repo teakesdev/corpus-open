@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
@@ -110,6 +111,14 @@ class Base(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.m = Matter(self._tmp.name)
+        # Brief check's entry points check case cites on CourtListener by default: a settings folder of
+        # its own and no COURTLISTENER_TOKEN, here and in every child it starts, so no test reads the
+        # person's real saved key or sends anything.
+        env = {k: v for k, v in os.environ.items() if k != "COURTLISTENER_TOKEN"}
+        env["MATTER_KIT_CONFIG"] = os.path.join(self._tmp.name, "no-config")
+        patch = mock.patch.dict(os.environ, env, clear=True)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def tearDown(self):
         self.m.conn.close()
@@ -348,6 +357,12 @@ class TestCli(Base):
             self.assertIn("BLOCKED", f.read())
         with open(draft, "w") as f:
             f.write("Courts manage their dockets. Dietz v. Bouldin, 579 U.S. 40, 45 (2016).")
+        # The case cite is checked on CourtListener too: a saved answer, so nothing is sent and all is tied.
+        from matterkit import saved_lookups
+        saved_lookups.save_cites(self.m.dir, {"579 U.S. 40": {
+            "citation": "579 U.S. 40", "normalized_citations": ["579 U.S. 40"], "status": 200,
+            "clusters": [{"id": 4242, "case_name": "Dietz v. Bouldin", "absolute_url": "/opinion/4242/dietz-v-bouldin/",
+                          "date_filed": "2016-06-09"}]}})
         p = self.run_cli("brief", "check", self.m.dir, draft)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 

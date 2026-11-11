@@ -4,7 +4,7 @@
 // so the order requests finish in is the test's to choose.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { A, B, Ev, boot, byText, caseHash } from "./dom.mjs";
+import { A, B, Ev, boot, byText, caseHash, fixtureHandler } from "./dom.mjs";
 
 // node identity without assert.equal, which would print both whole DOM trees when it fails
 const same = (a, b, msg) => assert.ok(a === b, msg);
@@ -296,4 +296,125 @@ test("markdown table: the report's own shape renders end to end", async () => {
   assert.equal(tds[1].textContent, "The notice said “pay | vacate”");
   assert.equal(tds[2].querySelectorAll("br").length, 1);
   assert.equal(tds[3].textContent, "QUOTE FOUND: “pay | vacate”");
+});
+
+// --- cite check by default: the new-case form's two first-run questions ---
+
+function openNewCase(env) {
+  byText(env.document.body, "button", "New case").click();
+  return env.document.getElementById("new-case-name").closest("form");
+}
+
+test("new case: asks for a key only when there is none, and search stays off unless ticked", async () => {
+  const env = await boot();
+  await env.flush();
+  const form = openNewCase(env);
+  assert.ok(env.document.getElementById("new-case-key"), "no key on this computer, so the form should offer the key field");
+  const search = env.document.getElementById("new-case-search");
+  assert.equal(search.checked, false, "search must start unticked");
+  assert.match(form.textContent, /only bare citations/);
+  env.document.getElementById("new-case-name").value = "Gamma v. Town";
+  form.dispatchEvent(new Ev("submit"));
+  await env.flush();
+  env.only("POST", /^\/cases$/).respond({ case: { id: "c".repeat(16), title: "Gamma v. Town", rel: "Gamma v. Town", parent_id: null } });
+  await env.flush();
+  assert.equal(env.find("POST", /courtlistener-key/).length, 0, "an empty key box sends nothing");
+  assert.equal(env.find("POST", /\/caselaw$/).length, 0, "search was not ticked, so nothing turns it on");
+});
+
+test("new case: a typed key and a ticked search box are each sent once, after the case exists", async () => {
+  const env = await boot();
+  await env.flush();
+  const form = openNewCase(env);
+  env.document.getElementById("new-case-name").value = "Gamma v. Town";
+  env.document.getElementById("new-case-key").value = "synthetic-key-0000";
+  env.document.getElementById("new-case-search").checked = true;
+  form.dispatchEvent(new Ev("submit"));
+  await env.flush();
+  assert.equal(env.find("POST", /courtlistener-key/).length, 0, "nothing else goes before the case is made");
+  env.only("POST", /^\/cases$/).respond({ case: { id: "c".repeat(16), title: "Gamma v. Town", rel: "Gamma v. Town", parent_id: null } });
+  await env.flush();
+  const key = env.only("POST", /^\/courtlistener-key$/);
+  assert.deepEqual(key.json(), { key: "synthetic-key-0000" });
+  key.respond({ key: "settings" });
+  await env.flush();
+  const on = env.only("POST", new RegExp(`^/cases/${"c".repeat(16)}/caselaw$`));
+  assert.deepEqual(on.json(), { on: true });
+});
+
+test("new case: no key field when this computer already has one", async () => {
+  const handler = (req) => (req.method === "GET" && req.path === "/session"
+    ? { status: 200, body: { workspace: "/synthetic/workspace", operator: "tester", folders: ["Evidence"], layers: ["30s"], courtlistener_key: "settings" } }
+    : fixtureHandler(req));
+  const env = await boot({ handler });
+  await env.flush();
+  openNewCase(env);
+  assert.equal(env.document.getElementById("new-case-key"), null);
+  assert.ok(env.document.getElementById("new-case-search"));
+});
+
+// --- cite check by default: the Case law lookups panel ---
+
+const scope = (state, extra = {}) => ({ on: state === "on" || state === "default", state, by_default: state === "default",
+  used_today: 0, daily_limit: 100, turned_on_by: null, turned_on_at: null, ...extra });
+const caselawState = ({ cite = "default", statutes = "default", search = "off", key = null } = {}) => ({
+  on: scope(cite).on && scope(search).on, search_on: scope(search).on, cite_check_on: scope(cite).on,
+  statute_check_on: scope(statutes).on, scopes: { search: scope(search), "cite-lookup": scope(cite) },
+  statutes: scope(statutes, { daily_limit: 50 }), saved: { searches: 0, cites: 0 }, key,
+  key_url: "https://www.courtlistener.com/profile/api/", what_is_sent: "Search words are sent.",
+  by_default: "Cite checking is on for every case unless a person turns it off." });
+
+async function openCaselaw(state) {
+  const handler = (req) => (req.method === "GET" && req.path === `/cases/${A.id}/caselaw`
+    ? { status: 200, body: { caselaw: state } } : fixtureHandler(req));
+  const env = await boot({ handler });
+  await env.go(caseHash(A, "caselaw"));
+  await env.flush();
+  return env;
+}
+
+test("case law panel: a case nobody has chosen for reads on by default, with each check and two plain buttons", async () => {
+  const env = await openCaselaw(caselawState());
+  const main = env.main();
+  assert.ok(byText(main, "h2", "Cite checking: on by default"));
+  const items = main.querySelectorAll("li").map((li) => li.textContent);
+  assert.ok(items.includes("Case cites, to CourtListener: on by default · 0 used today of 100 a day"), items.join(" | "));
+  assert.ok(items.includes("Statute and code cites, to Corpus (corpuslaw.us): on by default · 0 used today of 50 a day"));
+  assert.ok(items.includes("Case law search, to CourtListener: off"));
+  assert.ok(byText(main, "button", "Turn off citation checks"));
+  assert.ok(byText(main, "button", "Turn on case law search"));
+  assert.match(main.textContent, /not looked up until a CourtListener key is saved/);
+  assert.match(main.textContent, /--scope statute-lookup/);
+});
+
+test("case law panel: turning citation checks off sends on:false once and redraws as off", async () => {
+  const env = await openCaselaw(caselawState({ key: "settings" }));
+  assert.doesNotMatch(env.main().textContent, /not looked up until/, "a key is saved");
+  const btn = byText(env.main(), "button", "Turn off citation checks");
+  btn.click();
+  btn.click();  // disabled while the request is out
+  await env.flush();
+  const post = env.only("POST", new RegExp(`^/cases/${A.id}/caselaw$`));
+  assert.deepEqual(post.json(), { on: false });
+  post.respond({ caselaw: caselawState({ cite: "declined", key: "settings" }) });
+  await env.flush();
+  assert.ok(byText(env.main(), "h2", "Cite checking: off for this case (a person turned it off)"));
+  assert.equal(env.main().querySelectorAll("button").filter((b) => /^Turn off/.test(b.textContent)).length, 0);
+  assert.ok(byText(env.main(), "button", "Turn on case law search and citation checks"));
+  assert.equal(env.toast(), "Case cite checks are off for this case.");
+});
+
+test("case law panel: turning search on sends on:true and says what search sends", async () => {
+  const env = await openCaselaw(caselawState());
+  assert.match(env.main().textContent, /Search words are sent\./);
+  byText(env.main(), "button", "Turn on case law search").click();
+  await env.flush();
+  const post = env.only("POST", new RegExp(`^/cases/${A.id}/caselaw$`));
+  assert.deepEqual(post.json(), { on: true });
+  post.respond({ caselaw: caselawState({ cite: "on", search: "on" }) });
+  await env.flush();
+  assert.ok(byText(env.main(), "h2", "Cite checking: on"));
+  assert.ok(byText(env.main(), "button", "Turn off citation checks and search"));
+  assert.equal(env.main().querySelectorAll("button").filter((b) => /^Turn on/.test(b.textContent)).length, 0);
+  assert.equal(env.toast(), "Case law search is on for this case.");
 });
