@@ -2,7 +2,8 @@
 
 Hermes's classic terminal takes the Markdown out of a model's reply before showing it, but prints a
 plugin command's answer as it comes, so `**NOT LOOKED UP**` and `# Matter status` would show with
-their marks. /matter answers in Markdown everywhere else: Desktop, Telegram and the rest draw it.
+their marks. /matter answers in Markdown on the surfaces known to draw it: Telegram and the other
+chat platforms, and Desktop when it runs the command itself.
 """
 from __future__ import annotations
 
@@ -10,8 +11,12 @@ import os
 import re
 
 # The surfaces that print a command's answer as typed, by the `platform` Hermes hands a command.
-# "cli" is `hermes chat --cli`. Other values are left alone until they are seen printing marks.
-PLAIN_PLATFORMS = ("cli",)
+# "cli" is `hermes chat --cli` running the command itself. "local" is what a command gets when a
+# running gateway owns the session: the classic terminal, the TUI and Desktop all arrive as "local"
+# with nothing to tell them apart, and the terminal was seen printing the marks (2026-11-10), so
+# all three get plain text, which reads right on each. Other values are left alone until they are
+# seen printing marks.
+PLAIN_PLATFORMS = ("cli", "local")
 
 _BOLD = re.compile(r"\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*")
 _CODE = re.compile(r"`([^`\n]+)`")

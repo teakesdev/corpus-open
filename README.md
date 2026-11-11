@@ -276,7 +276,8 @@ the MCP server above can't:
   shows what is sent, where the CourtListener key goes in Hermes, and the terminal commands, with
   full paths, that turn each cite check off or back on. In the classic terminal
   (`hermes chat --cli`) `/matter` answers in plain text, since that surface prints a command's
-  answer as typed.
+  answer as typed. When a running Hermes gateway owns the session, the terminal, the TUI and
+  Desktop look the same to a command, so all three get the plain form.
   `/matter init <folder>` makes a case folder, points the plugin at it and says what to do next.
   `/matter demo [folder]` makes a practice case (default `~/cases/corpus-open-demo`): three source
   files recorded with a hash, two made-up deadlines (one overdue), four labeled facts (one with no

@@ -119,6 +119,17 @@ class TestMatterInTheTerminal(PluginCase):
         self.assertIn("**", p.command(f"check {DRAFT}", platform="desktop"))
         self.assertTrue(p.command("", platform="desktop").startswith("# Matter status — "))
 
+    def test_a_session_the_gateway_owns_gets_no_marks_either(self):
+        # With a gateway running, Hermes runs the command there and hands it "local" for the classic
+        # terminal, the TUI and Desktop alike (its plugin docs: "`local` (CLI/Desktop sessions owned
+        # by the gateway)"), with nothing a command can read to tell them apart. Seen live
+        # 2026-11-10: the terminal showed the marks. Plain text reads right on all three.
+        p = self.demo()
+        for sub in SUBS:
+            out = p.command(sub, platform="local")
+            self.assertEqual(marks(out), [], sub)
+            self.assertEqual(out, p.command(sub, platform="cli"), sub)
+
     def test_a_case_with_no_folder_yet(self):
         out = self.plugin(matter_dir="").command("", platform="cli")
         self.assertIn("/matter demo", out)
