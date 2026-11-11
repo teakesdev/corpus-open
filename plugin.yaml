@@ -3,12 +3,15 @@ version: "0.6.0"
 manifest_version: 2
 api_version: 1
 description: >-
-  Corpus Open's matter kit inside Hermes. A citation guard lists every case, statute and
-  code cite under each reply with what CourtListener, Corpus and your case file hold at it
-  (NO SUCH VOLUME, FOUND, NOT FOUND, NAME DIFFERS, IN CORPUS), so a made-up cite is flagged
-  before it reaches a filing; a cite whose volume or year cannot exist is flagged with no
-  lookup at all. Twelve tools read and keep a local case folder (labeled facts with sources,
-  deadlines and triggers, brief check, counsel packet, court rules, hash verification), a
+  For people handling their own court case without a lawyer (pro se, self-represented
+  litigants): Corpus Open, a legal case kit for litigation, inside Hermes. A citation guard
+  lists every case, statute and code cite under each reply with what CourtListener, Corpus and
+  your case file hold at it (NO SUCH VOLUME, FOUND, NOT FOUND, NAME DIFFERS, IN CORPUS), so a
+  made-up (hallucinated) citation is flagged before it reaches a court filing; a cite whose
+  volume or year cannot exist is flagged with no lookup at all. A quote guard refuses a write
+  that misquotes a filed document or cites the wrong page. Twelve tools read and keep a local
+  case folder (labeled facts with sources, deadlines and triggers, brief check, a packet for a
+  lawyer deciding whether to take the case, court rules, hash verification), a
   deadline brief opens each session, /matter shows status, deadlines and the packet, and in
   Hermes Desktop a Case pane shows deadlines (passed first), a tamper badge for the case's files
   and how many facts have no source.
@@ -16,11 +19,11 @@ description: >-
   550 U.S. 544 go to CourtListener, only when a key is set, and bare statute and code cites such
   as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us). Nothing else goes anywhere. Each check
   can be turned off per case, and off sticks; citation_guard local keeps every cite on this
-  computer. Nothing is filed, sent or shared.
+  computer. Nothing is filed, sent or shared. Not a lawyer and not legal advice.
 author: Corpus (teakesdev)
 license: Apache-2.0
 homepage: https://github.com/teakesdev/corpus-open
-tags: [legal, citations, litigation, pro-se, deadlines, matter]
+tags: [legal, law, pro-se, self-represented, litigation, lawsuit, court, citations, case-law, statutes, legal-research, deadlines, hallucination, courtlistener, matter]
 requires_hermes: ">=0.21.6"
 provides_tools:
   - matter_status
