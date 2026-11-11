@@ -26,8 +26,14 @@ What could go wrong, and the test that would catch it:
                                                     -> Passes tests
 - a relative path is only found from the working directory, or an absolute one not at all
                                                     -> Paths tests
-- a command naming a registered source no longer goes to the source guard's approval first
-                                                    -> test_the_source_guard_still_comes_first
+- a command naming a registered source no longer goes to the source guard's approval
+                                                    -> test_a_command_naming_a_source_still_goes_to_approval
+- the source guard's approval question is all a bad quotation gets: a person may say yes, and with
+  approvals turned off nobody is asked. On the third take the agent's command began "cd <case> &&",
+  so it named the case folder, got only the question, and wrote the sentence
+                                                    -> test_a_bad_quotation_is_refused_even_when_the_
+                                                       command_also_needs_approval
+- an error in one guard turns the other off         -> the two test_an_error_in_... tests
 - the guard raises, or checks with the setting off  -> Passes tests
 - the write_file message changes                    -> test_the_write_file_message_is_unchanged
 
@@ -238,14 +244,53 @@ class Paths(Base):
 
 
 class Order(Base):
-    def test_the_source_guard_still_comes_first(self):
-        for cmd in ("printf '%s\\n' '" + BAD + "' | tee -a " + DRAFT + " " + DECLARATION,
-                    "printf '%s\\n' '" + BAD + "' >> " + DECLARATION):
+    def live(self, sentence):
+        """The command the agent ran on the third take: it names the case folder first."""
+        return (f"cd {self.case} && printf '\\n\\n{sentence}\\n' >> {DRAFT} && tail -n 3 {DRAFT}")
+
+    def test_a_command_naming_a_source_still_goes_to_approval(self):
+        for cmd in ("printf '%s\\n' '" + EXACT + "' | tee -a " + DRAFT + " " + DECLARATION,
+                    "printf '%s\\n' '" + EXACT + "' >> " + DECLARATION,
+                    "printf '%s\\n' '" + BAD + "' >> " + DECLARATION,  # no draft named: not the quote check's
+                    self.live(EXACT)):
             with self.subTest(cmd=cmd):
                 d = self.hook("terminal", cmd)
                 self.assertEqual(d["action"], "approve", d)
                 self.assertEqual(d["rule_key"], sg.RULE_KEY)
-                self.assertIn("registered source document " + DECLARATION, d["message"])
+
+    def test_the_approval_names_the_source(self):
+        d = self.hook("terminal", "printf '%s\\n' '" + EXACT + "' >> " + DECLARATION)
+        self.assertIn("registered source document " + DECLARATION, d["message"])
+
+    def test_a_bad_quotation_is_refused_even_when_the_command_also_needs_approval(self):
+        # An approval is a question a person may answer yes, and with approvals off nobody is asked.
+        # The command the agent ran on 2026-11-10 named the case folder, so it only got the question.
+        for cmd in (self.live(BAD),
+                    "printf '%s\\n' '" + BAD + "' | tee -a " + DRAFT + " " + DECLARATION):
+            with self.subTest(cmd=cmd):
+                d = self.hook("terminal", cmd)
+                self.assertEqual(d["action"], "block", d)
+                self.assertIn("this command was not run", d["message"])
+                self.assertIn("not found: " + BAD_QUOTE, d["message"])
+
+    def test_a_block_from_the_source_guard_is_not_replaced(self):
+        store = os.path.join(self.case, ".matter", "sources.jsonl")
+        d = self.p.on_tool_call("write_file", {"path": store, "content": BAD + "\n"})
+        self.assertEqual(d["action"], "block", d)
+        self.assertNotIn("quote check", d["message"])
+
+    def test_an_error_in_the_source_guard_does_not_skip_the_quote_check(self):
+        with mock.patch.object(sg, "check", side_effect=RuntimeError("boom")):
+            d = self.hook("terminal", self.live(BAD))
+            self.assertEqual(d["action"], "block", d)
+            self.assertIn("this command was not run", d["message"])
+            self.assertEqual(self.hook("terminal", self.live(EXACT))["action"], "approve")
+
+    def test_an_error_in_the_quote_check_leaves_the_approval(self):
+        with mock.patch.object(qg, "check", side_effect=RuntimeError("boom")):
+            d = self.hook("terminal", self.live(BAD))
+        self.assertEqual(d["action"], "approve", d)
+        self.assertEqual(d["rule_key"], sg.RULE_KEY)
 
     def test_the_write_file_message_is_unchanged(self):
         d = qg.check("write_file", {"path": self.draft, "content": BAD + "\n"}, matter_dir=self.case,

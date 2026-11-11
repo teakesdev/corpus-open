@@ -255,7 +255,8 @@ the MCP server above can't:
   write and tells the agent what is wrong and where the words really are; exact and can't check
   pass. A `terminal` command or `execute_code` run that looks like it changes files and names a
   draft is checked the same way on its own text, read as the text it would write, and refused
-  before it runs. A command that builds its text in pieces, encodes it, or writes through a file
+  before it runs, even when the source guard would only have asked about the same command. A
+  command that builds its text in pieces, encodes it, or writes through a file
   it doesn't name is not caught: this catches an agent's mistakes; it is not a sandbox. Exact means
   the words are in the registered document on that page, not that they prove the point. The
   `quote_guard` setting turns it off.
