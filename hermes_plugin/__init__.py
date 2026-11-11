@@ -44,6 +44,13 @@ from .tools import SCHEMAS, TOOLSET, MatterError, Tools, draft_path, resolve_mat
 PLUGIN_ID = "corpus-open"
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
+SKILLS = [
+    ("matter-kit", SKILL_PATH,
+     "How to keep a case folder: hashed sources, labeled facts with sources, deadlines, counsel packets"),
+    ("case-intake", os.path.join(KIT, "skills", "case-intake", "SKILL.md"),
+     "Start a new case with a person who has no lawyer: one plain question at a time, recorded as "
+     "facts with no source until a paper backs them, then /matter intake for what is missing"),
+]
 DEMO_SOURCE = os.path.join(KIT, "demo-matter")
 DEMO_DECLARATION = "Filings/12-declaration_synthetic.md"
 DEMO_COMPLAINT = "Filings/complaint_synthetic.md"
@@ -74,8 +81,8 @@ UNCONFIRMED = ("Dates marked working-estimate, unverified or secondary-source ar
 _QUOTE_ORDER = (_quote_guard.quotecheck.NOT_FOUND, _quote_guard.quotecheck.WRONG_PAGE,
                 _quote_guard.quotecheck.CANT_CHECK, _quote_guard.quotecheck.EXACT)
 _QUOTE_MARK = {_quote_guard.quotecheck.EXACT: "✓", _quote_guard.quotecheck.CANT_CHECK: "·"}
-USAGE = ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant | "
-         "init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
+USAGE = ("Usage: /matter [status] | deadlines | intake | packet [30s|3min|15min] | check <draft.md> | "
+         "grant | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
 WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
 WATCH_USAGE = ("Usage: /matter watch (the check, now) | /matter watch on [HH:MM] (each morning, through Hermes "
                "cron) | /matter watch off")
@@ -322,6 +329,8 @@ class Plugin:
                 return status.replace(md, _terminal.tilde(md), 1) + "\n\n" + self._deadline_text()
             if sub == "deadlines":
                 return self._deadline_text()
+            if sub == "intake":
+                return self._intake()
             if sub == "packet":
                 return self._unwrap(self.tools.handler("matter_packet_render")({"layer": rest or "3min"}))
             if sub == "check":
@@ -365,6 +374,20 @@ class Plugin:
             ways = [DEMO_WAY, "- /matter init ~/cases/my-case: a folder for your own case. Your files stay "
                               "on this computer."]
         return "\n".join([WELCOME, "", head, *ways, "", THEN_ASK])
+
+    def _intake(self) -> str:
+        """/matter intake: the intake checklist (matterkit.intake), read-only. With no case yet, how
+        to make one."""
+        from ..matterkit import intake
+        s = self.settings()
+        try:
+            md = resolve_matter(s.get("matter_dir"))
+        except MatterError:
+            raw = str(s.get("matter_dir") or "").strip()
+            return intake.no_case(_terminal.tilde(os.path.abspath(os.path.expanduser(raw))) if raw else None)
+        today = self.today()
+        items = intake.steps(md, today=today, guard_mode=s["citation_guard"])
+        return intake.render(items, shown=_terminal.tilde(md), today=today)
 
     def _check(self, rel: str) -> str:
         """/matter check: the draft's cites (the citation guard's block), then its quotations and
@@ -678,15 +701,15 @@ def register(ctx, *, secret=_secret, today=None) -> Plugin:
     ctx.register_hook("pre_llm_call", plugin.on_turn)
     ctx.register_hook("pre_tool_call", plugin.on_tool_call)
     skill = getattr(ctx, "register_skill", None)
-    if callable(skill) and os.path.isfile(SKILL_PATH):
+    for name, path, description in SKILLS if callable(skill) else ():
+        if not os.path.isfile(path):
+            continue
         try:
-            skill("matter-kit", SKILL_PATH,
-                  description="How to keep a case folder: hashed sources, labeled facts with sources, "
-                              "deadlines, counsel packets")
-        except Exception:  # noqa: BLE001 - a skill that won't register must not stop the tools loading
+            skill(name, path, description=description)
+        except Exception:  # noqa: BLE001 - a skill that won't register must not stop the tools or the next skill
             pass
     ctx.register_command("matter", plugin.command,
-                         description="Your case: status, deadlines, morning watch, calendar, counsel packet, cite "
-                                     "check, new case, demo",
-                         args_hint="[status|deadlines|watch|calendar|packet|check|grant|init|demo]")
+                         description="Your case: status, deadlines, intake checklist, morning watch, calendar, "
+                                     "counsel packet, cite check, new case, demo",
+                         args_hint="[status|deadlines|intake|watch|calendar|packet|check|grant|init|demo]")
     return plugin
