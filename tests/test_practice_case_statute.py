@@ -1,21 +1,28 @@
-"""The practice case's statute cite is one Corpus answers with that section.
+"""The practice case's statute cite reads IN CORPUS for the section Corpus holds.
 
 The practice draft holds three planted mistakes and three things that are right: a real case, a
-real statute and a real quotation. Its README says a check should pass the right ones. What could
-go wrong, and so what these tests pin:
+real statute and a real quotation. Its README says a check should pass the right ones. The statute
+is Title VII's retaliation provision, written as a brief writes it: "42 U.S.C. § 2000e-3(a)". What
+could go wrong, and so what these tests pin:
 
-- The draft cites a statute Corpus does not return for the request the plugin sends. The row then
-  reads NOT MATCHED IN CORPUS for a real statute, on the first thing a newcomer tries. This happened:
-  on 2026-11-10 Corpus's five results for "42 U.S.C. § 2000e-3(a)" did not include that section.
-- The draft's cite is written in a form the match cannot equal to Corpus's heading (a subsection
-  letter, or a hyphenated section, which Corpus writes with a long dash).
-- The plugin loses the heading Corpus sent. This happened too: the parser only read a numbered
-  heading line that ended in a full stop ("... tenant holding over."), and United States Code
-  headings do not ("29 U.S.C. § 2615 — Prohibited acts"), so the hit was known only by its node id
-  and no United States Code section could match.
+- The row reads NOT MATCHED IN CORPUS for a real statute, on the first thing a newcomer tries.
+  This happened on 2026-11-10, for three reasons that all had to be fixed:
+  - Corpus did not return the section for the request the plugin sends (fixed in Corpus);
+  - the plugin lost the heading Corpus sent: the parser only read a numbered heading line that
+    ended in a full stop ("... tenant holding over."), and United States Code headings do not
+    ("42 U.S.C. § 2000e–3 — Other unlawful employment practices"), so the hit was known only by
+    its node id and no United States Code section could match (fixed here, TestHeadingLines);
+  - the cite has a hyphen where Corpus's heading has a long dash, and a subsection letter the
+    heading does not have (fixed by the dash and subsection matching this branch stacks on).
+- The draft's sentence says more than the cited section does. On 2026-11-10 the cite was swapped
+  for 29 U.S.C. § 2615 because that one matched; that section only covers practices the Family and
+  Medical Leave Act makes unlawful, so the sentence over-claimed. The Title VII cite is back.
+- The row claims more than was checked: Corpus holds sections, so a match on § 2000e–3 does not
+  check subsection (a)'s text, and the row has to say so.
 
-ANSWER is what Corpus sent on 2026-11-10 to the plugin's own request for "29 U.S.C. § 2615"
-(federal law, five results), with each excerpt cut short. Nothing here reaches the network.
+TITLE_VII is what Corpus sent on 2026-11-10 (after its own fix) to the plugin's request for
+"42 U.S.C. § 2000e-3(a)" (federal law, five results); FMLA is what it sent for "29 U.S.C. § 2615".
+Each excerpt is cut short. Nothing here reaches the network.
 """
 import io
 import os
@@ -30,8 +37,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_citescreen_guard import DRAFT_REL, KIT, Ctx, cases, corpus, guard, hp, no_network  # noqa: E402
 
-CITE = "29 U.S.C. § 2615"
-ANSWER = (
+CITE = "42 U.S.C. § 2000e-3(a)"
+TITLE_VII = (
+    '5 of 187 results for "42 U.S.C. § 2000e-3(a)" in US (hybrid):\n\n'
+    "1. 42 U.S.C. § 2000e\u20133 \u2014 Other unlawful employment practices\n   United States · USC\n"
+    "   (a) Discrimination for making charges, testifying, assisting, or participating in enforcement\n"
+    "   node_id: 741ab9f4-75f5-42de-bbbf-c549d9a1ca14\n\n"
+    "2. 29 U.S.C. § 628 \u2014 Rules and regulations; exemptions\n   United States · USC\n"
+    "   In accordance with the provisions of subchapter II of chapter 5 of title 5\n"
+    "   node_id: 8173e4a4-ca34-44c0-86ea-0e516ef0135b\n\n"
+    "3. 29 C.F.R. Appendix A to Part 1636 \u2014 Interpretive Guidance on the Pregnant Workers Fairness Act\n"
+    "   United States · CFR\n   internal citations and quotation marks omitted). 177 See 42 U.S.C. 2000e-3(a).\n"
+    "   node_id: d38553e7-3607-4927-9a18-1cd12c11f481\n\n"
+    "4. 42 U.S.C. § 2000e\u20132 \u2014 Unlawful employment practices\n   United States · USC\n"
+    "   (a) Employer practicesIt shall be an unlawful employment practice for an employer\n"
+    "   node_id: a5276414-1f38-43bc-a7eb-4ffcffa08b05\n\n"
+    "5. 29 C.F.R. Appendix to Part 1630 \u2014 Interpretive Guidance on Title I of the Americans With Disabilities Act\n"
+    "   United States · CFR\n   Title I of the ADA prohibits disability-based discrimination in employment.\n"
+    "   node_id: 74c05897-7db5-4b92-912c-217681fdbe2b")
+FMLA = (
     '5 of 172 results for "29 U.S.C. § 2615" in US (hybrid):\n\n'
     "1. 29 U.S.C. § 2615 — Prohibited acts\n   United States · USC\n"
     "   (a) Interference with rights(1) Exercise of rightsIt shall be unlawful for any employer to\n"
@@ -73,7 +97,7 @@ class TestPracticeCaseStatute(unittest.TestCase):
             if payload["method"] == "initialize":
                 return {"jsonrpc": "2.0", "id": 1, "result": {}}
             self.asked.append(payload["params"]["arguments"])
-            return {"jsonrpc": "2.0", "id": 2, "result": {"text": ANSWER, "isError": False}}
+            return {"jsonrpc": "2.0", "id": 2, "result": {"text": TITLE_VII, "isError": False}}
         p = mock.patch.object(corpus.CorpusSearchAdapter, "_rpc", rpc)
         p.start()
         self.addCleanup(p.stop)
@@ -85,12 +109,18 @@ class TestPracticeCaseStatute(unittest.TestCase):
     def test_the_draft_cites_one_statute_and_it_is_the_one_corpus_answers(self):
         self.assertEqual(guard.statute_cites(self.draft()), [CITE])
 
-    def test_the_cite_has_no_subsection_letter_and_no_hyphenated_section(self):
-        # Corpus's heading has no "(a)", and it writes "2000e–3" with a long dash, so neither form
-        # can equal the heading.
+    def test_the_cite_is_written_as_a_brief_writes_it(self):
+        # A hyphen where Corpus prints a long dash, and a subsection letter Corpus's heading lacks:
+        # the two forms that could not match before. The draft keeps them on purpose.
         (cite,) = guard.statute_cites(self.draft())
-        self.assertNotRegex(cite, r"[()]")
-        self.assertNotRegex(cite.split("§", 1)[1], r"[-–—]")
+        self.assertIn("2000e-3", cite)
+        self.assertTrue(cite.endswith("(a)"))
+
+    def test_the_sentence_is_about_the_statute_it_cites(self):
+        # The sentence was once left as it was while the cite became a leave statute.
+        (line,) = [ln for ln in self.draft().splitlines() if CITE in ln]
+        self.assertEqual(line, "Federal law forbids firing a worker for opposing an unlawful practice. " + CITE + ".")
+        self.assertNotIn("§ 2615", self.draft())
 
     def test_matter_check_reads_the_statute_as_in_corpus(self):
         plugin = hp.Plugin(Ctx(dict(matter_dir=self.dir)), secret=lambda _name: None)
@@ -99,7 +129,14 @@ class TestPracticeCaseStatute(unittest.TestCase):
         (row,) = [ln for ln in out.splitlines() if CITE in ln and ln.startswith("- ")]
         self.assertIn("IN CORPUS", row)
         self.assertNotIn("NOT MATCHED", row)
-        self.assertIn("Corpus: Prohibited acts", row)  # the heading Corpus gave, after the cite
+        self.assertIn("Corpus: Other unlawful employment practices", row)  # the heading Corpus gave
+        self.assertIn("741ab9f4-75f5-42de-bbbf-c549d9a1ca14", row)  # linked to the section, not a neighbour
+
+    def test_the_row_says_the_subsection_was_not_checked(self):
+        plugin = hp.Plugin(Ctx(dict(matter_dir=self.dir)), secret=lambda _name: None)
+        out = plugin.command(f"check {DRAFT_REL}")
+        (row,) = [ln for ln in out.splitlines() if CITE in ln and ln.startswith("- ")]
+        self.assertIn("subsection (a) not checked against its text", row)
 
 
 class TestHeadingLines(unittest.TestCase):
@@ -107,11 +144,12 @@ class TestHeadingLines(unittest.TestCase):
         return [h["citation"] for h in corpus._extract_hits(text)]
 
     def test_a_heading_with_no_full_stop_is_read(self):
-        self.assertEqual(self.headings(ANSWER)[:2],
+        self.assertEqual(self.headings(FMLA)[:2],
                          ["29 U.S.C. § 2615 — Prohibited acts", "7 U.S.C. § 2615 — Finding and issuance of plan"])
+        self.assertEqual(self.headings(TITLE_VII)[0], "42 U.S.C. § 2000e–3 — Other unlawful employment practices")
 
     def test_a_heading_keeps_a_colon_and_a_semicolon(self):
-        got = self.headings(ANSWER)
+        got = self.headings(FMLA)
         self.assertEqual(got[2], "12 U.S.C. § 2615 — Contracts and liens; validity")
         self.assertEqual(got[3], "10 U.S.C. § 2615 — Military museums and military education programs: "
                                  "cooperative agreement authority")
