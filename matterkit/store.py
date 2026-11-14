@@ -197,6 +197,28 @@ CREATE TABLE IF NOT EXISTS document_blocks (
   reason TEXT,
   PRIMARY KEY (document_sha256, part, locator)
 );
+-- The timeline: a fact's date, and the exact words each source holds for it. Siblings of
+-- assertions and assertion_sources rather than new columns on them, because older code inserts
+-- into assertion_sources by position. Purely additive: an old store gains both tables on its next
+-- connect, and nothing already stored is read or rewritten. `events` is the store's audit trail
+-- (deadline changes, rule packs), not the case's story, so the timeline does not use it.
+CREATE TABLE IF NOT EXISTS fact_dates (
+  assertion_id TEXT PRIMARY KEY REFERENCES assertions(id),
+  date_start TEXT NOT NULL,          -- YYYY-MM-DD, YYYY-MM or YYYY: as precise as a source is
+  date_end TEXT,                     -- a range's last date, same forms; NULL for one date
+  precision TEXT NOT NULL CHECK (precision IN ('day','month','year')),
+  approximate INTEGER NOT NULL DEFAULT 0 CHECK (approximate IN (0,1)),   -- "on or about"
+  date_basis TEXT NOT NULL DEFAULT 'stated' CHECK (date_basis IN ('stated','inferred')),
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fact_quotes (
+  assertion_id TEXT NOT NULL REFERENCES assertions(id),
+  document_id TEXT NOT NULL REFERENCES documents(id),
+  locator TEXT NOT NULL DEFAULT '',  -- the source's locator as cited ('' when it names none)
+  quote TEXT NOT NULL CHECK (length(trim(quote)) > 0),
+  PRIMARY KEY (assertion_id, document_id, locator)
+);
 """
 
 VALID_STATUS = {"DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"}

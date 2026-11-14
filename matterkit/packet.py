@@ -46,6 +46,10 @@ def status_report(conn, matter_dir: str) -> str:
         lines.append(f"- {kind}: {c}")
     lines += ["", f"Assertions: {d['assertions']} · Open deadlines: {d['open_deadlines']} · "
                   f"Unverified authorities: {d['unverified_authorities']}"]
+    from .timeline import summary_line  # local: timeline imports briefcheck, which status needs nowhere else
+    when = summary_line(conn)
+    if when:
+        lines.append(when)
     if d["notices_by_status"]:
         lines += ["", "Custodian notices (transport=nosend; humans send): " +
                   " · ".join(f"{s}: {c}" for s, c in d["notices_by_status"].items())]

@@ -699,6 +699,38 @@ applies to the pack version it was recorded for, never vouches for an undated
 pack, and `--found amended` keeps the pack `STALE` until you attach the new
 version.
 
+## Case timeline (dated facts)
+
+A fact can carry the date it happened, and each of its sources can carry the
+exact words that support it. `timeline` lists dated facts oldest first, then the
+undated ones, and checks every quote against the registered document each time
+it is shown.
+
+```bash
+python3 matter.py fact add ~/cases/my-case --text "Landlord taped the notice to the door" \
+  --status ALLEGATION --date 2026-03-14 \
+  --source Filings/complaint.pdf@p.3 --quote "taped a notice to the door on March 14"
+python3 matter.py fact date ~/cases/my-case a_… --date 2026-03 --approx   # date a fact you already have
+python3 matter.py fact date ~/cases/my-case a_… --clear                   # take it off the timeline
+python3 matter.py timeline ~/cases/my-case [--from 2026-03] [--to 2026-06] [--out TIMELINE.md]
+```
+
+- **Dates** are `YYYY-MM-DD`, `YYYY-MM` or `YYYY`, only as precise as a source is.
+  `--date-end` makes a range, `--approx` marks "on or about", and `--inferred`
+  marks a date worked out rather than stated by any source. A month sorts before
+  the days of that month. `--from`/`--to` keep facts whose dates overlap the window.
+- **Quotes** pair with sources in order: the first `--quote` belongs to the first
+  `--source`. A quote on a source that can't be resolved refuses the whole fact.
+- **Checks** run when the timeline is shown, never stored, so editing a file
+  after the fact was saved can never keep an old ✓. ✓ the words are on the cited
+  page; ⚠ they are on another page (named); ✗ not found; · can't check (file
+  changed, missing, no text, or a locator that isn't a page); – no quote saved.
+  A ✓ means the words are in the document, not that the fact is true.
+- Over MCP: `matter.fact_add` takes `date`, `date_end`, `approximate`, `inferred`
+  and `quotes` (parallel to `sources`); `matter.fact_date` and `matter.timeline`
+  (read-only). In Hermes: `/matter timeline [from DATE] [to DATE]`, and `/matter`
+  status says how many facts are dated.
+
 ## Deadlines and subcases
 
 ```bash

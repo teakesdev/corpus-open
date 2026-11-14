@@ -232,12 +232,13 @@ def register_parent_ref(conn, pdoc):
     return doc_id, f"referenced parent document {pdoc.rel_path} ({pdoc.doc_id}); bytes stay in the parent"
 
 
-def attach_sources(conn, aid, sources, parents):
+def attach_sources(conn, aid, sources, parents, resolved=None):
     """Attach sources (see source_parts) to assertion `aid`. `parents` is resolve_parent_sources'
     result, so parent refs were re-hashed before anything was written. Returns (unrecognized
-    refs, notes). Does not commit; a SubcaseError here means roll back."""
+    refs, notes). Does not commit; a SubcaseError here means roll back. When `resolved` is a dict,
+    it gets {index in sources: (document_id, locator)} for every source that was attached."""
     unrecognized, notes = [], []
-    for s in sources or []:
+    for i, s in enumerate(sources or []):
         key, ref, loc, by_id = source_parts(s)
         if key in parents:
             doc_id, note = register_parent_ref(conn, parents[key])
@@ -250,6 +251,8 @@ def attach_sources(conn, aid, sources, parents):
                 continue
             doc_id = row["id"]
         conn.execute("INSERT OR IGNORE INTO assertion_sources VALUES (?,?,?)", (aid, doc_id, loc))
+        if resolved is not None:
+            resolved[i] = (doc_id, loc)
     return unrecognized, notes
 
 

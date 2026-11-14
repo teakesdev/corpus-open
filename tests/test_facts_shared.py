@@ -257,7 +257,7 @@ class TestFactsModule(FactBase):
     def test_add_returns_the_result_dict(self):
         r = facts.add(self.conn, self.dir, "Sourced", "documented-fact", ["Evidence/note.txt@p1"], by="agent:model-x")
         self.assertEqual(set(r), {"id", "status", "created_by", "sources_attached", "unsupported",
-                                  "unrecognized", "notes"})
+                                  "unrecognized", "notes", "date", "quotes"})
         self.assertRegex(r["id"], r"^a_[0-9a-f]{12}$")
         self.assertEqual((r["status"], r["created_by"], r["sources_attached"], r["unsupported"],
                           r["unrecognized"], r["notes"]), ("DOCUMENTED FACT", "agent:model-x", 1, False, [], []))
@@ -328,7 +328,8 @@ class TestFactsModule(FactBase):
         got = facts.list_(self.conn)
         self.assertEqual([g["status"] for g in got], ["ALLEGATION", "DOCUMENTED FACT", "INFERENCE"])
         for g in got:
-            self.assertEqual(set(g), {"id", "text", "status", "created_by", "created_at", "sources", "unsupported"})
+            self.assertEqual(set(g), {"id", "text", "status", "created_by", "created_at", "sources", "unsupported",
+                                  "date"})
             self.assertRegex(g["created_at"], r"^\d{4}-\d{2}-\d{2}T")
         by_text = {g["text"]: g for g in got}
         self.assertEqual((by_text["Unsourced"]["sources"], by_text["Unsourced"]["unsupported"]), ([], True))
