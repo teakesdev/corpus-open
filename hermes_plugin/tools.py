@@ -95,8 +95,32 @@ SCHEMAS = {
         "source is stored and shown as UNSUPPORTED. Never upgrade a label without a new source.",
         {"text": {"type": "string"}, "status": {"type": "string", "enum": LABELS},
          "sources": {"type": "array", "items": {"type": "string"}},
+         "quotes": {"type": "array", "items": {"type": ["string", "null"]},
+                    "description": "runs alongside sources: quotes[i] is the exact words sources[i] holds for "
+                                   "the fact, copied from the document, or null. The timeline checks each one "
+                                   "against the record whenever it is shown."},
+         "date": {"type": "string", "description": "when it happened, YYYY-MM-DD, YYYY-MM or YYYY, only as precise "
+                                                   "as a source is; puts the fact on the timeline"},
+         "date_end": {"type": "string", "description": "the last date of a range, same forms"},
+         "approximate": {"type": "boolean", "description": "the source says 'on or about' or similar"},
+         "inferred": {"type": "boolean", "description": "the date is worked out, not stated by any source"},
          "directed_by": {"type": "string", "description": "who asked for this fact to be recorded"}},
         ["text", "status"]),
+    "matter_fact_date": _schema(
+        "matter_fact_date",
+        "Put an existing fact on the case timeline, change its date, or take it off with clear. Dates are "
+        "YYYY-MM-DD, YYYY-MM or YYYY, only as precise as a source is; mark inferred when no source states it.",
+        {"fact_id": {"type": "string"}, "date": {"type": "string"}, "date_end": {"type": "string"},
+         "approximate": {"type": "boolean"}, "inferred": {"type": "boolean"}, "clear": {"type": "boolean"},
+         "directed_by": {"type": "string", "description": "who asked for this change"}},
+        ["fact_id"]),
+    "matter_timeline": _schema(
+        "matter_timeline",
+        "The case's dated facts, oldest first, then undated ones, as Markdown. Each source's quote is checked "
+        "against the registered document now (exact, wrong page, not found, can't check); nothing is stored. "
+        "A match means the words are in the document, not that the fact is true. Read-only.",
+        {"from": {"type": "string", "description": "YYYY[-MM[-DD]]: only dates on or after"},
+         "to": {"type": "string", "description": "YYYY[-MM[-DD]]: only dates on or before"}}),
     "matter_fact_list": _schema(
         "matter_fact_list", "List the case's assertions with labels and sources, optionally one label only.",
         {"status": {"type": "string", "enum": LABELS}}),
@@ -216,7 +240,8 @@ class Tools:
         with self._conn() as (conn, _md):
             rows = facts.list_(conn, args.get("status"))
         return [{"id": f["id"], "status": f["status"], "text": f["text"], "supported": not f["unsupported"],
-                 "sources": [x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "") for x in f["sources"]]}
+                 "sources": [x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "") for x in f["sources"]],
+                 "date": f.get("date")}
                 for f in rows]
 
     def matter_deadline_list(self, args):
@@ -229,6 +254,11 @@ class Tools:
         from ..matterkit import triggers
         with self._conn() as (conn, _md):
             return [dict(r) for r in triggers.select(conn, include_closed=bool(args.get("all")))]
+
+    def matter_timeline(self, args):
+        from ..matterkit import timeline
+        with self._conn() as (conn, md):
+            return timeline.render(timeline.build(conn, md, since=args.get("from"), until=args.get("to")))
 
     def matter_packet_render(self, args):
         with self._conn() as (conn, md):
@@ -294,9 +324,20 @@ class Tools:
         from ..matterkit import facts
         with self._conn() as (conn, md):
             r = facts.add(conn, md, args["text"], args.get("status", "UNKNOWN"),
-                          args.get("sources") or [], self._by(args))
+                          args.get("sources") or [], self._by(args), date=args.get("date"),
+                          date_end=args.get("date_end"), approximate=bool(args.get("approximate")),
+                          inferred=bool(args.get("inferred")), quotes=args.get("quotes"))
         return {"id": r["id"], "status": r["status"], "unsupported": bool(r["unsupported"]),
-                "unrecognized_sources": r["unrecognized"], "notes": r["notes"]}
+                "unrecognized_sources": r["unrecognized"], "notes": r["notes"], "date": r["date"],
+                "quotes": r["quotes"]}
+
+    def matter_fact_date(self, args):
+        from ..matterkit import timeline
+        with self._conn() as (conn, _md):
+            d = timeline.set_date(conn, args.get("fact_id"), args.get("date"), args.get("date_end"),
+                                  bool(args.get("approximate")), bool(args.get("inferred")), self._by(args),
+                                  clear=bool(args.get("clear")))
+        return {"fact_id": args.get("fact_id"), "date": d}
 
     def matter_trigger_fire(self, args):
         from ..matterkit import triggers
