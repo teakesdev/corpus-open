@@ -8,6 +8,7 @@ have filed, and keeps your deadlines in front of you. Your case file stays on yo
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml/badge.svg)](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml)
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/teakesdev/corpus-open)
 
 <p align="center">
   <img src="docs/media/banner.png" alt="Corpus Open for Hermes. Catches made-up citations before the judge does." width="100%">
