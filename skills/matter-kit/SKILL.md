@@ -107,8 +107,9 @@ after every capture: `verify` from a foreign cwd; MISSING/CHANGED is a blocker.
 matter fact add <dir> --text "Property records show plaintiff owns both parcels" --status DOCUMENTED-FACT --source "Evidence/EVIDENCE_INVENTORY.md@Tier 1 #6"
 matter fact list <dir> [--status ALLEGATION]     # unsupported rows render **[UNSUPPORTED]**
 matter fact add <dir> --text "Notice taped to the door" --status ALLEGATION --date 2026-03-14 --source "Filings/complaint.pdf@p.3" --quote "taped a notice to the door on March 14"
-matter fact date <dir> <a_id> --date 2026-03 [--date-end 2026-04] [--approx] [--inferred] | --clear
-matter timeline <dir> [--from 2026-03] [--to 2026-06] [--out TIMELINE.md]   # every quote rechecked now
+matter fact date <dir> <a_id> --date 2026-03 [--date-end 2026-04] [--approx] [--inferred] [--event NAME] | --clear
+matter timeline <dir> [--from 2026-03] [--to 2026-06] [--conflicts] [--label L] [--doc rel] [--hypotheses]   # every quote rechecked now
+# text files are cited by line (Evidence/log.txt@L12-L14); facts sharing an --event whose dates don't overlap are listed as conflicts
 matter deadline add <dir> --label "Rule 4(m) service deadline" --due 2026-10-14 --rule "Fed. R. Civ. P. 4(m)" --confidence hard --verification secondary-source
 matter trigger add <dir> --label "Reply brief" --days 7 --waits-on "the response is served" --rule "L.U.Civ.R. 7(b)(4)" --owner ours
 matter trigger fire <dir> <t_id> --on 2026-11-02 --service ecf --source Filings/response.pdf@p.1 --reason "response served" [--dry-run]

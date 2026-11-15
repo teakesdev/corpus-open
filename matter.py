@@ -12,12 +12,16 @@ Usage:
   matter.py fact add <dir> --text T --status LABEL [--source rel@loc]...
                            [--author agent:MODEL [--directed-by PERSON]]
                            # in a subcase, a source may be parent:<rel_path>@loc (hash-checked, no copy)
-                           [--date YYYY[-MM[-DD]] [--date-end ...] [--approx] [--inferred]]
+                           [--date YYYY[-MM[-DD]] [--date-end ...] [--approx] [--inferred] [--event NAME]]
                            [--quote "exact words"]...   # each --quote goes with the --source in its position
+                           # a text file is cited by line: --source Evidence/log.txt@L12-L14
   matter.py fact list <dir> [--status LABEL]
-  matter.py fact date <dir> <a_ID> --date YYYY[-MM[-DD]] [--date-end ...] [--approx] [--inferred] | --clear
-  matter.py timeline <dir> [--from DATE] [--to DATE] [--out FILE] [--no-pdftotext]
-                           # dated facts in order; each source's quote is checked against the record now
+  matter.py fact date <dir> <a_ID> --date YYYY[-MM[-DD]] [--date-end ...] [--approx] [--inferred]
+                           [--event NAME] | --event NAME (rename only) | --clear
+  matter.py timeline <dir> [--from DATE] [--to DATE] [--label LABEL] [--doc rel_path] [--hypotheses]
+                           [--conflicts] [--out FILE] [--no-pdftotext]
+                           # dated facts in order; each source's quote is checked against the record now;
+                           # facts sharing an --event whose dates don't overlap are listed as conflicts
   matter.py amend add <dir> --text T [--para "¶¶ 37, 172"] [--reason R] [--target complaint]
                             [--fact a_ID]... [--source rel@loc]...
                             [--author agent:MODEL [--directed-by PERSON]]
@@ -175,12 +179,12 @@ def cmd_fact(args):
         try:  # parent: refs are re-hashed against the parent before anything is written
             r = facts.add(conn, args.case_dir, args.text, args.status, args.source, by, date=args.date,
                           date_end=args.date_end, approximate=args.approx, inferred=args.inferred,
-                          quotes=args.quote)
+                          quotes=args.quote, event=args.event)
         except (facts.FactError, subcase.SubcaseError) as e:
             sys.exit(f"refused: {e}")
         warn = "\n⚠ UNSUPPORTED — no recognized sources attached." if r["unsupported"] else ""
         bad = f"\n⚠ unrecognized source refs: {r['unrecognized']}" if r["unrecognized"] else ""
-        when = f"\n  dated {timeline.display_date(r['date'])}" if r["date"] else ""
+        when = f"\n  dated {_dated(r['date'])}" if r["date"] else ""
         print(f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}{when}"
               + "".join(f"\n  ↳ {note}" for note in r["notes"]))
         if r["quotes"]:
@@ -188,25 +192,30 @@ def cmd_fact(args):
     elif args.sub == "date":
         if not args.fact_id:
             sys.exit("usage: matter.py fact date <dir> <a_ID> --date YYYY[-MM[-DD]] [--date-end ...] [--approx] "
-                     "[--inferred] | --clear")
+                     "[--inferred] [--event NAME] | --event NAME | --clear")
         try:
             by = store.attribution(args.author, args.directed_by)
         except ValueError as e:
             sys.exit(f"invalid attribution: {e}")
         try:
             d = timeline.set_date(conn, args.fact_id, args.date, args.date_end, args.approx, args.inferred, by,
-                                  clear=args.clear)
+                                  clear=args.clear, event=args.event)
         except timeline.TimelineError as e:
             sys.exit(f"refused: {e}")
-        print(f"{args.fact_id}: date cleared" if d is None else f"{args.fact_id}: dated {timeline.display_date(d)} by {by}")
+        print(f"{args.fact_id}: date cleared" if d is None else f"{args.fact_id}: dated {_dated(d)} by {by}")
     else:
         st = args.status.upper().replace("-", " ") if args.status else None
         for r in facts.list_(conn, st):
             s = "; ".join(x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "")
                           for x in r["sources"]) or "**[UNSUPPORTED]**"
-            when = f"\n                dated {timeline.display_date(r['date'])}" if r.get("date") else ""
+            when = f"\n                dated {_dated(r['date'])}" if r.get("date") else ""
             print(f"[{r['status']:15}] {r['text']}\n                ↳ {s}"
                   f"\n                by {r['created_by'] or 'unrecorded'}{when}")
+
+
+def _dated(d):
+    from matterkit import timeline
+    return timeline.display_date(d) + (f" (event: {d['event']})" if d.get("event") else "")
 
 
 def _amend_line(item):
@@ -505,10 +514,11 @@ def cmd_timeline(args):
     conn = store.connect(args.case_dir)
     try:
         data = timeline.build(conn, args.case_dir, since=getattr(args, "from"), until=args.to,
-                              use_pdftotext=not args.no_pdftotext)
+                              use_pdftotext=not args.no_pdftotext, label=args.label, doc=args.doc,
+                              hypotheses=args.hypotheses)
     except timeline.TimelineError as e:
         sys.exit(f"refused: {e}")
-    text = timeline.render(data)
+    text = timeline.render(data, conflicts_only=args.conflicts)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w") as f:
@@ -1114,6 +1124,8 @@ def main():
     p.add_argument("--approx", action="store_true", help="the source says 'on or about' or similar")
     p.add_argument("--inferred", action="store_true", help="worked out, not stated by any source")
     p.add_argument("--clear", action="store_true", help="for 'date': take the fact off the timeline")
+    p.add_argument("--event", help="a short name for the happening ('notice served'); facts sharing one are "
+                                   "compared, and dates that don't overlap are listed as a conflict")
     p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
                    help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
     p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
@@ -1336,6 +1348,10 @@ def main():
     p = sub.add_parser("timeline", help="dated facts in order, each quote checked against the record now")
     p.add_argument("case_dir"); p.add_argument("--from", help="YYYY[-MM[-DD]]: only dates on or after")
     p.add_argument("--to", help="YYYY[-MM[-DD]]: only dates on or before"); p.add_argument("--out")
+    p.add_argument("--label", help="only this label (e.g. ALLEGATION); HYPOTHESIS shows hypotheses")
+    p.add_argument("--doc", help="only facts with a source in this registered file (rel_path)")
+    p.add_argument("--hypotheses", action="store_true", help="include hypotheses (left out by default)")
+    p.add_argument("--conflicts", action="store_true", help="only the events whose dates disagree")
     p.add_argument("--no-pdftotext", action="store_true"); p.set_defaults(fn=cmd_timeline)
 
     p = sub.add_parser("packet"); p.add_argument("case_dir")

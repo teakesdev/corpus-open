@@ -106,7 +106,7 @@ class TestStatusCharacterization(TmpCase):
             "Documents registered: **3**\n"
             "- evidence: 1\n- filing: 1\n- research: 1\n\n"
             "Assertions: 2 · Open deadlines: 2 · Unverified authorities: 1\n"
-            "Timeline: 0 of 2 facts dated.\n\n"
+            "Timeline: 0 of 2 facts dated · 1 source with no quote.\n\n"
             "Custodian notices (transport=nosend; humans send): draft: 1\n\n"
             "Subcases: 2\n"
             "- kid — Kid case · Open deadlines: 1 · ⚠ OVERDUE: 1\n"

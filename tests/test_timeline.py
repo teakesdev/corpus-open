@@ -97,7 +97,7 @@ class TestAddAndStore(Base):
                          ("p.2", "On January 5, 2026, I attended"))
         listed = facts.list_(self.conn)[0]
         self.assertEqual(listed["date"], {"date_start": "2026-01-05", "date_end": None, "precision": "day",
-                                          "approximate": False, "inferred": False})
+                                          "approximate": False, "inferred": False, "event": None})
 
     def test_undated_fact_is_unchanged(self):
         r = self.add("No date", [f"{DECL}@p.2"])
@@ -175,7 +175,7 @@ class TestBuild(Base):
         out = timeline.render(self.build())
         for mark in ("✓", "⚠ words on p. 3", "✗ not found", "–"):
             self.assertIn(mark, out)
-        self.assertIn("1 exact, 1 wrong page, 1 not found", out)
+        self.assertIn("1 exact, 1 in the wrong place, 1 not found", out)
 
     def test_changed_file_cannot_keep_an_old_check(self):
         self.add("exact", [f"{DECL}@p.2"], ["On January 5, 2026, I attended"], date="2026-01-05")
@@ -238,6 +238,149 @@ class TestFrontDoors(Base):
         self.assertIn("✓", text)
 
 
+LOG = "Evidence/log.txt"
+LOG_TEXT = ("Line one of the log.\nOn March 14 the landlord taped a notice\nto the front door.\n"
+            "Nothing else happened.\n")
+
+
+class TestPhaseTwo(Base):
+    """Line cites, document counts, event names and date conflicts, filters, hypotheses."""
+
+    def setUp(self):
+        super().setUp()
+        write(os.path.join(self.dir, *LOG.split("/")), LOG_TEXT)
+        run_cli("ingest", self.dir)
+
+    def src(self, text):
+        return self.build(hypotheses=True)["dated"][[f["text"] for f in self.build(hypotheses=True)["dated"]]
+                                                    .index(text)]["sources"][0]
+
+    def test_line_cites(self):
+        self.add("in range", [f"{LOG}@L2-L3"], ["taped a notice to the front door"], date="2026-03-01")
+        self.add("one line", [f"{LOG}@line 4"], ["Nothing else happened"], date="2026-03-02")
+        self.add("wrong line", [f"{LOG}@L1"], ["Nothing else happened"], date="2026-03-03")
+        self.add("past the end", [f"{LOG}@L40"], ["absent words"], date="2026-03-04")
+        self.add("lines on a paged file", [f"{DECL}@L3"], ["On January 5, 2026"], date="2026-03-05")
+        self.assertEqual(self.src("in range")["verdict"], timeline.EXACT)
+        self.assertEqual(self.src("one line")["verdict"], timeline.EXACT)
+        wrong = self.src("wrong line")
+        self.assertEqual((wrong["verdict"], wrong["where"]), (timeline.WRONG_PAGE, "L4"))
+        past = self.src("past the end")
+        self.assertEqual((past["verdict"], past["warning"]), (timeline.NOT_FOUND, "the file has 4 lines"))
+        self.assertEqual(self.src("lines on a paged file")["verdict"], timeline.EXACT)
+        out = timeline.render(self.build())
+        self.assertIn("⚠ words on L4", out)
+        self.assertIn("✗ not found (the file has 4 lines)", out)
+        # A line cite can't drift: an edit after registering makes it uncheckable.
+        write(os.path.join(self.dir, *LOG.split("/")), "Inserted first.\n" + LOG_TEXT)
+        self.assertEqual(self.src("in range")["verdict"], timeline.CANT_CHECK)
+
+    def test_line_span_finds_the_first_place(self):
+        frags = timeline.briefcheck._fragments("taped a notice to the front door")
+        self.assertEqual(timeline._line_span(frags, LOG_TEXT.splitlines()), (2, 3))
+        self.assertIsNone(timeline._line_span(frags, ["nothing", "here"]))
+
+    def test_document_count(self):
+        r = self.add("two files", [f"{LOG}@L2-L3", f"{DECL}@p.2", f"{DECL}@p.3"], date="2026")
+        row = self.build()["dated"][0]
+        self.assertEqual(row["documents"], 2)
+        self.assertIn("2 documents: ", timeline.render(self.build()))
+        self.assertTrue(r["id"])
+
+    def test_events_and_conflicts(self):
+        a = self.add("taped", [f"{LOG}@L2-L3"], ["taped a notice"], date="2026-03-14", event="Notice  Served")["id"]
+        self.add("posted", [f"{DECL}@p.2"], status="ALLEGATION", date="2026-03-16", event="notice served")
+        self.add("range overlaps", date="2026-03", event="rent due")
+        self.add("day inside", date="2026-03-05", event="rent due")
+        self.assertEqual(facts.list_(self.conn)[0]["date"]["event"], "notice served")
+        data = self.build()
+        self.assertEqual([c["event"] for c in data["conflicts"]], ["notice served"])
+        self.assertEqual([f["text"] for f in data["conflicts"][0]["facts"]], ["taped", "posted"])
+        out = timeline.render(data)
+        self.assertIn("**Dates that disagree (1)**", out)
+        self.assertIn("_(event: notice served; dates disagree)_", out)
+        self.assertIn("_(event: rent due)_", out)
+        only = timeline.render(data, conflicts_only=True)
+        self.assertTrue(only.startswith("## Dates that disagree (1)"))
+        self.assertNotIn("rent due", only)
+        # Conflicts are worked out over every dated fact, even ones a filter leaves out.
+        self.assertEqual(len(self.build(since="2026-03-15")["conflicts"]), 1)
+        self.assertIn("1 date conflict", timeline.summary_line(self.conn))
+        # Renaming the event alone settles it; the date stays.
+        timeline.set_date(self.conn, a, event="notice taped")
+        self.assertEqual(self.build()["conflicts"], [])
+        self.assertEqual({f["text"]: f["date_start"] for f in self.build()["dated"]}["taped"], "2026-03-14")
+        with self.assertRaises(timeline.TimelineError):
+            timeline.set_date(self.conn, self.add("undated")["id"], event="x")
+        with self.assertRaises(Exception):
+            self.add("too long", date="2026", event="x" * 81)
+        with self.assertRaises(Exception):
+            self.add("event without a date", event="notice served")
+        self.assertEqual(self.count("assertions"), 5)
+
+    def test_filters_and_hypotheses(self):
+        self.add("fact", [f"{LOG}@L2"], date="2026-01")
+        self.add("claim", [f"{DECL}@p.2"], status="ALLEGATION", date="2026-02")
+        self.add("guess", status="HYPOTHESIS", date="2026-03")
+        texts = lambda **kw: [f["text"] for f in self.build(**kw)["dated"]]  # noqa: E731
+        self.assertEqual(texts(), ["fact", "claim"])
+        self.assertEqual(self.build()["hidden_hypotheses"], 1)
+        self.assertIn("1 hypothesis not shown", timeline.render(self.build()))
+        self.assertEqual(texts(hypotheses=True), ["fact", "claim", "guess"])
+        self.assertEqual(texts(label="hypothesis"), ["guess"])
+        self.assertEqual(texts(label="allegation"), ["claim"])
+        self.assertEqual(texts(doc=LOG), ["fact"])
+        with self.assertRaises(timeline.TimelineError):
+            self.build(label="RUMOR")
+        with self.assertRaises(timeline.TimelineError):
+            self.build(doc="Evidence/nope.txt")
+
+    def test_status_counts_sources_with_no_quote(self):
+        self.add("quoted", [f"{LOG}@L2"], ["taped a notice"], date="2026")
+        self.add("bare", [f"{LOG}@L3", f"{DECL}@p.2"])
+        self.assertEqual(timeline.summary_line(self.conn), "Timeline: 1 of 2 facts dated · 2 sources with no quote.")
+
+    def test_first_build_store_gains_event_column(self):
+        aid = self.add("kept", date="2026-01")["id"]
+        self.conn.executescript(
+            "CREATE TABLE fd_old AS SELECT assertion_id,date_start,date_end,precision,approximate,date_basis,"
+            "created_by,created_at FROM fact_dates; DROP TABLE fact_dates; ALTER TABLE fd_old RENAME TO fact_dates;")
+        self.conn.close()
+        ro = store.connect_readonly(self.dir)
+        try:  # read-only on the old shape: dates show, no event, no conflicts
+            self.assertEqual(timeline.build(ro, self.dir, use_pdftotext=False)["dated"][0]["event"], None)
+            self.assertEqual(timeline.summary_line(ro), "Timeline: 1 of 1 facts dated.")
+        finally:
+            ro.close()
+        self.conn = store.connect(self.dir)
+        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(fact_dates)")]
+        self.assertIn("event_key", cols)
+        timeline.set_date(self.conn, aid, event="first build")
+        self.assertEqual(facts.list_(self.conn)[0]["date"]["event"], "first build")
+
+    def test_front_doors(self):
+        out = run_cli("fact", "add", self.dir, "--text", "taped", "--status", "DOCUMENTED-FACT", "--date",
+                      "2026-03-14", "--event", "notice served", "--source", f"{LOG}@L2-L3",
+                      "--quote", "taped a notice").stdout
+        self.assertIn("dated 2026-03-14 (event: notice served)", out)
+        res = self.mcp("matter.fact_add", {"text": "posted", "status": "ALLEGATION", "date": "2026-03-16",
+                                           "event": "notice served"})
+        self.assertFalse(res.get("isError"), res)
+        out = run_cli("timeline", self.dir, "--conflicts").stdout
+        self.assertIn("## Dates that disagree (1)", out)
+        text = self.mcp("matter.timeline", {"conflicts": True})["content"][0]["text"]
+        self.assertIn("**notice served**", text)
+        text = self.mcp("matter.timeline", {"doc": LOG})["content"][0]["text"]
+        self.assertIn("taped", text)
+        self.assertNotIn("| posted", text)
+        aid = [f["id"] for f in facts.list_(self.conn) if f["text"] == "posted"][0]
+        res = self.mcp("matter.fact_date", {"fact_id": aid, "event": "notice posted"})
+        self.assertFalse(res.get("isError"), res)
+        self.assertIn("No dates disagree", run_cli("timeline", self.dir, "--conflicts").stdout)
+        bad = run_cli("timeline", self.dir, "--label", "rumor", check=False)
+        self.assertNotEqual(bad.returncode, 0)
+
+
 @unittest.skipUnless(os.path.exists(os.path.join(KIT, "__init__.py")), "plugin package")
 class TestHermes(unittest.TestCase):
     def setUp(self):
@@ -263,6 +406,16 @@ class TestHermes(unittest.TestCase):
         self.assertIn("timeline", p.command("frobnicate"))
         self.assertIn("Timeline: 1 of 1 facts dated.", p.command("status"))
         self.assertFalse(self.case.call("matter_timeline", {"from": "soon"})["ok"])
+        self.case.call("matter_fact_add", {"text": "Notice posted", "status": "ALLEGATION", "date": "2026-04-02",
+                                           "event": "notice served"})
+        self.case.call("matter_fact_date", {"fact_id": aid, "event": "notice served"})
+        self.assertIn("Dates that disagree (1)", p.command("timeline conflicts"))
+        self.assertIn("**notice served**", self.case.call("matter_timeline", {"conflicts": True})["result"])
+        self.case.call("matter_fact_add", {"text": "A guess", "status": "HYPOTHESIS", "date": "2026-05"})
+        self.assertNotIn("A guess", p.command("timeline"))
+        self.assertIn("A guess", p.command("timeline hypotheses"))
+        self.assertIn("A guess", p.command("timeline label hypothesis"))
+        self.assertIn("Usage: /matter timeline", p.command("timeline label"))
 
 
 if __name__ == "__main__":

@@ -209,6 +209,8 @@ CREATE TABLE IF NOT EXISTS fact_dates (
   precision TEXT NOT NULL CHECK (precision IN ('day','month','year')),
   approximate INTEGER NOT NULL DEFAULT 0 CHECK (approximate IN (0,1)),   -- "on or about"
   date_basis TEXT NOT NULL DEFAULT 'stated' CHECK (date_basis IN ('stated','inferred')),
+  event_key TEXT,                    -- a short name for the happening ("notice served"); facts that
+                                     -- share one and whose dates don't overlap are a date conflict
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
@@ -293,6 +295,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(deadlines)")]
     if cols and "owner" not in cols:  # who must act by the deadline (deadlines.OWNERS); NULL = not set
         conn.execute("ALTER TABLE deadlines ADD COLUMN owner TEXT")
+        conn.commit()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(fact_dates)")]
+    if cols and "event_key" not in cols:  # stores made by the first timeline build
+        conn.execute("ALTER TABLE fact_dates ADD COLUMN event_key TEXT")
         conn.commit()
 
 
