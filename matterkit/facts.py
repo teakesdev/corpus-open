@@ -23,7 +23,7 @@ def normalize_status(s):
 
 
 def add(conn, matter_dir, text, status, sources=(), by="human", date=None, date_end=None,
-        approximate=False, inferred=False, quotes=None):
+        approximate=False, inferred=False, quotes=None, event=None):
     """Register an assertion with its sources. A source is a 'ref@locator' string (ref is a
     rel_path, a document id, or 'parent:rel_path' in a subcase) or a typed
     {"document_id": id, "locator": text} that names one document by its exact id, as the web UI
@@ -32,7 +32,8 @@ def add(conn, matter_dir, text, status, sources=(), by="human", date=None, date_
     `date` (YYYY-MM-DD, YYYY-MM or YYYY), `date_end`, `approximate` and `inferred` put the fact on
     the timeline (matterkit.timeline). `quotes` runs alongside `sources`: quotes[i] is the exact
     words sources[i] holds for the fact, or None. The timeline checks each quote against the
-    record every time it is shown; nothing about the check is stored.
+    record every time it is shown; nothing about the check is stored. `event` names the happening
+    ("notice served") so facts that date the same event can be compared; it needs a date.
 
     Refuses an invalid label (FactError), empty text (FactError), a bad date, a quote with no
     source or on a source that is not a registered document (FactError), and a parent document
@@ -61,8 +62,12 @@ def add(conn, matter_dir, text, status, sources=(), by="human", date=None, date_
             timeline.check_date(date, date_end)
         except timeline.TimelineError as e:
             raise FactError(str(e)) from None
-    elif date_end not in (None, "") or approximate or inferred:
-        raise FactError("a date range, 'approximate' or 'inferred' needs a date")
+        try:
+            event = timeline.normalize_event(event)
+        except timeline.TimelineError as e:
+            raise FactError(str(e)) from None
+    elif date_end not in (None, "") or approximate or inferred or (event not in (None, "")):
+        raise FactError("a date range, 'approximate', 'inferred' or an event name needs a date")
     parents = subcase.resolve_parent_sources(matter_dir, sources, conn)
     aid = new_id("a_")
     resolved: dict = {}
@@ -79,7 +84,7 @@ def add(conn, matter_dir, text, status, sources=(), by="human", date=None, date_
             doc_id, loc = resolved[i]
             conn.execute("INSERT OR REPLACE INTO fact_quotes (assertion_id,document_id,locator,quote) VALUES (?,?,?,?)",
                          (aid, doc_id, loc or "", q.strip()))
-        dated = timeline.write_date(conn, aid, date, date_end, approximate, inferred, by) if date else None
+        dated = timeline.write_date(conn, aid, date, date_end, approximate, inferred, by, event) if date else None
     n = conn.execute("SELECT COUNT(*) c FROM assertion_sources WHERE assertion_id=?", (aid,)).fetchone()["c"]
     return {"id": aid, "status": status, "created_by": by, "sources_attached": n,
             "unsupported": n == 0, "unrecognized": unrecognized, "notes": notes, "date": dated,
@@ -105,5 +110,6 @@ def list_(conn, status=None):
                     "unsupported": not srcs,
                     "date": None if d is None else {
                         "date_start": d["date_start"], "date_end": d["date_end"], "precision": d["precision"],
-                        "approximate": bool(d["approximate"]), "inferred": d["date_basis"] == "inferred"}})
+                        "approximate": bool(d["approximate"]), "inferred": d["date_basis"] == "inferred",
+                        "event": d["event_key"] if "event_key" in d.keys() else None}})
     return out

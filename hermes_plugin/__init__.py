@@ -82,7 +82,7 @@ _QUOTE_ORDER = (_quote_guard.quotecheck.NOT_FOUND, _quote_guard.quotecheck.WRONG
                 _quote_guard.quotecheck.CANT_CHECK, _quote_guard.quotecheck.EXACT)
 _QUOTE_MARK = {_quote_guard.quotecheck.EXACT: "✓", _quote_guard.quotecheck.CANT_CHECK: "·"}
 USAGE = ("Usage: /matter [status] | deadlines | intake | packet [30s|3min|15min] | check <draft.md> | "
-         "timeline [from DATE] [to DATE] | grant | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
+         "timeline [conflicts | hypotheses | from DATE | to DATE | label LABEL | doc <file>] | grant | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
 WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
 WATCH_USAGE = ("Usage: /matter watch (the check, now) | /matter watch on [HH:MM] (each morning, through Hermes "
                "cron) | /matter watch off")
@@ -498,13 +498,19 @@ class Plugin:
                 f"Pick a folder outside every case: {retry}")
 
     def _timeline(self, rest: str) -> str:
-        """`/matter timeline [from DATE] [to DATE]`; DATE is YYYY, YYYY-MM or YYYY-MM-DD."""
+        """`/matter timeline [conflicts] [hypotheses] [from DATE] [to DATE] [label LABEL] [doc FILE]`;
+        DATE is YYYY, YYYY-MM or YYYY-MM-DD, LABEL may be hyphenated (documented-fact)."""
         words = rest.split()
         args: dict = {}
         while words:
-            if len(words) < 2 or words[0].lower() not in ("from", "to"):
-                return "Usage: /matter timeline [from YYYY[-MM[-DD]]] [to YYYY[-MM[-DD]]]"
-            args[words[0].lower()] = words[1]
+            w = words[0].lower()
+            if w in ("conflicts", "hypotheses"):
+                args[w], words = True, words[1:]
+                continue
+            if len(words) < 2 or w not in ("from", "to", "label", "doc"):
+                return ("Usage: /matter timeline [conflicts] [hypotheses] [from YYYY[-MM[-DD]]] "
+                        "[to YYYY[-MM[-DD]]] [label LABEL] [doc <file in the case>]")
+            args[w] = words[1]
             words = words[2:]
         return self._unwrap(self.tools.handler("matter_timeline")(args))
 
