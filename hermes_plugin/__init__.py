@@ -82,7 +82,7 @@ _QUOTE_ORDER = (_quote_guard.quotecheck.NOT_FOUND, _quote_guard.quotecheck.WRONG
                 _quote_guard.quotecheck.CANT_CHECK, _quote_guard.quotecheck.EXACT)
 _QUOTE_MARK = {_quote_guard.quotecheck.EXACT: "✓", _quote_guard.quotecheck.CANT_CHECK: "·"}
 USAGE = ("Usage: /matter [status] | deadlines | intake | packet [30s|3min|15min] | check <draft.md> | "
-         "grant | city [CODE|clear] | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
+         "timeline [conflicts | hypotheses | from DATE | to DATE | label LABEL | doc <file>] | grant | city [CODE|clear] | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
 WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
 WATCH_USAGE = ("Usage: /matter watch (the check, now) | /matter watch on [HH:MM] (each morning, through Hermes "
                "cron) | /matter watch off")
@@ -344,6 +344,8 @@ class Plugin:
                 return self._intake()
             if sub == "packet":
                 return self._unwrap(self.tools.handler("matter_packet_render")({"layer": rest or "3min"}))
+            if sub == "timeline":
+                return self._timeline(rest)
             if sub == "check":
                 if not rest:
                     return "Usage: /matter check <draft.md inside the case folder>"
@@ -525,6 +527,23 @@ class Plugin:
     def _nested_refusal(folder: str, root: str, retry: str) -> str:
         return (f"{folder} is inside the case at {root}, so it can't be a case of its own. "
                 f"Pick a folder outside every case: {retry}")
+
+    def _timeline(self, rest: str) -> str:
+        """`/matter timeline [conflicts] [hypotheses] [from DATE] [to DATE] [label LABEL] [doc FILE]`;
+        DATE is YYYY, YYYY-MM or YYYY-MM-DD, LABEL may be hyphenated (documented-fact)."""
+        words = rest.split()
+        args: dict = {}
+        while words:
+            w = words[0].lower()
+            if w in ("conflicts", "hypotheses"):
+                args[w], words = True, words[1:]
+                continue
+            if len(words) < 2 or w not in ("from", "to", "label", "doc"):
+                return ("Usage: /matter timeline [conflicts] [hypotheses] [from YYYY[-MM[-DD]]] "
+                        "[to YYYY[-MM[-DD]]] [label LABEL] [doc <file in the case>]")
+            args[w] = words[1]
+            words = words[2:]
+        return self._unwrap(self.tools.handler("matter_timeline")(args))
 
     def _init(self, rest: str) -> str:
         if not rest:
