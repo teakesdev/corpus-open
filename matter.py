@@ -12,7 +12,16 @@ Usage:
   matter.py fact add <dir> --text T --status LABEL [--source rel@loc]...
                            [--author agent:MODEL [--directed-by PERSON]]
                            # in a subcase, a source may be parent:<rel_path>@loc (hash-checked, no copy)
+                           [--date YYYY[-MM[-DD]] [--date-end ...] [--approx] [--inferred] [--event NAME]]
+                           [--quote "exact words"]...   # each --quote goes with the --source in its position
+                           # a text file is cited by line: --source Evidence/log.txt@L12-L14
   matter.py fact list <dir> [--status LABEL]
+  matter.py fact date <dir> <a_ID> --date YYYY[-MM[-DD]] [--date-end ...] [--approx] [--inferred]
+                           [--event NAME] | --event NAME (rename only) | --clear
+  matter.py timeline <dir> [--from DATE] [--to DATE] [--label LABEL] [--doc rel_path] [--hypotheses]
+                           [--conflicts] [--out FILE] [--no-pdftotext]
+                           # dated facts in order; each source's quote is checked against the record now;
+                           # facts sharing an --event whose dates don't overlap are listed as conflicts
   matter.py amend add <dir> --text T [--para "¶¶ 37, 172"] [--reason R] [--target complaint]
                             [--fact a_ID]... [--source rel@loc]...
                             [--author agent:MODEL [--directed-by PERSON]]
@@ -56,6 +65,9 @@ Usage:
   matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
                         [--offline]   # never writes the store; checks the draft's case cites on CourtListener
                         # (bare cites, at most one request; a saved answer first); --offline sends nothing
+  matter.py privacy check <dir> <file-or-folder>... [--out REPORT.md] [--no-pdftotext]
+                        # Fed. R. Civ. P. 5.2(a): full SSNs/tax ids, birth dates, minors' names, account numbers
+                        # (advisory: phones, addresses). Masks every match; changes no file; no network.
   matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N] [--fresh]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
                         # sends the draft's case cites, nothing else, to CourtListener; on by default
@@ -66,10 +78,27 @@ Usage:
   matter.py courtlistener on|off|status <dir>   # on: search + case cite checks (asks you to type yes);
                                                 # off: both, and case cite checks stay off
   matter.py courtlistener key [--forget]        # save your free CourtListener key (outside every case folder)
+  matter.py city <dir> [CODE | --clear]          # the case's city (TX-AUSTIN): city code cites that name no
+                                                # city ("Municipal Code § 12.03") are checked on Corpus
+                                                # under it; with no CODE, shows it. Sends nothing.
+  matter.py city --list [TEXT]                   # Corpus city codes (matching TEXT)
   matter.py consent decline <dir> --scope statute-lookup|cite-lookup|search|corpus-search
                                                 # turn one off for the case; it stays off
   matter.py consent propose|activate <dir> [--scope search|cite-lookup|statute-lookup|corpus-search] [--caller ID]...
                                                 # narrower grants; activate asks you to type ACTIVATE
+  matter.py research log <dir> --source S --query Q --outcome found|nothing|blocked|not-online|paywalled|error
+                       [--jurisdiction XX] [--court C] [--years 1990-2005] [--url U] [--note N] [--by NAME]
+                       # a search you did anywhere (Google Scholar, a court's site, a law library); after a
+                       # miss with --jurisdiction it says where else to look
+  matter.py research list <dir> [--outcome O] [--jurisdiction XX] [--json]   # also the searches the kit sent
+  matter.py research save <dir> "TITLE" --why REASON [--revisit YYYY-MM-DD] [--citation C] [--url U]
+                       [--jurisdiction XX] [--by NAME]      # a case that may matter later (a lead, not good law)
+  matter.py research leads <dir> [--status open|all|saved|revisited|dropped|used] [--json]
+  matter.py research due <dir> [--as-of YYYY-MM-DD] [--json]   # leads whose revisit date has come
+  matter.py research set <dir> LEAD_ID [--status S] [--revisit D] [--note N] [--by NAME]
+  matter.py research where XX [--level supreme|appellate|trial|federal-appellate|federal-district|bankruptcy]
+                       [--year 2003|1990-2005] [--court WORDS] [--limit N] [--json]
+                       # where a state's (or DC's, or US federal) opinions can be read free; a dated survey
   matter.py docket suggest <dir>
   matter.py rules build <source.txt|.pdf> <out_dir> --id ID --version V --title T --cite-prefix P
                         [--current-as-of YYYY-MM-DD] [--start-at LINE] [--stop-at LINE] [--court C]
@@ -152,7 +181,7 @@ def cmd_status(args):
 
 
 def cmd_fact(args):
-    from matterkit import facts
+    from matterkit import facts, timeline
     conn = store.connect(args.case_dir)
     if args.sub == "add":
         from matterkit import subcase
@@ -164,21 +193,49 @@ def cmd_fact(args):
             by = store.attribution(args.author, args.directed_by)
         except ValueError as e:
             sys.exit(f"invalid attribution: {e}")
+        if len(args.quote) > len(args.source):
+            sys.exit("refused: each --quote goes with the --source in the same position; there are more quotes "
+                     "than sources")
         try:  # parent: refs are re-hashed against the parent before anything is written
-            r = facts.add(conn, args.case_dir, args.text, args.status, args.source, by)
+            r = facts.add(conn, args.case_dir, args.text, args.status, args.source, by, date=args.date,
+                          date_end=args.date_end, approximate=args.approx, inferred=args.inferred,
+                          quotes=args.quote, event=args.event)
         except (facts.FactError, subcase.SubcaseError) as e:
             sys.exit(f"refused: {e}")
         warn = "\n⚠ UNSUPPORTED — no recognized sources attached." if r["unsupported"] else ""
         bad = f"\n⚠ unrecognized source refs: {r['unrecognized']}" if r["unrecognized"] else ""
-        print(f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}"
+        when = f"\n  dated {_dated(r['date'])}" if r["date"] else ""
+        print(f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}{when}"
               + "".join(f"\n  ↳ {note}" for note in r["notes"]))
+        if r["quotes"]:
+            print(f"  {r['quotes']} quote(s) saved; `matter.py timeline {args.case_dir}` checks them against the record")
+    elif args.sub == "date":
+        if not args.fact_id:
+            sys.exit("usage: matter.py fact date <dir> <a_ID> --date YYYY[-MM[-DD]] [--date-end ...] [--approx] "
+                     "[--inferred] [--event NAME] | --event NAME | --clear")
+        try:
+            by = store.attribution(args.author, args.directed_by)
+        except ValueError as e:
+            sys.exit(f"invalid attribution: {e}")
+        try:
+            d = timeline.set_date(conn, args.fact_id, args.date, args.date_end, args.approx, args.inferred, by,
+                                  clear=args.clear, event=args.event)
+        except timeline.TimelineError as e:
+            sys.exit(f"refused: {e}")
+        print(f"{args.fact_id}: date cleared" if d is None else f"{args.fact_id}: dated {_dated(d)} by {by}")
     else:
         st = args.status.upper().replace("-", " ") if args.status else None
         for r in facts.list_(conn, st):
             s = "; ".join(x["rel_path"] + (f"@{x['locator']}" if x["locator"] else "")
                           for x in r["sources"]) or "**[UNSUPPORTED]**"
+            when = f"\n                dated {_dated(r['date'])}" if r.get("date") else ""
             print(f"[{r['status']:15}] {r['text']}\n                ↳ {s}"
-                  f"\n                by {r['created_by'] or 'unrecorded'}")
+                  f"\n                by {r['created_by'] or 'unrecorded'}{when}")
+
+
+def _dated(d):
+    from matterkit import timeline
+    return timeline.display_date(d) + (f" (event: {d['event']})" if d.get("event") else "")
 
 
 def _amend_line(item):
@@ -472,6 +529,25 @@ def citations_error():
     return StageOrderError
 
 
+def cmd_timeline(args):
+    from matterkit import timeline
+    conn = store.connect(args.case_dir)
+    try:
+        data = timeline.build(conn, args.case_dir, since=getattr(args, "from"), until=args.to,
+                              use_pdftotext=not args.no_pdftotext, label=args.label, doc=args.doc,
+                              hypotheses=args.hypotheses)
+    except timeline.TimelineError as e:
+        sys.exit(f"refused: {e}")
+    text = timeline.render(data, conflicts_only=args.conflicts)
+    if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        with open(args.out, "w") as f:
+            f.write(text + "\n")
+        print(f"wrote {args.out}")
+    else:
+        print(text)
+
+
 def cmd_packet(args):
     conn = store.connect(args.case_dir)
     text = pk.packet(conn, args.case_dir, layer=args.layer)
@@ -512,6 +588,33 @@ def cmd_brief(args):
                                   docket_path=args.docket, mode=args.mode, cites=cites)
     except (ValueError, FileNotFoundError) as e:
         sys.exit(f"brief check refused: {e}")
+    text = report.render()
+    if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"{report.summary()}\nwrote {args.out}")
+    else:
+        print(text)
+    sys.exit(report.exit_code)
+
+
+def cmd_privacy(args):
+    """privacy check: list what Fed. R. Civ. P. 5.2(a) restricts in drafts or filings (and, as advisory, phone
+    numbers and street addresses), every match masked. Reads the files once; writes none of them, sends
+    nothing. Exit 1 = something restricted, 2 = advisory items or files not (fully) scanned, 0 = nothing found."""
+    from matterkit import privacy
+    if not os.path.isdir(args.case_dir):
+        sys.exit(f"no such case folder: {args.case_dir}")
+    targets = [draft_path(args.case_dir, p) for p in args.paths]
+    if args.out:
+        out = os.path.abspath(args.out)
+        for t in targets:
+            t = os.path.abspath(t)
+            if out == t or (os.path.isdir(t) and out.startswith(t.rstrip(os.sep) + os.sep)):
+                sys.exit("privacy check refused: --out would write inside what is being checked; "
+                         "name a report file somewhere else")
+    report = privacy.check(targets, case_dir=args.case_dir, use_pdftotext=not args.no_pdftotext)
     text = report.render()
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -859,6 +962,36 @@ def cmd_consent(args):
               f"callers={g['authorized_callers']}")
 
 
+def cmd_city(args):
+    """city: the case's city for city code cites (matterkit.municipal). Local only."""
+    import getpass
+    from matterkit import municipal
+    if args.list is not None:
+        codes = municipal.suggest(args.list) if args.list else sorted(municipal.CITIES)
+        for code in codes:
+            print(f"{code}\t{municipal.CITIES[code]['name']}")
+        if not codes:
+            print(f"no Corpus city matches {args.list!r}")
+        return
+    if not args.case_dir:
+        sys.exit("usage: matter.py city <case folder> [CODE | --clear]  (or matter.py city --list [TEXT])")
+    if args.clear or args.code:
+        try:
+            rec = municipal.set_case_city(args.case_dir, None if args.clear else args.code,
+                                          args.issuer or getpass.getuser(), "cli")
+        except ValueError as e:
+            sys.exit(f"refused: {e}")
+        if rec is None:
+            print("The case has no city now. City code cites that name no city are listed, not looked up.")
+        else:
+            print(f"The case's city is {municipal.label(rec['jurisdiction'])}. City code cites that name no "
+                  "city are checked on Corpus under it; a cite that names another city is checked under that one.")
+        return
+    code = municipal.case_city(args.case_dir)
+    print(f"The case's city: {municipal.label(code)}" if code else
+          "The case has no city set (`matter.py city <case folder> TX-AUSTIN` sets one).")
+
+
 def cmd_courtlistener(args):
     """courtlistener on|off|status|key: the one switch for case law lookups (search and cite lookup),
     the same switch as the browser UI's Case law lookups panel."""
@@ -949,6 +1082,55 @@ def cmd_search(args):
                 (aid, r.citation or r.name, "resolved", via, note))
         conn.commit()
         print(f"recorded {len(rows)} authorities as resolved (not source-checked)")
+
+
+def _research_case(args):
+    if not os.path.isdir(os.path.join(args.case_dir, ".matter")):
+        sys.exit(f"refused: {args.case_dir} is not a case folder (no .matter/)")
+
+
+def cmd_research(args):
+    """research log|list|save|leads|due|set|where: the case law research log (matterkit.research_log)."""
+    from matterkit import research_log as rl
+    try:
+        if args.sub == "where":
+            res = rl.where(args.jurisdiction, args.level, args.year, args.court,
+                           limit=args.limit if args.limit is not None else (None if args.json else 25))
+            print(json.dumps(res, indent=1) if args.json else rl.render_where(res))
+            return
+        _research_case(args)
+        if args.sub in ("log", "save", "set"):
+            try:
+                by = store.attribution(args.by or os.environ.get("USER"))
+            except ValueError as e:
+                sys.exit(f"invalid attribution: {e}")
+        if args.sub == "log":
+            r = rl.log_search(args.case_dir, by, args.source, args.query, args.outcome, args.jurisdiction,
+                              args.court, args.years, args.url, args.note)
+            print(f"{r['id']} [{r['outcome']}] {r['source']}: {r['query']}")
+            if r["outcome"] in rl.MISSES and r["jurisdiction"]:
+                print(rl.render_hints(rl.hints(r["jurisdiction"], r["source"], years=r["years"], court=r["court"]),
+                                      r["outcome"]))
+            elif r["outcome"] in rl.MISSES:
+                print("Add --jurisdiction XX (a state code, DC, or US) and this says where else to look.")
+        elif args.sub == "list":
+            rows = rl.list_searches(args.case_dir, args.outcome, args.jurisdiction)
+            print(json.dumps(rows, indent=1) if args.json else rl.render_searches(rows))
+        elif args.sub == "save":
+            r = rl.save_lead(args.case_dir, by, args.title, args.why, args.revisit, args.citation, args.url,
+                             args.jurisdiction)
+            print(f"{r['id']} [{r['status']}] {r['title']}" + (f" (look again {r['revisit']})" if r["revisit"] else ""))
+        elif args.sub == "leads":
+            rows = rl.leads(args.case_dir, args.status)
+            print(json.dumps(rows, indent=1) if args.json else rl.render_leads(rows))
+        elif args.sub == "due":
+            res = rl.due(args.case_dir, args.as_of)
+            print(json.dumps(res, indent=1) if args.json else rl.render_due(res))
+        else:
+            r = rl.update_lead(args.case_dir, by, args.lead_id, args.status, args.revisit, args.note)
+            print(f"{r['id']} [{r['status']}] {r['title']}" + (f" (look again {r['revisit']})" if r["revisit"] else ""))
+    except ValueError as e:
+        sys.exit(f"refused: {e}")
 
 
 def cmd_ui(args):
@@ -1059,8 +1241,18 @@ def main():
     p = sub.add_parser("watch"); p.add_argument("case_dir"); p.set_defaults(fn=cmd_watch)
     p = sub.add_parser("status"); p.add_argument("case_dir"); p.set_defaults(fn=cmd_status)
 
-    p = sub.add_parser("fact"); p.add_argument("sub", choices=["add", "list"]); p.add_argument("case_dir")
+    p = sub.add_parser("fact"); p.add_argument("sub", choices=["add", "list", "date"]); p.add_argument("case_dir")
+    p.add_argument("fact_id", nargs="?", help="for 'date': the a_ID of the fact to date")
     p.add_argument("--text"); p.add_argument("--status"); p.add_argument("--source", action="append", default=[])
+    p.add_argument("--quote", action="append", default=[],
+                   help="the exact words the --source in the same position holds for the fact")
+    p.add_argument("--date", help="YYYY-MM-DD, YYYY-MM or YYYY: as precise as the source is")
+    p.add_argument("--date-end", help="the last date of a range, same forms")
+    p.add_argument("--approx", action="store_true", help="the source says 'on or about' or similar")
+    p.add_argument("--inferred", action="store_true", help="worked out, not stated by any source")
+    p.add_argument("--clear", action="store_true", help="for 'date': take the fact off the timeline")
+    p.add_argument("--event", help="a short name for the happening ('notice served'); facts sharing one are "
+                                   "compared, and dates that don't overlap are listed as a conflict")
     p.add_argument("--author", default=os.environ.get("MATTER_AUTHOR"),
                    help="who did the work: 'human' (default) or 'agent:<model>'; env MATTER_AUTHOR")
     p.add_argument("--directed-by", default=os.environ.get("MATTER_DIRECTED_BY"),
@@ -1106,6 +1298,14 @@ def main():
                    help="send nothing: case cites with no saved CourtListener answer are marked NOT VERIFIED "
                         "(by default their bare cites, nothing else, go to CourtListener in at most one request)")
     p.set_defaults(fn=cmd_brief)
+
+    p = sub.add_parser("privacy", help="Filing privacy check (Fed. R. Civ. P. 5.2): masked report, changes no file")
+    p.add_argument("sub", choices=["check"]); p.add_argument("case_dir")
+    p.add_argument("paths", nargs="+", metavar="file-or-folder",
+                   help="drafts or filings (.md, .txt, .docx, .pdf); a folder is scanned file by file")
+    p.add_argument("--out", help="write the (masked) report here instead of printing it")
+    p.add_argument("--no-pdftotext", action="store_true", help="do not run pdftotext: PDFs are listed as not scanned")
+    p.set_defaults(fn=cmd_privacy)
 
     p = sub.add_parser("docket"); p.add_argument("sub", choices=["suggest"]); p.add_argument("case_dir")
     p.set_defaults(fn=cmd_docket)
@@ -1273,12 +1473,77 @@ def main():
     p.add_argument("--directed-by", help="lookup --record: person who directed an agent; env MATTER_DIRECTED_BY")
     p.set_defaults(fn=cmd_cite)
 
+    p = sub.add_parser("research", help="Case law research log: what you searched, leads to revisit, where else to look")
+    commands = p.add_subparsers(dest="sub", required=True)
+    from matterkit import research_log as rlog
+    by_help = "who is recording this (default: your login name)"
+    c = commands.add_parser("log", help="Record a search you did by hand, and what came of it")
+    c.add_argument("case_dir")
+    c.add_argument("--source", required=True,
+                   help='where you looked, e.g. "google scholar", courtlistener, "court website", "law library"; '
+                        "the ids `research where` prints work best")
+    c.add_argument("--query", required=True, help="the words or citation you searched for")
+    c.add_argument("--outcome", required=True, choices=rlog.OUTCOMES,
+                   help="found, nothing, blocked (the site refused you), not-online, paywalled or error")
+    c.add_argument("--jurisdiction", help="state code, DC, or US (federal); after a miss this shows where else to look")
+    c.add_argument("--court", help="which court, in words")
+    c.add_argument("--years", help="the years searched: 2003 or 1990-2005")
+    c.add_argument("--url", help="the page you searched or found")
+    c.add_argument("--note", default="", help="anything you want to remember")
+    c.add_argument("--by", help=by_help)
+    c = commands.add_parser("list", help="Searches logged by hand plus the ones the kit sent to CourtListener")
+    c.add_argument("case_dir")
+    c.add_argument("--outcome", choices=rlog.OUTCOMES)
+    c.add_argument("--jurisdiction", help="only searches scoped to this state code, DC, or US")
+    c.add_argument("--json", action="store_true")
+    c = commands.add_parser("save", help="Keep a case that may matter later (a lead, not good law)")
+    c.add_argument("case_dir"); c.add_argument("title", help="the case, in your words")
+    c.add_argument("--why", required=True, help="why it may matter (required: you will not remember)")
+    c.add_argument("--revisit", help="YYYY-MM-DD to look at it again")
+    c.add_argument("--citation"); c.add_argument("--url")
+    c.add_argument("--jurisdiction", help="state code, DC, or US")
+    c.add_argument("--by", help=by_help)
+    c = commands.add_parser("leads", help="List saved leads, soonest revisit date first")
+    c.add_argument("case_dir")
+    c.add_argument("--status", default="open", choices=["open", "all", *rlog.LEAD_STATUSES],
+                   help="open = still saved (default)")
+    c.add_argument("--json", action="store_true")
+    c = commands.add_parser("due", help="Leads whose revisit date has come, and the ones with no date")
+    c.add_argument("case_dir")
+    c.add_argument("--as-of", help="YYYY-MM-DD to count from (default: today)")
+    c.add_argument("--json", action="store_true")
+    c = commands.add_parser("set", help="Mark a lead revisited, dropped or used, or move its revisit date")
+    c.add_argument("case_dir"); c.add_argument("lead_id", help="the rl_... id from `research leads`")
+    c.add_argument("--status", choices=rlog.LEAD_STATUSES)
+    c.add_argument("--revisit", help="YYYY-MM-DD")
+    c.add_argument("--note", default="", help="what happened (kept with the lead)")
+    c.add_argument("--by", help=by_help)
+    c = commands.add_parser("where", help="Where a state's (or DC's, or the federal) opinions can be read for free, "
+                                          "from a dated survey; needs no case folder")
+    c.add_argument("jurisdiction", help="two-letter state code, DC, or US for the federal courts")
+    c.add_argument("--level", choices=rlog.LEVELS, help="only this kind of court")
+    c.add_argument("--year", help="a year (2003) or a range (1990-2005): marks which places cover it")
+    c.add_argument("--court", help="only courts whose name has these words, e.g. Maryland (federal courts are many)")
+    c.add_argument("--limit", type=int, help="most places to show (default 25; --json shows all)")
+    c.add_argument("--json", action="store_true")
+    for c in commands.choices.values():
+        c.set_defaults(fn=cmd_research)
+
     p = sub.add_parser("pages"); p.add_argument("case_dir"); p.add_argument("path", nargs="?")
     p.set_defaults(fn=cmd_pages)
 
     p = sub.add_parser("stage"); p.add_argument("case_dir"); p.add_argument("authority_id"); p.add_argument("status")
     p.add_argument("--via", default=None); p.add_argument("--evidence", default=None)
     p.set_defaults(fn=cmd_auth_stage)
+
+    p = sub.add_parser("timeline", help="dated facts in order, each quote checked against the record now")
+    p.add_argument("case_dir"); p.add_argument("--from", help="YYYY[-MM[-DD]]: only dates on or after")
+    p.add_argument("--to", help="YYYY[-MM[-DD]]: only dates on or before"); p.add_argument("--out")
+    p.add_argument("--label", help="only this label (e.g. ALLEGATION); HYPOTHESIS shows hypotheses")
+    p.add_argument("--doc", help="only facts with a source in this registered file (rel_path)")
+    p.add_argument("--hypotheses", action="store_true", help="include hypotheses (left out by default)")
+    p.add_argument("--conflicts", action="store_true", help="only the events whose dates disagree")
+    p.add_argument("--no-pdftotext", action="store_true"); p.set_defaults(fn=cmd_timeline)
 
     p = sub.add_parser("packet"); p.add_argument("case_dir")
     p.add_argument("--layer", default="3min", choices=["30s", "3min", "15min"])
@@ -1291,6 +1556,14 @@ def main():
     p.add_argument("--issuer", default=os.environ.get("USER", "human"))
     p.add_argument("--caller", action="append", default=[])
     p.set_defaults(fn=cmd_consent)
+
+    p = sub.add_parser("city", help="The case's city, for city code cites (local only)")
+    p.add_argument("case_dir", nargs="?")
+    p.add_argument("code", nargs="?", help="a Corpus city code such as TX-AUSTIN")
+    p.add_argument("--clear", action="store_true", help="remove the case's city")
+    p.add_argument("--list", nargs="?", const="", default=None, metavar="TEXT", help="list Corpus city codes")
+    p.add_argument("--issuer", help="who is setting it; default your login name")
+    p.set_defaults(fn=cmd_city)
 
     p = sub.add_parser("courtlistener", help="Turn case law lookups on or off for a case, or save your key")
     p.add_argument("sub", choices=["on", "off", "status", "key"])

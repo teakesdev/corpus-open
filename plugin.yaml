@@ -9,15 +9,18 @@ description: >-
   your case file hold at it (NO SUCH VOLUME, FOUND, NOT FOUND, NAME DIFFERS, IN CORPUS), so a
   made-up (hallucinated) citation is flagged before it reaches a court filing; a cite whose
   volume or year cannot exist is flagged with no lookup at all. A quote guard refuses a write
-  that misquotes a filed document or cites the wrong page. Twelve tools read and keep a local
-  case folder (labeled facts with sources, deadlines and triggers, brief check, a packet for a
-  lawyer deciding whether to take the case, court rules, hash verification), a
+  that misquotes a filed document or cites the wrong page. Thirteen tools read and keep a local
+  case folder (labeled facts with sources, deadlines and triggers, brief check, a filing privacy
+  check that finds the Social Security, birth-date and account numbers and minors' names Rule 5.2
+  restricts, a packet for a lawyer deciding whether to take the case, court rules, hash verification), a
   deadline brief opens each session, /matter shows status, deadlines and the packet, and in
   Hermes Desktop a Case pane shows deadlines (passed first), a tamper badge for the case's files
   and how many facts have no source.
   Network calls are only cite checks, on by default for each case: bare case cites such as
   550 U.S. 544 go to CourtListener, only when a key is set, and bare statute and code cites such
-  as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us). Nothing else goes anywhere. Each check
+  as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us). City code cites such as Austin City
+  Code § 25-2-551 go to Corpus too, with the city's Corpus code (TX-AUSTIN), only when the cite
+  or the case names the city. Nothing else goes anywhere. Each check
   can be turned off per case, and off sticks; citation_guard local keeps every cite on this
   computer. Nothing is filed, sent or shared. Not a lawyer and not legal advice.
 author: Corpus (teakesdev)
@@ -29,12 +32,15 @@ provides_tools:
   - matter_status
   - matter_fact_add
   - matter_fact_list
+  - matter_fact_date
+  - matter_timeline
   - matter_deadline_list
   - matter_trigger_list
   - matter_trigger_fire
   - matter_packet_render
   - matter_brief_check
   - matter_rules_show
+  - matter_privacy_check
   - matter_cite_check
   - matter_verify
   - matter_ingest_path

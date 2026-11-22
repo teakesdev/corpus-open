@@ -2,11 +2,12 @@
 """matter-mcp — zero-dependency stdio MCP server exposing a matter store to any MCP client.
 
 Set MATTER_DIR to the case workspace root before launching. Tools are deliberately
-read-mostly: agents can register facts and render packets, but nothing here files or
-contacts anyone. What leaves the machine goes to CourtListener: bare case cites
-(matter.cite_lookup, matter.brief_check), on for every case unless a person turned that
-check off, and query text (matter.search), only after a person turned search on. No tool
-here can turn a check on, or undo a person's off.
+read-mostly: agents can register facts, keep a case law research log and render packets,
+but nothing here files or contacts anyone. What leaves the machine goes to CourtListener:
+bare case cites (matter.cite_lookup, matter.brief_check), on for every case unless a person
+turned that check off, and query text (matter.search), only after a person turned search
+on. The research log (matter.research_*) sends nothing. No tool here can turn a check on,
+or undo a person's off.
 """
 import contextlib
 import io
@@ -16,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from matterkit import ingest as ing, store, packet as pk  # noqa: E402
+from matterkit import ingest as ing, store, packet as pk, timeline  # noqa: E402
 
 VERSION = "0.7.0"  # the plugin version; tests/test_release.py keeps it equal to plugin.yaml
 
@@ -29,7 +30,27 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["text", "status"],
                      "properties": {"text": {"type": "string"}, "status": {"enum": ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]},
                                     "sources": {"type": "array", "items": {"type": "string"}}, "created_by": {"type": "string"},
-                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."},
+                                    "quotes": {"type": "array", "items": {"type": ["string", "null"]}, "description": "Runs alongside sources: quotes[i] is the exact words sources[i] holds for the fact (null for none). matter.timeline checks each against the record when shown. A quote on a source that is not a registered document is refused."},
+                                    "date": {"type": "string", "description": "When it happened: YYYY-MM-DD, YYYY-MM or YYYY, only as precise as a source is. Puts the fact on the timeline."},
+                                    "date_end": {"type": "string", "description": "Last date of a range, same forms."},
+                                    "approximate": {"type": "boolean", "description": "The source says 'on or about' or similar."},
+                                    "inferred": {"type": "boolean", "description": "The date is worked out (e.g. 'three days after the notice'), not stated by any source."},
+                                    "event": {"type": "string", "description": "A short name for the happening ('notice served'). Facts that share an event and whose dates do not overlap are listed by matter.timeline as a date conflict; neither side is picked."}}}},
+    {"name": "matter.fact_date", "description": "Put an existing fact on the timeline, change its date, or take it off (clear=true). With an event and no date, renames the event of a fact that already has a date. Dates are YYYY-MM-DD, YYYY-MM or YYYY. Refuses an unknown fact, a date that doesn't exist and a range that ends before it starts; changes nothing when it refuses.",
+     "inputSchema": {"type": "object", "required": ["fact_id"],
+                     "properties": {"fact_id": {"type": "string"}, "date": {"type": "string"}, "date_end": {"type": "string"},
+                                    "approximate": {"type": "boolean"}, "inferred": {"type": "boolean"}, "clear": {"type": "boolean"},
+                                    "event": {"type": "string", "description": "A short name for the happening ('notice served'). Facts that share an event and whose dates do not overlap are listed by matter.timeline as a date conflict; neither side is picked."},
+                                    "created_by": {"type": "string"}, "directed_by": {"type": "string"}}}},
+    {"name": "matter.timeline", "description": "The case's dated facts, oldest first, then events whose dates disagree, then undated facts, as Markdown. Each source's quote is checked against the registered document now: exact (on the cited page or lines), in the wrong place, not found, or can't check (no text, file missing or changed). Nothing is stored. A match means the words are there, not that the fact is true. Each row says how many documents back it. Hypotheses are left out unless asked for. Read-only.",
+     "inputSchema": {"type": "object", "properties": {
+         "from": {"type": "string", "description": "YYYY[-MM[-DD]]: only dates on or after"},
+         "to": {"type": "string", "description": "YYYY[-MM[-DD]]: only dates on or before"},
+         "label": {"type": "string", "description": "only this label; HYPOTHESIS shows hypotheses"},
+         "doc": {"type": "string", "description": "only facts with a source in this registered file (rel_path)"},
+         "hypotheses": {"type": "boolean", "description": "include hypotheses"},
+         "conflicts": {"type": "boolean", "description": "only the events whose dates disagree"}}}},
     {"name": "matter.fact_list", "description": "List assertions, optionally filtered by label, with their provenance.",
      "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}}}},
     {"name": "matter.amend_add", "description": "Queue a change for the next version of a pleading (the amendment list): what to add or change, the paragraphs it touches, why, and the facts (assertion ids) and registered documents ('rel_path@page', split on the last '@') that support it. Starts as 'proposed'. Refuses empty text, an empty target, an unknown fact id and a document that is not registered; changes nothing when it refuses. Agents only propose: approving, dropping or marking a change as in the draft is a person's decision, made with `matter.py amend set` or in the browser UI.",
@@ -92,6 +113,10 @@ TOOLS = [
                      "properties": {"path": {"type": "string"}, "pdftotext": {"type": "boolean"},
                                     "mode": {"type": "string", "enum": ["brief", "complaint"], "description": "complaint: allegations need no record cite"},
                                     "offline": {"type": "boolean", "description": "send nothing to CourtListener; cites with no saved answer are NOT VERIFIED (default false)"}}}},
+    {"name": "matter.privacy_check", "description": "Filing privacy check (Fed. R. Civ. P. 5.2) for a draft or filing inside MATTER_DIR (Markdown, text, Word .docx or PDF), or every file in a folder there. Lists what Rule 5.2(a) restricts: Social Security and taxpayer ID numbers shown in full, birth dates with more than the year, names of people the text calls minors (initials are allowed) and financial account or card numbers with more than the last four digits; phone numbers and street addresses as advisory. Every match is masked in the report (last four digits, the year, initials), so the report never repeats it. Files it could not read, or read only in part, are listed. Pattern matching: a clean scan is not proof of compliance. Changes no file, writes nothing, no network. Returns the report; first line gives exit=0 (nothing found), 1 (restricted items), 2 (advisory items or files not fully scanned).",
+     "inputSchema": {"type": "object", "required": ["path"],
+                     "properties": {"path": {"type": "string", "description": "a file or folder inside MATTER_DIR"},
+                                    "pdftotext": {"type": "boolean", "description": "read PDFs with pdftotext (default true)"}}}},
     {"name": "matter.rules_show", "description": "Text of a rule or subsection from a rules pack attached to this matter (.matter/rules.json), with the pack id, version and current-as-of date. Cite as 'L.U.Civ.R. 7(b)(4)', 'Fed. R. Civ. P. 15(a)(2)', 'Local Rule 7(b)(4)' or an anchor id. A bare 'Rule 15' names no rule set: it lists every attached pack that has it and picks none unless `pack` is given. Derived text, not the official copy. Read-only. No network.",
      "inputSchema": {"type": "object", "required": ["cite"],
                      "properties": {"cite": {"type": "string"}, "pack": {"type": "string", "description": "pack id"}}}},
@@ -112,8 +137,44 @@ TOOLS = [
                                     "fresh": {"type": "boolean", "description": "ask CourtListener again instead of using the answer saved in this case (default false)"},
                                     "created_by": {"type": "string"},
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+    {"name": "matter.research_list", "description": "The case law searches recorded in this case: ones logged by hand (Google Scholar, a court's website, a law library, ...) with the outcome of each (found, nothing, blocked, not-online, paywalled, error), plus the CourtListener searches the kit sent (source 'courtlistener'), oldest first. outcome and jurisdiction narrow the list. Read-only. No network.",
+     "inputSchema": {"type": "object", "properties": {"outcome": {"enum": ["found", "nothing", "blocked", "not-online", "paywalled", "error"]},
+                                                      "jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US"}}}},
+    {"name": "matter.research_leads", "description": "Cases saved as leads to look at again, each with the reason it was kept, its revisit date (soonest first, undated last) and status. status: 'open' (still saved, default), 'all', or one of saved|revisited|dropped|used. A lead is a note to self: it is not source-checked and not good law. Read-only. No network.",
+     "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}}}},
+    {"name": "matter.research_due", "description": "Leads whose revisit date has come (on or before as_of, default today), with how many days ago, and separately the open leads that have no revisit date. A lead is a note to self, not good law. Read-only. No network.",
+     "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string", "description": "YYYY-MM-DD, default today"}}}},
+    {"name": "matter.research_where", "description": "Where else to look for case law: for a state (two-letter code), DC, or US (federal), the places a court's opinions can be read for free, each with its link, the years it covers, whether it has full-text search, whether the survey could open it (status accessible|partial|blocked|unknown; blocked means the survey's automated check was refused and the page may still open in a browser) and whether that was observed or inferred. A CourtListener row also carries, measured from CourtListener's public bulk files (cl_snapshot in the reply names the snapshot), its opinion count, the earliest and the newest opinion's date (the cl field); a mistyped early date is corrected (cl.clamp keeps the original). With year (2003 or 1990-2005) each place is marked covers|partly|does-not-cover|unknown and covering places come first. level and court narrow it; there are many federal courts, so give court for US. The data is a dated survey (see checked_at in the reply) and court websites change: check the page itself. A place listed is a lead, not good law. Read-only. No network.",
+     "inputSchema": {"type": "object", "required": ["jurisdiction"],
+                     "properties": {"jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US for the federal courts"},
+                                    "level": {"enum": ["supreme", "appellate", "trial", "federal-appellate", "federal-district", "bankruptcy", "other"]},
+                                    "year": {"type": "string", "description": "2003 or 1990-2005"},
+                                    "court": {"type": "string", "description": "only courts whose name has these words, e.g. 'Maryland'"},
+                                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "default 20"}}}},
+    {"name": "matter.research_log", "description": "Record a case law search done anywhere (Google Scholar, a court's website, a law library, CourtListener by hand) and what came of it: found, nothing, blocked (the site refused), not-online, paywalled or error. Writes one line to this case's .matter/caselaw/research.jsonl and nothing else; no network, nothing is searched. Refuses an empty source or query, an unknown outcome or malformed years (YYYY or YYYY-YYYY), and writes nothing then. When the outcome is nothing, blocked, not-online or paywalled and a jurisdiction is given, the reply also lists other places to look from a dated survey (court websites change; check the page). Searches the kit sends to CourtListener are recorded already.",
+     "inputSchema": {"type": "object", "required": ["source", "query", "outcome"],
+                     "properties": {"source": {"type": "string", "description": "where you looked, e.g. 'google scholar', 'court website', 'law library'"},
+                                    "query": {"type": "string"},
+                                    "outcome": {"enum": ["found", "nothing", "blocked", "not-online", "paywalled", "error"]},
+                                    "jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US"},
+                                    "court": {"type": "string"}, "years": {"type": "string", "description": "2003 or 1990-2005"},
+                                    "url": {"type": "string"}, "note": {"type": "string"}, "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+    {"name": "matter.research_save", "description": "Keep a case that may matter later as a lead, with the reason (required: a lead without one is useless later) and optionally a revisit date (YYYY-MM-DD), citation, link and jurisdiction. Writes one line to this case's .matter/caselaw/research.jsonl and nothing else; no network. A lead is a note to self: it is not source-checked and not good law. Agents save leads; marking one revisited, dropped or used is a person's decision, made with `matter.py research set`. Refuses an empty title or reason and a bad date, and writes nothing then.",
+     "inputSchema": {"type": "object", "required": ["title", "why"],
+                     "properties": {"title": {"type": "string", "description": "the case, in plain words"},
+                                    "why": {"type": "string", "description": "why it may matter"},
+                                    "revisit": {"type": "string", "description": "YYYY-MM-DD"},
+                                    "citation": {"type": "string"}, "url": {"type": "string"},
+                                    "jurisdiction": {"type": "string", "description": "two-letter state code, DC, or US"},
+                                    "created_by": {"type": "string"},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
 ]
 
+
+def _dated(d):
+    """'2026-03-14 (event: notice served)': a fact's date as the tools report it."""
+    return timeline.display_date(d) + (" (event: %s)" % d["event"] if d.get("event") else "")
 
 def _resolve_in_matter(path: str) -> str:
     """Resolve path inside MATTER_DIR. Relative paths are joined to the matter root, not cwd."""
@@ -149,7 +210,39 @@ def _off_reply(err, on) -> str:
     return f"Nothing was sent.{why}\n\n{caselaw.describe(MATTER_DIR)}"
 
 
+def _research(name: str, args: dict):
+    """The case law research log (matterkit.research_log). Local only: it reads and appends to the
+    case's .matter/caselaw/research.jsonl and reads the packaged survey; nothing is sent anywhere."""
+    from matterkit import research_log as rl
+    if name == "matter.research_list":
+        return json.dumps(rl.list_searches(MATTER_DIR, args.get("outcome"), args.get("jurisdiction")), indent=1)
+    if name == "matter.research_leads":
+        return json.dumps(rl.leads(MATTER_DIR, args.get("status") or "open"), indent=1)
+    if name == "matter.research_due":
+        return json.dumps(rl.due(MATTER_DIR, args.get("as_of")), indent=1)
+    if name == "matter.research_where":
+        limit = max(1, min(int(args.get("limit") or 20), 100))
+        return json.dumps(rl.where(args.get("jurisdiction"), args.get("level"), args.get("year"), args.get("court"),
+                                   limit=limit), indent=1)
+    by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
+    if name == "matter.research_log":
+        r = rl.log_search(MATTER_DIR, by, args.get("source"), args.get("query"), args.get("outcome"),
+                          args.get("jurisdiction"), args.get("court"), args.get("years"), args.get("url"),
+                          args.get("note") or "")  # raises ValueError -> isError, nothing written
+        text = f"{r['id']} [{r['outcome']}] {r['source']}: {r['query']} (recorded by {by})"
+        if r["outcome"] in rl.MISSES and r["jurisdiction"]:
+            text += "\n\n" + rl.render_hints(rl.hints(r["jurisdiction"], r["source"], years=r["years"], court=r["court"]),
+                                              r["outcome"])
+        return text
+    r = rl.save_lead(MATTER_DIR, by, args.get("title"), args.get("why"), args.get("revisit"), args.get("citation"),
+                     args.get("url"), args.get("jurisdiction"))  # raises ValueError -> isError, nothing written
+    return f"{r['id']} [{r['status']}] {r['title']} (saved by {by}; a lead, not good law)" + \
+        (f"; look again {r['revisit']}" if r["revisit"] else "")
+
+
 def call(name: str, args: dict):
+    if name.startswith("matter.research_"):
+        return _research(name, args)
     if name == "matter.verify":
         abs_matter = os.path.abspath(MATTER_DIR)
         if not os.path.isdir(abs_matter):
@@ -179,6 +272,14 @@ def call(name: str, args: dict):
             report = briefcheck.check(MATTER_DIR, _readable_in_matter(args["path"]),
                                       use_pdftotext=args.get("pdftotext", True), mode=args.get("mode", "brief"),
                                       cites=cites)
+        return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
+    if name == "matter.privacy_check":
+        from matterkit import privacy
+        target = _resolve_in_matter(args.get("path", ""))
+        if not ing.reads_inside(target, MATTER_DIR):
+            raise ValueError(f"{args.get('path')} is a link to a file outside MATTER_DIR, so it is not read")
+        report = privacy.check([target], case_dir=ing.abs_path(MATTER_DIR), use_pdftotext=args.get("pdftotext", True),
+                               confine=MATTER_DIR)
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
     if name == "matter.rules_show":
         from matterkit import rules
@@ -233,11 +334,25 @@ def call(name: str, args: dict):
         from matterkit import facts
         by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
         # raises -> isError, nothing written: invalid label, empty text, an uncitable parent: ref
-        r = facts.add(conn, MATTER_DIR, args["text"], args.get("status", "UNKNOWN"), args.get("sources", []), by)
+        r = facts.add(conn, MATTER_DIR, args["text"], args.get("status", "UNKNOWN"), args.get("sources", []), by,
+                      date=args.get("date"), date_end=args.get("date_end"), approximate=bool(args.get("approximate")),
+                      inferred=bool(args.get("inferred")), quotes=args.get("quotes"),
+                      event=args.get("event"))
         warn = "\n⚠ UNSUPPORTED — no recognized sources." if r["unsupported"] else ""
         bad = f"\n⚠ Unrecognized source refs ignored: {r['unrecognized']}" if r["unrecognized"] else ""
-        return (f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}"
+        when = f"\ndated {_dated(r['date'])}" if r["date"] else ""
+        return (f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}{when}"
                 + "".join(f"\n  ↳ {note}" for note in r["notes"]))
+    if name == "matter.fact_date":
+        by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
+        d = timeline.set_date(conn, args["fact_id"], args.get("date"), args.get("date_end"),
+                              bool(args.get("approximate")), bool(args.get("inferred")), by, clear=bool(args.get("clear")),
+                              event=args.get("event"))
+        return f"{args['fact_id']}: date cleared" if d is None else f"{args['fact_id']}: dated {_dated(d)} by {by}"
+    if name == "matter.timeline":
+        data = timeline.build(conn, MATTER_DIR, since=args.get("from"), until=args.get("to"), label=args.get("label"),
+                              doc=args.get("doc"), hypotheses=bool(args.get("hypotheses")))
+        return timeline.render(data, conflicts_only=bool(args.get("conflicts")))
     if name == "matter.fact_list":
         from matterkit import facts
         out = [{"id": f["id"], "status": f["status"], "text": f["text"],
