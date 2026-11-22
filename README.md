@@ -97,7 +97,8 @@ because Hermes runs them and the model cannot skip them:
   Deadline Watch can also send them to you each morning through Hermes, with no model in
   between.
 
-It also adds thirteen tools for the case folder (facts labeled with their sources, deadlines, a
+It also adds fifteen tools for the case folder (facts labeled with their sources, a dated case
+timeline, deadlines, a
 brief check, a filing privacy check for Social Security, birth-date and account numbers and
 minors' names, a packet for a lawyer who might take the case, court rules, file fingerprints),
 the `/matter` command, and a Case pane in Hermes Desktop. The details are under

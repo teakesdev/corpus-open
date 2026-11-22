@@ -366,8 +366,8 @@ the MCP server above can't:
   read-only backend (`dashboard/plugin_api.py`, mounted at `/api/plugins/corpus-open/`), which
   Hermes loads only for plugins in `plugins.enabled` (`hermes plugins enable corpus-open` adds
   it). It never writes to the case and makes no network calls.
-- **Thirteen tools** in the `corpus_open` toolset: `matter_status`, `matter_fact_add`,
-  `matter_fact_list`, `matter_deadline_list`, `matter_trigger_list`, `matter_trigger_fire`,
+- **Fifteen tools** in the `corpus_open` toolset: `matter_status`, `matter_fact_add`,
+  `matter_fact_list`, `matter_fact_date`, `matter_timeline`, `matter_deadline_list`, `matter_trigger_list`, `matter_trigger_fire`,
   `matter_packet_render`, `matter_brief_check`, `matter_privacy_check`, `matter_rules_show`,
   `matter_cite_check`, `matter_verify`, `matter_ingest_path`.
 

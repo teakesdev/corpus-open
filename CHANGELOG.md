@@ -24,6 +24,10 @@ Pull request numbers link to https://github.com/teakesdev/corpus-open/pulls. Com
   `matterkit/data/corpus_cities.json` lists the cities Corpus holds, and
   `scripts/refresh-corpus-cities.py` refreshes it. This is a new kind of request to Corpus; it
   can be turned off with the other cite checks.
+- **Filing privacy check** (#22). The Hermes tool `matter_privacy_check` and the MCP tool
+  `matter.privacy_check` read a draft or a folder inside the case and list what Fed. R. Civ. P.
+  5.2 restricts in a filing: Social Security and taxpayer numbers, birth dates, financial account
+  numbers and minors' names. It changes nothing and sends nothing.
 - **Case-law research log** (#19). `matter.py research` and the MCP tools
   `matter.research_save`, `matter.research_log`, `matter.research_list`,
   `matter.research_leads`, `matter.research_due` and `matter.research_where` keep a record of
@@ -46,7 +50,8 @@ Pull request numbers link to https://github.com/teakesdev/corpus-open/pulls. Com
 
 - The README's CI badge is captioned: GitHub Actions is off for this repository, so the badge
   does not show a current test run. Run the tests yourself as shown in `docs/reference.md`.
-- The tool count in the README and `plugin.yaml` is fourteen, with the two timeline tools.
+- The tool count in the README, `plugin.yaml` and the manual is fifteen, with the two timeline
+  tools and the privacy check.
 - The stdio MCP server reports its version as 0.7.0, the plugin's version. It said 0.1.0.
 - The manual's closing status line describes this version instead of the v0.1 dogfooding stage.
 
