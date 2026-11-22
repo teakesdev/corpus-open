@@ -772,9 +772,30 @@ ln -s /path/to/matter-kit/skills/matter-kit ~/.hermes/skills/matter-kit
 4. **Read-mostly MCP.** Agents register facts and render packets; humans act.
 5. **Adverse facts are first-class.** A packet that hides them is worthless and dishonest.
 
+## Running the tests
+
+GitHub Actions is turned off for this repository, so there is no live CI status: the badge on
+the README says so instead of showing a stale result. Run the suite yourself, with Python 3.10
+or later and nothing to install:
+
+```
+python3 scripts/run_tests.py
+```
+
+That runs each test file in its own process, one per CPU at a time, and prints one summary: about
+80 seconds on four cores, against about 265 seconds for the same 2,312 tests run one after
+another. It runs every test the serial command runs, file by file, exactly as
+`python3 -m unittest discover -s tests -p <file>` would; `-j N` sets how many run at once and
+`-v` prints each file's output. The serial command, `python3 -m unittest discover -s tests`,
+still works.
+
+`.github/workflows/ci.yml` still describes the CI run (Python
+3.10 to 3.12, plus the leak scan) for when Actions is turned back on.
+
 ## Status
 
-v0.1 — dogfooding stage. Schema may change; hashing is stable.
+Version 0.7.0 (see [CHANGELOG.md](../CHANGELOG.md)). Still young: the case store's schema may
+change between versions; file hashing is stable.
 
 License: Apache-2.0. Not affiliated with any bar association; nothing here is
 legal advice or a substitute for a licensed attorney.
