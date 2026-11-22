@@ -18,7 +18,8 @@ class TestDiscoveryImport(unittest.TestCase):
             "match_reason": "regression",
         }]}
         p = os.path.join(d, "brief.json")
-        json.dump(brief, open(p, "w"))
+        with open(p, "w") as f:
+            json.dump(brief, f)
         r = disc.import_brief(conn, p)   # must not raise TypeError
         self.assertTrue(r)
 
@@ -32,6 +33,7 @@ class TestDiscoveryImport(unittest.TestCase):
             "retrieved_at": "2026-09-09",
         }]}  # no intake_channel, no verbatim
         p = os.path.join(d, "brief.json")
-        json.dump(brief, open(p, "w"))
+        with open(p, "w") as f:
+            json.dump(brief, f)
         with self.assertRaises(Exception):
             disc.import_brief(conn, p)

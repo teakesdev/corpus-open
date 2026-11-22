@@ -20,7 +20,8 @@ class TestImportAtomicity(unittest.TestCase):
              "retrieved_at": "2026-09-09"},  # missing intake_channel
         ]}
         p = os.path.join(d, "brief.json")
-        json.dump(brief, open(p, "w"))
+        with open(p, "w") as f:
+            json.dump(brief, f)
         with self.assertRaises(Exception):
             disc.import_brief(conn, p)
         n = conn.execute("SELECT COUNT(*) c FROM outreach_recipients").fetchone()["c"]

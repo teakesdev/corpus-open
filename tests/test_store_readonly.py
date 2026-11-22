@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from fileio import read_bytes as _read_bytes
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
@@ -22,13 +23,13 @@ class TestConnectReadonly(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             d = os.path.join(root, "a case #1? with spaces")
             store.connect(d).close()
-            before = open(store.db_path(d), "rb").read()
+            before = _read_bytes(store.db_path(d))
             conn = store.connect_readonly(d)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0], 0)
             with self.assertRaises(sqlite3.OperationalError):
                 conn.execute("INSERT INTO deadlines (id,label,due_date) VALUES ('x','y','2026-01-01')")
             conn.close()
-            self.assertEqual(open(store.db_path(d), "rb").read(), before)
+            self.assertEqual(_read_bytes(store.db_path(d)), before)
 
 
 if __name__ == "__main__":

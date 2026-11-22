@@ -14,6 +14,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
+from fileio import read_text as _read_text
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
@@ -574,7 +575,7 @@ class TestAdapter(Matter):
         (rec,) = self.egress()
         self.assertEqual((rec["provider"], rec["endpoint"], rec["payload_type"]),
                          (citelookup.PROVIDER, citelookup.ENDPOINT, citelookup.PAYLOAD_TYPE))
-        raw = open(consent.egress_path(self.dir)).read()
+        raw = _read_text(consent.egress_path(self.dir))
         self.assertNotIn("F.4th", raw)
         self.assertNotIn(TOKEN, raw)
         self.assertEqual(len(batches), 1)
@@ -889,7 +890,7 @@ class TestCLI(Matter):
             code, out, _ = run_cli("cite", "lookup", self.dir, self.draft, "--record", "--out", out_path,
                                    "--author", "agent:test", "--directed-by", "ty", "--caller", "ty")
         self.assertEqual(code, 1)
-        report = open(out_path).read()
+        report = _read_text(out_path)
         self.assertIn("NAME DIFFERS", report)
         self.assertNotIn(TOKEN, report + out)
         conn = store.connect(self.dir)
@@ -957,7 +958,7 @@ class TestEndToEndNetblocked(Matter):
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("could not reach CourtListener", r.stderr)
         self.assertEqual(r.stdout.count("**NOT LOOKED UP**"), 4)
-        log = open(consent.egress_path(self.dir)).read()
+        log = _read_text(consent.egress_path(self.dir))
         self.assertEqual(len(log.splitlines()), 1)  # the attempt is logged before it is made
         for text in (r.stdout, r.stderr, log):
             self.assertNotIn(TOKEN, text)
@@ -967,7 +968,7 @@ class TestIsolation(unittest.TestCase):
     def test_citelookup_imports_no_network_module(self):
         banned = {"socket", "urllib", "http", "requests", "httpx", "ssl", "ftplib", "smtplib",
                   "telnetlib", "xmlrpc", "asyncio"}
-        tree = ast.parse(open(os.path.join(KIT, "matterkit", "citelookup.py")).read())
+        tree = ast.parse(_read_text(os.path.join(KIT, "matterkit", "citelookup.py")))
         for node in ast.walk(tree):
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else \
                 [node.module or ""] if isinstance(node, ast.ImportFrom) else []
@@ -977,7 +978,7 @@ class TestIsolation(unittest.TestCase):
 
     def test_mcp_server_cannot_turn_lookups_on(self):
         # The MCP server runs lookups (RFC 0001 amendment 2026-11-06) but never writes a grant or a key.
-        src = open(os.path.join(KIT, "matter-mcp.py")).read()
+        src = _read_text(os.path.join(KIT, "matter-mcp.py"))
         for name in ("turn_on", "write_human_grant", "activate_human_grant", "save_grants",
                      "save_courtlistener_token", "courtlistener_citations"):
             self.assertNotIn(name, src)

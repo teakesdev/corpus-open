@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+from fileio import read_text as _read_text
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -412,7 +413,7 @@ class TestBrowserSwitch(ServerCase):
         self.assertEqual(credentials.courtlistener_token(), KEY)
         _, _, st = self.api("GET", self.case_path("Alpha v. City", "/caselaw"))
         self.assertNotIn(KEY, json.dumps(st))
-        self.assertFalse(any(KEY in open(os.path.join(dp, f), errors="ignore").read()
+        self.assertFalse(any(KEY in _read_text(os.path.join(dp, f), errors="ignore")
                              for dp, _, fs in os.walk(self.ws) for f in fs))
         status, _, data = self.api("POST", "/courtlistener-key", {"key": "not a key"})
         self.assertEqual(status, 400)

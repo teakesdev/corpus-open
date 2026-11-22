@@ -9,6 +9,7 @@ from unittest import mock
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fileio import read_text as _read_text
 from matterkit import consent, search, store
 from matterkit.adapters.courtlistener import CourtListenerFreeAdapter
 
@@ -107,7 +108,7 @@ class TestR2Search(unittest.TestCase):
         conn = store.connect(self.dir)
         n = conn.execute("SELECT COUNT(*) c FROM authorities WHERE status='source-checked'").fetchone()["c"]
         self.assertEqual(n, 0)
-        log = open(consent.egress_path(self.dir)).read()
+        log = _read_text(consent.egress_path(self.dir))
         self.assertIn("courtlistener-free", log)
         self.assertNotIn("347 U.S. 483", log)  # hash-only
 
