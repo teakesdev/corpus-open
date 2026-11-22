@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_hermes_plugin import KIT, PluginCase, corpus, guard  # noqa: E402
 
+from fileio import read_text  # noqa: E402
 from matterkit import cases, municipal, statutelookup  # noqa: E402
 from matterkit.search import SearchQuery  # noqa: E402
 
@@ -380,7 +381,7 @@ class TestSnapshot(unittest.TestCase):
     def test_municipal_module_makes_no_network_calls(self):
         import ast
         banned = {"socket", "urllib", "http", "requests", "httpx", "ssl", "asyncio"}
-        tree = ast.parse(open(os.path.join(KIT, "matterkit", "municipal.py"), encoding="utf-8").read())
+        tree = ast.parse(read_text(os.path.join(KIT, "matterkit", "municipal.py")))
         for node in ast.walk(tree):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import) else
                      [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])

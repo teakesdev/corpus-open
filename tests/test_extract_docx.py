@@ -536,6 +536,7 @@ class TestBlockStorage(unittest.TestCase):
 
         self.tmp = tempfile.mkdtemp()
         self.conn = store.connect(self.tmp)
+        self.addCleanup(self.conn.close)
 
     def tearDown(self):
         self.conn.close()
@@ -1395,6 +1396,7 @@ class TestEmptyDocumentIsRecordedExplicitly(unittest.TestCase):
 
         self.tmp = tempfile.mkdtemp()
         self.conn = store.connect(self.tmp)
+        self.addCleanup(self.conn.close)
 
     def tearDown(self):
         self.conn.close()

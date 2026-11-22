@@ -46,6 +46,7 @@ def make_fetch(matter_dir: str, max_bytes: int = MAX_BYTES, timeout: int = TIMEO
                     raise CaptureError(f"HTTP {resp.status} from {url} — only a 200 is a capture")
                 body = resp.read(max_bytes + 1)
         except urllib.error.HTTPError as e:
+            e.close()  # the error holds the response's open socket; headers stay readable
             raise CaptureError(f"HTTP {e.code} from {url} — not captured") from None
         except urllib.error.URLError as e:
             raise CaptureError(f"fetch failed for {url}: {e.reason}") from None

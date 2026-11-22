@@ -89,6 +89,7 @@ class CorpusSearchAdapter:
         except ConsentError:
             raise
         except urllib.error.HTTPError as e:
+            e.close()  # the error holds the response's open socket; headers stay readable
             if 300 <= int(e.code) < 400:
                 loc = e.headers.get("Location", "") if e.headers else ""
                 raise ConsentError(

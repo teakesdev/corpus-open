@@ -414,6 +414,7 @@ class TestReport(unittest.TestCase):
 class TestRecord(Matter):
     def _row(self, citation, status="unverified", via=None, evidence=None):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         aid = store.new_id("auth_")
         conn.execute("INSERT INTO authorities (id,citation,status,checked_via,check_evidence) VALUES (?,?,?,?,?)",
                      (aid, citation, status, via, evidence))
@@ -430,6 +431,7 @@ class TestRecord(Matter):
             result(p[0], "1 F.3d 1", 200, [cluster(1, "Alpha v. Beta", "1993-01-01", "1 F.3d 1")]),
             result(p[0], "2 F.3d 2", 200, [cluster(2, "Gamma v. Delta", "1993-01-01", "2 F.3d 2")])]])
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         actions = dict(citelookup.record(conn, res, by="human"))
         self.assertEqual(actions["1 F.3d 1"], f"{good}: unverified -> resolved")
         self.assertTrue(actions["2 F.3d 2"].startswith("not written (AttributeError"), actions["2 F.3d 2"])
@@ -442,6 +444,7 @@ class TestRecord(Matter):
         p = citelookup.payloads(cites)
         results = citelookup.interpret(cites, p, [recorded(p[0])])
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         return conn, citelookup.record(conn, results, by="agent:test; directed-by:ty")
 
     def test_found_moves_unverified_to_resolved_with_provenance(self):
@@ -837,6 +840,7 @@ class TestCLI(Matter):
         with open(self.draft, "w") as f:
             f.write("Smith v. Jones, 123 F.4th 456 (5th Cir. 2024).\n")
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         conn.execute("INSERT INTO authorities (id,citation,status,check_evidence) VALUES (?,?,?,?)",
                      ("auth_bad", "Smith v. Jones, 123 F.4th 456", "unverified", '{"lookups": 1}'))
         conn.commit()
@@ -853,6 +857,7 @@ class TestCLI(Matter):
         with open(self.draft, "w") as f:
             f.write("Smith v. Jones, 123 F.4th 456 (5th Cir. 2024).\n")
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         for aid, citation in (("auth_one", "Smith v. Jones, 123 F.4th 456"), ("auth_two", "Smith, 123 F.4th 456, 460")):
             conn.execute("INSERT INTO authorities (id,citation,status) VALUES (?,?,?)", (aid, citation, "unverified"))
         conn.commit()
@@ -894,6 +899,7 @@ class TestCLI(Matter):
         self.assertIn("NAME DIFFERS", report)
         self.assertNotIn(TOKEN, report + out)
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         vias = {r["checked_via"] for r in conn.execute("SELECT checked_via FROM authorities WHERE status='resolved'")}
         self.assertEqual(vias, {"courtlistener:id=9001", "courtlistener:id=9004"})
 

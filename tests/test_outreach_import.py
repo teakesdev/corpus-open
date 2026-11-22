@@ -25,6 +25,7 @@ class ImportTests(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="mk-imp-")
         self.conn = store.connect(self.d)
+        self.addCleanup(self.conn.close)
 
     def test_bundled_brief_unsendable_until_shortlisted(self):
         result = discovery.import_brief(self.conn, BRIEF)

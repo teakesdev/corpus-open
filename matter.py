@@ -1613,7 +1613,8 @@ def main():
     p.set_defaults(fn=cmd_ui)
 
     args = ap.parse_args()
-    args.fn(args)
+    with store.closing_scope():  # commands hand their connection on; close them all on the way out
+        args.fn(args)
 
 
 if __name__ == "__main__":

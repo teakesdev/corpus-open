@@ -131,6 +131,7 @@ class FileTools(Base):
         self.assertEqual(d["action"], "block")
         self.assertIn("Evidence/lease.txt", d["message"])
         conn = store.connect_readonly(self.case)
+        self.addCleanup(conn.close)
         sha = conn.execute("SELECT sha256 FROM documents WHERE rel_path='Evidence/lease.txt'").fetchone()[0]
         self.assertIn(sha[:12], d["message"])
 

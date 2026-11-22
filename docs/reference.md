@@ -943,8 +943,22 @@ ln -s /path/to/matter-kit/skills/matter-kit ~/.hermes/skills/matter-kit
 ## Running the tests
 
 GitHub Actions is turned off for this repository, so there is no live CI status: the badge on
-the README says so instead of showing a stale result. Run the suite yourself, with Python 3.10
-or later and nothing to install:
+the README says so instead of showing a stale result. Before you push, run the local gate, with
+Python 3.10 or later and nothing to install:
+
+```
+scripts/check.sh
+```
+
+It runs what CI would: every test, with `ResourceWarning` as an error, then `scripts/leak_scan.py`
+over the working tree and over the commits your branch adds to `origin/main` (`CHECK_BASE` names
+another base). Any `ResourceWarning` in the test output fails it, because an unclosed sqlite
+connection, file or socket is reported when it is collected, which cannot fail the test that
+left it open. `--no-range` skips the commit scan and `--no-tests` skips the tests. The sample
+hook `scripts/pre-push.sample` runs it on every push once you copy it into `.git/hooks/pre-push`
+(its header says how).
+
+To run only the tests:
 
 ```
 python3 scripts/run_tests.py

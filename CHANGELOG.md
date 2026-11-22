@@ -41,6 +41,9 @@ Pull request numbers link to https://github.com/teakesdev/corpus-open/pulls. Com
 - `scripts/run_tests.py` runs the test files side by side, one process per file: the same 2,312
   tests in about 80 seconds on four cores instead of about 265. `docs/reference.md` says how to
   run the tests, which it did not before.
+- `scripts/check.sh`, the local gate: the tests with `ResourceWarning` as an error, failing on
+  any that is printed, then the leak scan over the tree and the branch's commits, as CI would.
+  `scripts/pre-push.sample` runs it after its own commit scan.
 - `tests/test_release.py` keeps the version in `plugin.yaml`, the Desktop panel's manifest and
   the MCP server equal, requires a changelog section and release notes for it, and checks that
   `provides_tools`, the tool schemas, their handlers, the manual and the tool count in words
@@ -61,6 +64,11 @@ Pull request numbers link to https://github.com/teakesdev/corpus-open/pulls. Com
   `ResourceWarning: unclosed file`. Three tests wrote a JSON file without closing it and then
   read it back, which worked only because CPython happens to close it at once; they now close
   it first. `matter.py cite extract` closes the draft it reads.
+- Case stores are closed: a run of the tests printed about 180 `ResourceWarning: unclosed
+  database` lines. `matter.py` and the stdio MCP server close every store connection a command
+  or tool call opened when it ends (`store.closing_scope`), and the tests close theirs.
+- The CourtListener, Corpus and page-capture adapters close an HTTP error's response, which
+  held its socket open until it was collected.
 - A link to the mcpservers.org listing in the README (#18).
 
 ## [0.6.0] (2026-11-10)

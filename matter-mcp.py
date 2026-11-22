@@ -436,7 +436,8 @@ def handle(req: dict) -> dict:
     if method == "tools/call":
         params = req.get("params", {})
         try:
-            text = call(params["name"], params.get("arguments", {}))
+            with store.closing_scope():  # one tool call's connections end with the call
+                text = call(params["name"], params.get("arguments", {}))
             return result({"content": [{"type": "text", "text": str(text)}]})
         except Exception as e:  # noqa: BLE001
             return {"jsonrpc": "2.0", "id": rid,

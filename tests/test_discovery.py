@@ -7,6 +7,7 @@ class TestDiscoveryImport(unittest.TestCase):
     def test_date_only_retrieved_at_does_not_crash(self):
         d = tempfile.mkdtemp()
         conn = store.connect(d)
+        self.addCleanup(conn.close)
         brief = {"candidates": [{
             "name": "Org (SYNTHETIC)", "org": "T", "jurisdiction": "US",
             "practice_area": "civil", "intake_channel": "published web form",
@@ -26,6 +27,7 @@ class TestDiscoveryImport(unittest.TestCase):
     def test_incomplete_brief_raises_clear_error(self):
         d = tempfile.mkdtemp()
         conn = store.connect(d)
+        self.addCleanup(conn.close)
         brief = {"candidates": [{
             "name": "No-channel Org", "org": "T",
             "intake_url": "https://example.org/i",

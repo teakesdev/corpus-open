@@ -1,6 +1,7 @@
 #!/bin/sh
 # Sample pre-push hook: stop a push that would publish a home path, a personal email,
-# an assistant session transcript or a case identifier.
+# an assistant session transcript or a case identifier, or that fails the local gate
+# (scripts/check.sh: the unit tests, with nothing left open, and a leak scan of the tree).
 #
 # It is a sample. Nothing installs it. To use it in your own clone:
 #   cp scripts/pre-push.sample .git/hooks/pre-push && chmod +x .git/hooks/pre-push
@@ -14,6 +15,9 @@
 #                            turn it on together with LEAK_SCAN_ALLOW_EMAIL for your own
 #   LEAK_SCAN_PY             path to leak_scan.py (default: scripts/leak_scan.py in this repo)
 #   PYTHON                   interpreter (default: python3)
+#   PRE_PUSH_CHECK           the gate to run after the commit scan (default: scripts/check.sh
+#                            in this repo, run with --no-range). A missing gate blocks the push.
+#   PRE_PUSH_SKIP_CHECK      any value: skip that gate (the commit scan still runs)
 #
 # Any nonzero exit from the scanner blocks the push, including exit 2 (a patterns file
 # that is missing or invalid), so a broken setup never lets a push through unchecked.
@@ -56,5 +60,14 @@ done
 
 if [ "$status" -ne 0 ]; then
     echo "push blocked: leak_scan found something (or could not run). Fix it, or use --no-verify on purpose." >&2
+    exit "$status"
+fi
+
+# The rest of the gate: the commit scan above covers exactly what this push adds, so check.sh
+# skips its own.
+if [ -z "${PRE_PUSH_SKIP_CHECK:-}" ]; then
+    check=${PRE_PUSH_CHECK:-$root/scripts/check.sh}
+    PYTHON="$python" "$check" --no-range </dev/null || status=1
+    [ "$status" -ne 0 ] && echo "push blocked: $check failed (or is missing). Fix it, or use --no-verify on purpose." >&2
 fi
 exit "$status"

@@ -28,7 +28,7 @@ GRANT = [{
 
 def matter_with_grant():
     d = tempfile.mkdtemp(prefix="mk-r3-")
-    store.connect(d)
+    store.create(d)
     consent.save_grants(d, GRANT)
     return d
 
@@ -95,6 +95,7 @@ class TestR3Protocol(unittest.TestCase):
         self.assertFalse(rows[0].provenance["authenticated"])
         self.assertTrue(rows[0].provenance["url"].startswith("https://corpuslaw.us/code/"))
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         n = conn.execute("SELECT COUNT(*) c FROM authorities WHERE status='source-checked'").fetchone()["c"]
         self.assertEqual(n, 0)
 
@@ -121,7 +122,7 @@ class TestR3Protocol(unittest.TestCase):
 
     def test_no_grant_refused(self):
         empty = tempfile.mkdtemp(prefix="mk-r3-empty-")
-        store.connect(empty)
+        store.create(empty)
         with self.assertRaises(consent.ConsentError):
             search.build_adapter("corpus-search", empty, "ty")
 
