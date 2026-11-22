@@ -259,6 +259,7 @@ outreach.
 ```
 
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
+`matter.fact_date` · `matter.timeline` ·
 `matter.amend_add` · `matter.amend_list` ·
 `matter.deadline_list` · `matter.deadline_update` · `matter.trigger_list` · `matter.trigger_fire` ·
 `matter.packet_render` · `matter.cite_extract` ·
@@ -268,6 +269,8 @@ Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.cite_lookup` · `matter.research_list` · `matter.research_leads` ·
 `matter.research_due` · `matter.research_where` · `matter.research_log` ·
 `matter.research_save`.
+`matter.fact_date` and `matter.timeline` date facts and show the case timeline with each quote
+checked; see [Case timeline](#case-timeline-dated-facts).
 `matter.privacy_check` reads a file or folder inside `MATTER_DIR`, changes nothing and sends
 nothing; see [Checking a filing for private information](#checking-a-filing-for-private-information-rule-52).
 `matter.cite_lookup` and `matter.brief_check` send a draft's bare case cites to
@@ -394,7 +397,9 @@ back on, with full paths, so they work from any folder:
 <python> <kit>/matter.py consent activate ~/cases/my-case --scope statute-lookup   # statutes back on: type ACTIVATE
 ```
 
-**City code cites.** A cite to a city's code is checked on Corpus under that city's jurisdiction
+### City code cites
+
+A cite to a city's code is checked on Corpus under that city's jurisdiction
 code when the cite names a city Corpus lists (`Austin City Code § 25-2-551`, `Municipal Code of
 Chicago § 5-12-080`, `St. Louis Rev. Code 26.80.060`). A cite that names no city
 (`Municipal Code § 12.03`) is checked only once a person sets the case's city: `/matter city
@@ -921,6 +926,46 @@ own `.matter/`. A subcase cites the parent's documents in place as
 `parent:<rel_path>`, re-hashed against the parent on every use and never
 copied. `status` on the parent lists its subcases and their overdue deadlines.
 
+## Command index
+
+Every `matter.py` command, and every `/matter` command in Hermes, with where it is
+explained. `matter.py <command> -h` prints its options.
+
+| Command | What it does | Example or section |
+|---|---|---|
+| `matter.py init` · `ingest` · `verify` | make a case folder, register its files with a hash, re-check them | [Quick start](#quick-start) |
+| `matter.py status` | documents by kind, facts, open deadlines, unverified authorities, how many facts are dated | `python3 matter.py status ~/cases/my-case` |
+| `matter.py fact add` · `fact list` · `fact date` | labeled facts with their sources; `list` shows each with its sources and author | `python3 matter.py fact list ~/cases/my-case`; [Case timeline](#case-timeline-dated-facts) |
+| `matter.py timeline` | dated facts oldest first, each quote checked now | [Case timeline](#case-timeline-dated-facts) |
+| `matter.py amend add` · `list` · `set` | changes queued for the next amended pleading | [Changes for the next amended pleading](#changes-for-the-next-amended-pleading) |
+| `matter.py brief check` | check a draft's record cites, quotations and authorities | [Checking a brief](#checking-a-brief-before-it-is-filed) |
+| `matter.py privacy check` | Rule 5.2 filing privacy check, masked report | [Rule 5.2](#checking-a-filing-for-private-information-rule-52) |
+| `matter.py cite extract` · `list` · `lookup` | cites found in a document; case cites checked on CourtListener | [Citations](#citations-and-stages-v02-rfc-0001), [cited cases](#checking-that-cited-cases-exist) |
+| `matter.py city` | set the case's city for city code cites; `--list` finds a code | `python3 matter.py city ~/cases/my-case TX-AUSTIN`; [City code cites](#city-code-cites) |
+| `matter.py docket suggest` · `authority add` · `check` · `import` | docket entries and the authority ledger behind brief check | `python3 matter.py authority add ~/cases/my-case "Bell Atl. Corp. v. Twombly, 550 U.S. 544 (2007)"` logs a cite as unverified; [Checking a brief](#checking-a-brief-before-it-is-filed) |
+| `matter.py stage` · `pages` | move an authority through its stages; page text of a document | [Citations](#citations-and-stages-v02-rfc-0001), [Document extraction](#document-extraction-and-locators-rfc-0004-rfc-0005) |
+| `matter.py rules build` · `attach` · `checked` · `list` · `show` · `stale` | court rules packs attached to a case; `list` names the attached packs | `python3 matter.py rules list ~/cases/my-case`; [Court rules](#court-rules-attached-to-a-case) |
+| `matter.py deadline add` · `list` · `update` · `ics` | deadlines with owner, confidence and a reason for every change | [Deadlines](#deadlines-and-subcases) |
+| `matter.py trigger add` · `fire` · `list` · `withdraw` | deadlines that wait on an event; `withdraw` needs a reason | `python3 matter.py trigger withdraw ~/cases/my-case t_abc123 --reason "motion withdrawn"`; `trigger list --all` shows fired and withdrawn ones |
+| `matter.py holiday add` · `year` · `list` | legal holidays for day counts | `python3 matter.py holiday list ~/cases/my-case --year 2026` |
+| `matter.py subcase init` · `party add` · `party list` | subcases; the case's parties | [Deadlines and subcases](#deadlines-and-subcases), [Custodian correspondence](#custodian-correspondence) |
+| `matter.py watch` | overdue and soon-due deadlines and changed files, now | [Deadlines](#deadlines-and-subcases) |
+| `matter.py packet` | the counsel packet at 30s, 3min or 15min | [Quick start](#quick-start) |
+| `matter.py correspondence add` · `list` · `render` · `manifest` · `export` · `status` | custodian notices; `render` prints one notice's packet, `manifest` its hashes for review before signing | `python3 matter.py correspondence render ~/cases/my-case "$notice"`; [Custodian correspondence](#custodian-correspondence) |
+| `matter.py capture` | save a web page into the case with a hash | [Capturing a web page](#capturing-a-web-page) |
+| `matter.py courtlistener on` · `off` · `status` · `key` | case law lookups for a case, and the saved key | [Case law lookups](#case-law-lookups-courtlistener) |
+| `matter.py search` | search CourtListener's case law, once a person turned search on | `python3 matter.py search ~/cases/my-case "inherent authority docket" --limit 5` |
+| `matter.py research log` · `list` · `save` · `leads` · `due` · `set` · `where` | the case law research log and saved leads | [Case law research log](#case-law-research-log) |
+| `matter.py consent propose` · `activate` · `decline` | network grants: an agent can only propose (inert); a person activates or declines | `python3 matter.py consent decline ~/cases/my-case --scope statute-lookup`; [Hermes plugin](#hermes-plugin-citation-guard-source-guard-deadline-brief-deadline-watch-matter) |
+| `matter.py outreach` | counsel outreach ledger (nosend) | [RFC 0002](../rfcs/0002-counsel-outreach.md) |
+| `matter.py ui` | the browser screen, on this computer only | [Using the kit without a terminal](#using-the-kit-without-a-terminal) |
+| `/matter` · `/matter status` · `/matter deadlines` | status and deadlines in Hermes | [Hermes plugin](#hermes-plugin-citation-guard-source-guard-deadline-brief-deadline-watch-matter) |
+| `/matter intake` · `/matter init` · `/matter demo` | first steps, a new case, a practice case | [Hermes plugin](#hermes-plugin-citation-guard-source-guard-deadline-brief-deadline-watch-matter) |
+| `/matter check <draft>` · `/matter grant` · `/matter packet` | cites and quotations in a draft; what is sent; the counsel packet | [Hermes plugin](#hermes-plugin-citation-guard-source-guard-deadline-brief-deadline-watch-matter) |
+| `/matter timeline` | the case timeline | [Case timeline](#case-timeline-dated-facts) |
+| `/matter city` | set or clear the case's city (`/matter city TX-AUSTIN`, `/matter city clear`) | [City code cites](#city-code-cites) |
+| `/matter watch` · `/matter calendar` | Deadline Watch and the `.ics` export | [Hermes plugin](#hermes-plugin-citation-guard-source-guard-deadline-brief-deadline-watch-matter) |
+
 ## Skills
 
 `skills/matter-kit/SKILL.md` teaches agents the operating discipline: the five
@@ -931,6 +976,9 @@ your agent's skill directory:
 ```bash
 ln -s /path/to/matter-kit/skills/matter-kit ~/.hermes/skills/matter-kit
 ```
+
+`skills/case-intake/SKILL.md` is a first interview, one question at a time, that records what the
+person says as facts with no source and ends with `/matter intake`.
 
 ## Design rules
 
@@ -951,7 +999,7 @@ python3 scripts/run_tests.py
 ```
 
 That runs each test file in its own process, one per CPU at a time, and prints one summary: about
-80 seconds on four cores, against about 265 seconds for the same 2,312 tests run one after
+80 seconds on four cores, against about 265 seconds for the same tests run one after
 another. It runs every test the serial command runs, file by file, exactly as
 `python3 -m unittest discover -s tests -p <file>` would; `-j N` sets how many run at once and
 `-v` prints each file's output. The serial command, `python3 -m unittest discover -s tests`,

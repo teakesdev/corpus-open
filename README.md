@@ -173,9 +173,16 @@ Everything else is in **[docs/reference.md](docs/reference.md)**:
   setting, command and network call
 - [Checking a brief before it is filed](docs/reference.md#checking-a-brief-before-it-is-filed) and
   [checking that cited cases exist](docs/reference.md#checking-that-cited-cases-exist)
+- [Checking a filing for private information](docs/reference.md#checking-a-filing-for-private-information-rule-52)
+  (Rule 5.2: Social Security, birth-date and account numbers, minors' names)
+- [The case timeline](docs/reference.md#case-timeline-dated-facts): dated facts, each quote checked
+  against its document, and dates that disagree
+- [City code cites](docs/reference.md#city-code-cites) such as `Austin City Code § 25-2-551`,
+  checked on Corpus
 - [Case law lookups](docs/reference.md#case-law-lookups-courtlistener),
   [court rules](docs/reference.md#court-rules-attached-to-a-case) and
   [deadlines](docs/reference.md#deadlines-and-subcases)
+- [Command index](docs/reference.md#command-index): every `matter.py` and `/matter` command
 - [Design rules](docs/reference.md#design-rules) and [status](docs/reference.md#status)
 
 The code, the command-line tool and the skill are still named `matter-kit`, the project's
