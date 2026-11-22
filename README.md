@@ -116,6 +116,7 @@ Only bare citations, and only to check them:
 |---|---|---|
 | CourtListener | case cites such as `556 U.S. 662` | only after you add your free key |
 | Corpus (corpuslaw.us) | statute and code cites such as `42 U.S.C. § 2000e-3(a)`, one per request | by default; no key needed |
+| Corpus (corpuslaw.us) | city code cites such as `Austin City Code § 25-2-551`, one per request, with the city's Corpus code (`TX-AUSTIN`) | by default, only when the cite names the city or you set the case's city (`/matter city TX-AUSTIN`) |
 
 No reply text, facts, file names or documents are sent. Every request is logged in your case
 folder (`.matter/egress.jsonl`). You can turn each check off for a case from a terminal, and
@@ -134,7 +135,7 @@ under
 | `NOT FOUND` | CourtListener holds nothing at that cite. Check it by hand before relying on it. |
 | `NAME DIFFERS` | CourtListener holds an opinion at that cite under a different name from the one written. |
 | `NO SUCH VOLUME`, `YEAR DOES NOT FIT`, `NO SUCH PAGE` | The cite cannot exist as written. Found on your computer, with no lookup. |
-| `IN CORPUS` | Corpus holds a section with that exact cite. |
+| `IN CORPUS` | Corpus holds a section with that exact cite. For a city code cite: Corpus holds a section with that number in that city's code, and the block names the city. |
 | `NOT MATCHED IN CORPUS` | Corpus returned no section with that exact cite. It may be cited in another form. |
 | `NOT LOOKED UP` | Nothing was checked, and the block says why. |
 

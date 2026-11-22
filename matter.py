@@ -66,6 +66,10 @@ Usage:
   matter.py courtlistener on|off|status <dir>   # on: search + case cite checks (asks you to type yes);
                                                 # off: both, and case cite checks stay off
   matter.py courtlistener key [--forget]        # save your free CourtListener key (outside every case folder)
+  matter.py city <dir> [CODE | --clear]          # the case's city (TX-AUSTIN): city code cites that name no
+                                                # city ("Municipal Code § 12.03") are checked on Corpus
+                                                # under it; with no CODE, shows it. Sends nothing.
+  matter.py city --list [TEXT]                   # Corpus city codes (matching TEXT)
   matter.py consent decline <dir> --scope statute-lookup|cite-lookup|search|corpus-search
                                                 # turn one off for the case; it stays off
   matter.py consent propose|activate <dir> [--scope search|cite-lookup|statute-lookup|corpus-search] [--caller ID]...
@@ -858,6 +862,36 @@ def cmd_consent(args):
               f"callers={g['authorized_callers']}")
 
 
+def cmd_city(args):
+    """city: the case's city for city code cites (matterkit.municipal). Local only."""
+    import getpass
+    from matterkit import municipal
+    if args.list is not None:
+        codes = municipal.suggest(args.list) if args.list else sorted(municipal.CITIES)
+        for code in codes:
+            print(f"{code}\t{municipal.CITIES[code]['name']}")
+        if not codes:
+            print(f"no Corpus city matches {args.list!r}")
+        return
+    if not args.case_dir:
+        sys.exit("usage: matter.py city <case folder> [CODE | --clear]  (or matter.py city --list [TEXT])")
+    if args.clear or args.code:
+        try:
+            rec = municipal.set_case_city(args.case_dir, None if args.clear else args.code,
+                                          args.issuer or getpass.getuser(), "cli")
+        except ValueError as e:
+            sys.exit(f"refused: {e}")
+        if rec is None:
+            print("The case has no city now. City code cites that name no city are listed, not looked up.")
+        else:
+            print(f"The case's city is {municipal.label(rec['jurisdiction'])}. City code cites that name no "
+                  "city are checked on Corpus under it; a cite that names another city is checked under that one.")
+        return
+    code = municipal.case_city(args.case_dir)
+    print(f"The case's city: {municipal.label(code)}" if code else
+          "The case has no city set (`matter.py city <case folder> TX-AUSTIN` sets one).")
+
+
 def cmd_courtlistener(args):
     """courtlistener on|off|status|key: the one switch for case law lookups (search and cite lookup),
     the same switch as the browser UI's Case law lookups panel."""
@@ -1290,6 +1324,14 @@ def main():
     p.add_argument("--issuer", default=os.environ.get("USER", "human"))
     p.add_argument("--caller", action="append", default=[])
     p.set_defaults(fn=cmd_consent)
+
+    p = sub.add_parser("city", help="The case's city, for city code cites (local only)")
+    p.add_argument("case_dir", nargs="?")
+    p.add_argument("code", nargs="?", help="a Corpus city code such as TX-AUSTIN")
+    p.add_argument("--clear", action="store_true", help="remove the case's city")
+    p.add_argument("--list", nargs="?", const="", default=None, metavar="TEXT", help="list Corpus city codes")
+    p.add_argument("--issuer", help="who is setting it; default your login name")
+    p.set_defaults(fn=cmd_city)
 
     p = sub.add_parser("courtlistener", help="Turn case law lookups on or off for a case, or save your key")
     p.add_argument("sub", choices=["on", "off", "status", "key"])

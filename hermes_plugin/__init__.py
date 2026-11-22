@@ -82,16 +82,24 @@ _QUOTE_ORDER = (_quote_guard.quotecheck.NOT_FOUND, _quote_guard.quotecheck.WRONG
                 _quote_guard.quotecheck.CANT_CHECK, _quote_guard.quotecheck.EXACT)
 _QUOTE_MARK = {_quote_guard.quotecheck.EXACT: "✓", _quote_guard.quotecheck.CANT_CHECK: "·"}
 USAGE = ("Usage: /matter [status] | deadlines | intake | packet [30s|3min|15min] | check <draft.md> | "
-         "grant | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
+         "grant | city [CODE|clear] | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
 WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
 WATCH_USAGE = ("Usage: /matter watch (the check, now) | /matter watch on [HH:MM] (each morning, through Hermes "
                "cron) | /matter watch off")
 _HHMM = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
+def _city_words(md: str) -> str:
+    from ..matterkit import municipal
+    code = municipal.case_city(md)
+    return municipal.label(code) if code else "none set (/matter city <code>)"
+
+
 # What leaves the computer, in the words the decisions file (2026-11-10, extension 2) asks for.
 WHAT_LEAVES = ("Cite checks are on for every case unless a person turns them off. Only bare cites leave "
                "this computer:\n"
                "- Bare case cites such as 550 U.S. 544 go to CourtListener, only when a key is set.\n"
-               "- Bare statute and code cites such as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us).\n"
+               "- Bare statute and code cites such as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us), and so do\n"
+               "  city code cites such as Austin City Code § 25-2-551, with the city's Corpus code (TX-AUSTIN),\n"
+               "  when the cite or the case names the city.\n"
                "Nothing else goes anywhere. Each check can be turned off per case, and off sticks.")
 # Catalog rule 11: the key goes in through Hermes's own settings, never into a chat.
 KEY_IN_HERMES = (f"The key is free: get one at {_guard.KEY_URL}, then add it in Hermes, and never paste it "
@@ -342,6 +350,8 @@ class Plugin:
                 return self._check(rest)
             if sub == "grant":
                 return self._grant_text()
+            if sub == "city":
+                return self._city(rest)
             if sub == "init":
                 return self._init(rest)
             if sub == "demo":
@@ -424,6 +434,26 @@ class Plugin:
                    "prove the point. Can't check means there was no record text to compare against._")
         return "\n".join(out)
 
+    def _city(self, rest: str) -> str:
+        """/matter city [CODE|clear]: the case's city for city code cites. Typed by a person; sends nothing."""
+        from ..matterkit import municipal
+        md = resolve_matter(self.settings()["matter_dir"])
+        word = rest.strip()
+        if not word:
+            code = municipal.case_city(md)
+            return (f"This case's city: {municipal.label(code)}. City code cites that name no city are "
+                    "checked on Corpus under it." if code else
+                    "This case has no city set. /matter city TX-AUSTIN sets one (any Corpus city code), and "
+                    "city code cites that name no city, such as Municipal Code § 12.03, are then checked under it.")
+        try:
+            rec = municipal.set_case_city(md, None if word.lower() == "clear" else word, "hermes", "hermes")
+        except ValueError as e:
+            return str(e)
+        if rec is None:
+            return "This case has no city now."
+        return (f"This case's city is {municipal.label(rec['jurisdiction'])}. A cite that names another city "
+                "is still checked under that city.")
+
     def _grant_text(self) -> str:
         """What leaves by default, this case's checks, where the CourtListener key goes in Hermes
         (never the chat), and the terminal lines a person runs to turn each check off or back on."""
@@ -443,6 +473,7 @@ class Plugin:
             out += ["", "This case:",
                     f"- Case cites: {_STATE_WORDS[caselaw.check_label(md, citelookup.PROVIDER)]}",
                     f"- Statute and code cites: {_STATE_WORDS[caselaw.check_label(md, statutelookup.PROVIDER)]}",
+                    f"- City for city code cites: {_city_words(md)}",
                     f"- Search: {'on' if caselaw.search_on(md) else 'off'}"]
         if self.courtlistener_token():
             out += ["", "CourtListener key: set."]

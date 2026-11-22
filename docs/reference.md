@@ -336,6 +336,16 @@ back on, with full paths, so they work from any folder:
 <python> <kit>/matter.py consent activate ~/cases/my-case --scope statute-lookup   # statutes back on: type ACTIVATE
 ```
 
+**City code cites.** A cite to a city's code is checked on Corpus under that city's jurisdiction
+code when the cite names a city Corpus lists (`Austin City Code § 25-2-551`, `Municipal Code of
+Chicago § 5-12-080`, `St. Louis Rev. Code 26.80.060`). A cite that names no city
+(`Municipal Code § 12.03`) is checked only once a person sets the case's city: `/matter city
+TX-AUSTIN` in Hermes or `matter.py city ~/cases/my-case TX-AUSTIN` (`matter.py city --list austin`
+finds a code). Setting it sends nothing. A name several Corpus cities share (`Springfield`,
+`Columbus`, `Portland`) is checked only when the case's city is one of them; a city Corpus does not
+list is never sent. The city list is a snapshot of Corpus's `law.list_coverage`
+(`matterkit/data/corpus_cities.json`, rebuilt with `scripts/refresh-corpus-cities.py`).
+
 `<kit>` is where Hermes installed the plugin and `<python>` is the Python Hermes itself runs on;
 `/matter grant` prints both real paths. The kit needs Python 3.10 or newer, and a bare `python3`
 on a Mac can be 3.9.
@@ -366,6 +376,7 @@ default:
 |---|---|---|
 | `www.courtlistener.com` citation lookup | the bare case cites (`123 F.4th 456`), up to 60 per reply, with your token; nothing without a token | 100 lookups a day per case (CourtListener's free account allows about 125) |
 | `corpuslaw.us` law search | one statute or code cite per request (`Miss. Code Ann. § 89-7-27`), re-read by the kit's own parser before it is sent | `max_statute_checks` per reply, 50 a day per case; Corpus allows 250 searches a month without a key |
+| `corpuslaw.us` law search, city codes | one city code cite per request (`Austin City Code § 25-2-551`) and the city's Corpus jurisdiction code (`TX-AUSTIN`), and only when the cite names a city Corpus lists or a person set the case's city; a bare `§ 25-2-551` is never taken for a city cite | the same limits, from the same grant |
 | Hermes cron delivery (Deadline Watch, only if you create the job) | the case folder's name (the message heading, e.g. `Smith v Acme`), deadline names, dates and confidence labels, and counts of changed or missing files; never file names, paths or contents | once a day, only on days with something to report |
 
 No reply text, facts or documents leave the machine. Every request, and every Deadline Watch
