@@ -211,11 +211,14 @@ outreach.
 
 Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.amend_add` · `matter.amend_list` ·
-`matter.deadline_list` · `matter.trigger_list` · `matter.trigger_fire` ·
+`matter.deadline_list` · `matter.deadline_update` · `matter.trigger_list` · `matter.trigger_fire` ·
 `matter.packet_render` · `matter.cite_extract` ·
 `matter.ingest_path` · `matter.verify` · `matter.hold_render` ·
+`matter.brief_check` · `matter.privacy_check` · `matter.rules_show` ·
 `matter.correspondence_list` · `matter.caselaw_status` · `matter.search` ·
 `matter.cite_lookup`.
+`matter.privacy_check` reads a file or folder inside `MATTER_DIR`, changes nothing and sends
+nothing; see [Checking a filing for private information](#checking-a-filing-for-private-information-rule-52).
 `matter.cite_lookup` and `matter.brief_check` send a draft's bare case cites to
 CourtListener unless a person turned that check off for the case;
 `matter.search` reaches CourtListener only once a person has turned search on
@@ -308,10 +311,10 @@ the MCP server above can't:
   read-only backend (`dashboard/plugin_api.py`, mounted at `/api/plugins/corpus-open/`), which
   Hermes loads only for plugins in `plugins.enabled` (`hermes plugins enable corpus-open` adds
   it). It never writes to the case and makes no network calls.
-- **Twelve tools** in the `corpus_open` toolset: `matter_status`, `matter_fact_add`,
+- **Thirteen tools** in the `corpus_open` toolset: `matter_status`, `matter_fact_add`,
   `matter_fact_list`, `matter_deadline_list`, `matter_trigger_list`, `matter_trigger_fire`,
-  `matter_packet_render`, `matter_brief_check`, `matter_rules_show`, `matter_cite_check`,
-  `matter_verify`, `matter_ingest_path`.
+  `matter_packet_render`, `matter_brief_check`, `matter_privacy_check`, `matter_rules_show`,
+  `matter_cite_check`, `matter_verify`, `matter_ingest_path`.
 
 Install and set it up:
 
@@ -482,6 +485,48 @@ numbered title at the same level ("2. Plaintiff Was Arrested.") is a
 subheading, and one naming a non-fact section ("2. Argument.") ends it. A fact
 section never narrows: "I. FACTS" stays open through "A." and "B." subsections
 until a heading at its own level or higher.
+
+## Checking a filing for private information (Rule 5.2)
+
+```bash
+python3 matter.py privacy check ~/cases/my-case Filings/drafts/RESPONSE_v1.docx
+python3 matter.py privacy check ~/cases/my-case Filings --out ~/Desktop/privacy-check.md
+```
+
+Fed. R. Civ. P. 5.2(a) says a court filing may show only the last four digits of a Social
+Security or taxpayer identification number, only the year of a birth date, only the initials
+of a minor, and only the last four digits of a financial account number. `privacy check`
+reads a draft or filing (Markdown, text, Word `.docx`, PDF; a folder is read file by file) and
+lists:
+
+- **Restricted by Rule 5.2(a):** Social Security and taxpayer ID numbers shown in full, birth
+  dates with more than the year, names of people the text calls a minor or a child, and
+  account or card numbers with more than the last four digits.
+- **Advisory:** phone numbers and street addresses. The rule does not list them, but you may
+  not want them public.
+
+Every match is masked in the report (`***-**-4329`, `[month and day hidden] 1988`, `E. S.`), so
+the report never repeats what it found and is safe to save or share. Files it could not read
+(images, old `.doc` files, a scanned PDF with no text layer, a Word file with tracked changes,
+whose deleted text is still inside the file) are listed with the reason, and so is anything it
+read only in part. In a Word file it reads the body, footnotes, endnotes, headers, footers,
+comments and text boxes; in a PDF, every line `pdftotext` gives, running headers included.
+
+It matches patterns. A birth date or an account number is flagged only near words that say what
+it is ("born", "DOB", "account"), a nine-digit number only when the text calls it a Social
+Security or tax number, and a name only near words that say the person is a minor or a child.
+So it misses things and flags things that are fine: **a clean scan is not proof that a filing
+complies with the rule.** It does not decide the rule's exemptions, sealing or waiver, and
+local or state rules can ask for more. It changes no file and sends nothing anywhere.
+
+The rule's own words are quoted only from a rules pack attached to the case (see
+[Court rules attached to a case](#court-rules-attached-to-a-case)). Corpus does not hold the
+Federal Rules of Civil Procedure yet (checked 2026-11-22), so with no pack the report links the
+official text at uscourts.gov instead of quoting from memory.
+
+Exit codes: 0 nothing found, 1 something Rule 5.2(a) restricts, 2 only advisory items or
+files not (fully) read. The MCP tool is `matter.privacy_check`; the Hermes tool is
+`matter_privacy_check`.
 
 ## Checking that cited cases exist
 

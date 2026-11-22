@@ -90,6 +90,10 @@ TOOLS = [
                      "properties": {"path": {"type": "string"}, "pdftotext": {"type": "boolean"},
                                     "mode": {"type": "string", "enum": ["brief", "complaint"], "description": "complaint: allegations need no record cite"},
                                     "offline": {"type": "boolean", "description": "send nothing to CourtListener; cites with no saved answer are NOT VERIFIED (default false)"}}}},
+    {"name": "matter.privacy_check", "description": "Filing privacy check (Fed. R. Civ. P. 5.2) for a draft or filing inside MATTER_DIR (Markdown, text, Word .docx or PDF), or every file in a folder there. Lists what Rule 5.2(a) restricts: Social Security and taxpayer ID numbers shown in full, birth dates with more than the year, names of people the text calls minors (initials are allowed) and financial account or card numbers with more than the last four digits; phone numbers and street addresses as advisory. Every match is masked in the report (last four digits, the year, initials), so the report never repeats it. Files it could not read, or read only in part, are listed. Pattern matching: a clean scan is not proof of compliance. Changes no file, writes nothing, no network. Returns the report; first line gives exit=0 (nothing found), 1 (restricted items), 2 (advisory items or files not fully scanned).",
+     "inputSchema": {"type": "object", "required": ["path"],
+                     "properties": {"path": {"type": "string", "description": "a file or folder inside MATTER_DIR"},
+                                    "pdftotext": {"type": "boolean", "description": "read PDFs with pdftotext (default true)"}}}},
     {"name": "matter.rules_show", "description": "Text of a rule or subsection from a rules pack attached to this matter (.matter/rules.json), with the pack id, version and current-as-of date. Cite as 'L.U.Civ.R. 7(b)(4)', 'Fed. R. Civ. P. 15(a)(2)', 'Local Rule 7(b)(4)' or an anchor id. A bare 'Rule 15' names no rule set: it lists every attached pack that has it and picks none unless `pack` is given. Derived text, not the official copy. Read-only. No network.",
      "inputSchema": {"type": "object", "required": ["cite"],
                      "properties": {"cite": {"type": "string"}, "pack": {"type": "string", "description": "pack id"}}}},
@@ -177,6 +181,14 @@ def call(name: str, args: dict):
             report = briefcheck.check(MATTER_DIR, _readable_in_matter(args["path"]),
                                       use_pdftotext=args.get("pdftotext", True), mode=args.get("mode", "brief"),
                                       cites=cites)
+        return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
+    if name == "matter.privacy_check":
+        from matterkit import privacy
+        target = _resolve_in_matter(args.get("path", ""))
+        if not ing.reads_inside(target, MATTER_DIR):
+            raise ValueError(f"{args.get('path')} is a link to a file outside MATTER_DIR, so it is not read")
+        report = privacy.check([target], case_dir=ing.abs_path(MATTER_DIR), use_pdftotext=args.get("pdftotext", True),
+                               confine=MATTER_DIR)
         return f"exit={report.exit_code} · {report.summary()}\n\n{report.render()}"
     if name == "matter.rules_show":
         from matterkit import rules

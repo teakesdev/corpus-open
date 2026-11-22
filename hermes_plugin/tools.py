@@ -136,6 +136,17 @@ SCHEMAS = {
         {"path": {"type": "string"}, "mode": {"type": "string", "enum": ["brief", "complaint"]},
          "offline": {"type": "boolean"}},
         ["path"]),
+    "matter_privacy_check": _schema(
+        "matter_privacy_check",
+        "Filing privacy check under Rule 5.2 of the Federal Rules of Civil Procedure, for a draft or filing in the "
+        "case folder (Markdown, text, Word .docx or PDF) or every file in a folder there. Lists Social Security and taxpayer ID numbers shown in "
+        "full, birth dates with more than the year, names of people the text calls minors (initials are allowed) "
+        "and account or card numbers with more than the last four digits; phone numbers and street addresses as "
+        "advisory. Every match is masked in the report, so never ask for or repeat the unmasked value. Lists files "
+        "it could not read. Run it before anything is filed. A clean scan is not proof of compliance. Changes no "
+        "file; no network.",
+        {"path": {"type": "string", "description": "a file or folder inside the case folder, e.g. 'Drafts'"}},
+        ["path"]),
     "matter_rules_show": _schema(
         "matter_rules_show",
         "Text of a court rule from a rules pack attached to the case (e.g. 'Fed. R. Civ. P. 12(b)(6)', "
@@ -250,6 +261,22 @@ class Tools:
         with contextlib.redirect_stdout(io.StringIO()):
             report = briefcheck.check(md, draft_path(md, args.get("path", "")), use_pdftotext=True,
                                       mode=args.get("mode") or "brief", cites=cites)
+        return {"exit": report.exit_code, "summary": report.summary(), "report": report.render()}
+
+    def matter_privacy_check(self, args):
+        from ..matterkit import privacy
+        md = self._dir()
+        raw = args.get("path", "")
+        if _is_case_root(md, raw):
+            raise MatterError("That is the case folder itself. Name one folder in it (for example Drafts or "
+                              "Filings) or one file.")
+        p = inside(md, raw)
+        if not ing.reads_inside(p, md):
+            raise MatterError(f"{raw} is a link to a file outside the case folder, so it is not read.")
+        if not os.path.exists(p):
+            raise MatterError(f"There is no {raw} in the case folder. Check the name, or type /matter to see "
+                              "the case.")
+        report = privacy.check([p], case_dir=md, confine=md)
         return {"exit": report.exit_code, "summary": report.summary(), "report": report.render()}
 
     def matter_rules_show(self, args):
