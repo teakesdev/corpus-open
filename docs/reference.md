@@ -137,6 +137,55 @@ to turn search on.
   only by your user account), never in a case folder, so sharing a case with a
   lawyer doesn't share your key. `COURTLISTENER_TOKEN`, if set, is used instead.
 
+### Case law research log
+
+Case law is rarely all in one place: you also look in Google Scholar, on a court's
+own website, at a law library. The research log keeps what you tried and what came
+of it, the cases you want to look at again, and where else to look when a search
+comes up short. It lives in the case, in `.matter/caselaw/research.jsonl`, and
+sends nothing anywhere. The searches the kit itself sends to CourtListener are
+already saved, and `research list` shows them beside the ones you log by hand.
+
+```bash
+# 1. A search you did anywhere, and what came of it (found, nothing, blocked, not-online, paywalled, error).
+#    After a miss, with --jurisdiction (a state code, DC, or US for the federal courts), it says where else to look.
+python3 matter.py research log ~/cases/my-case --source "google scholar" --query "inherent authority docket" \
+  --outcome nothing --jurisdiction OH --years 1995-2000
+python3 matter.py research list ~/cases/my-case [--outcome blocked] [--jurisdiction OH]
+
+# 2. A case that may matter later: a reason is required, a date to look again is optional.
+python3 matter.py research save ~/cases/my-case "Smith v. Jones, docket control" \
+  --why "Treats a missed scheduling order as waiver; check whether still followed" --revisit 2026-12-01
+python3 matter.py research due ~/cases/my-case         # leads whose date has come, and the ones with none
+python3 matter.py research set ~/cases/my-case rl_1a2b3c4d --status revisited --note "still good"
+
+# 3. Where else to look, for a court and year. No case folder needed.
+python3 matter.py research where OH --level appellate --year 1998
+python3 matter.py research where US --level federal-district --court Maryland
+```
+
+`research leads` lists saved cases (`--status all` to include ones marked
+revisited, dropped or used), and `research list`, `leads`, `due` and `where` take
+`--json`. A saved case is a note to yourself: it is not checked and is not good
+law, so read the opinion before relying on it.
+
+The "where else to look" data is a survey taken on **2026-11-07** of what each
+state's courts, CourtListener, Google Scholar, Harvard's Caselaw Access Project
+and GovInfo publish for free. It records public metadata only (which website, from
+what year, whether it has full-text search, and whether the survey's own check
+could open the page); it logged in nowhere and needed no CourtListener key.
+Court websites change: every answer says when it was checked,
+and "blocked" means only that the survey's automated check was refused, so the
+page may still open in your browser. The data is `matterkit/data/caselaw_coverage.json`
+(schema 2, public: other projects read the same file, among them the case-law map on corpuslaw.us);
+`scripts/build_caselaw_coverage.py` rebuilds it from a newer survey. For CourtListener it carries
+the years, the opinion count and the newest opinion's date, counted from CourtListener's public bulk
+files (Public Domain Mark, no key): `scripts/cl_bulk_years.py <snapshot>` streams two of them, saves
+nothing, and writes the per-court summary that `build_caselaw_coverage.py --cl-years` folds in. A
+mistyped early date in the files (a Minnesota opinion dated 1665) is corrected, and only when it falls
+before both the court's own start and the Caselaw Access Project's earliest year for the state: it is
+raised to the project's year. A real predecessor court's history (Kentucky's 1881) is kept.
+
 ## Capturing a web page
 
 ```bash
@@ -215,13 +264,19 @@ Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.packet_render` · `matter.cite_extract` ·
 `matter.ingest_path` · `matter.verify` · `matter.hold_render` ·
 `matter.correspondence_list` · `matter.caselaw_status` · `matter.search` ·
-`matter.cite_lookup`.
+`matter.cite_lookup` · `matter.research_list` · `matter.research_leads` ·
+`matter.research_due` · `matter.research_where` · `matter.research_log` ·
+`matter.research_save`.
 `matter.cite_lookup` and `matter.brief_check` send a draft's bare case cites to
 CourtListener unless a person turned that check off for the case;
 `matter.search` reaches CourtListener only once a person has turned search on
 (see above). When a check is off or there is no key, the tools send nothing and
 reply with the steps, for the agent to pass on. `matter.caselaw_status` says
 what is on.
+The `matter.research_*` tools never reach the network: `research_log` and
+`research_save` append one line to the case's `.matter/caselaw/research.jsonl`
+(an agent saves leads; marking one revisited or dropped is for a person), and the
+rest read it and the dated "where else to look" survey.
 `matter.ingest_path` refuses paths that escape `MATTER_DIR`. `matter.verify`
 prints absolute `root=` and ok/changed/missing; it does not send network.
 `matter.hold_render` takes a `notice_id` and returns a filtered custodian packet.
