@@ -750,7 +750,8 @@ def cmd_cite(args):
     from matterkit import citations
     if args.sub == "extract":
         args.path = existing_draft(args.case_dir, args.path)
-        raw = open(args.path, "rb").read()
+        with open(args.path, "rb") as f:
+            raw = f.read()
         text = raw.decode("utf-8", errors="replace")
         import hashlib
         doc_sha = hashlib.sha256(raw).hexdigest()

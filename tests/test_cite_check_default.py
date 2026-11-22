@@ -19,6 +19,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
+from fileio import read_text as _read_text
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -351,7 +352,7 @@ class TestMcpCannotUndoOff(IsolatedConfig):
         self.assertEqual([x.get("event") for x in lines], ["case-default-written"])
 
     def test_mcp_source_cannot_write_a_choice(self):
-        src = open(os.path.join(KIT, "matter-mcp.py")).read()
+        src = _read_text(os.path.join(KIT, "matter-mcp.py"))
         for name in ("decline", "revoke", "turn_off", "write_declined", "ensure_defaults", "save_grants"):
             self.assertNotIn(name, src)
 

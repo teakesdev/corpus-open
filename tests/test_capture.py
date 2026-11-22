@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from fileio import read_text as _read_text
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -605,7 +606,7 @@ class TestCaptureModuleIsNetworkFree(unittest.TestCase):
         import ast
         banned = {"socket", "urllib", "http", "requests", "httpx", "ssl",
                   "ftplib", "smtplib", "telnetlib", "xmlrpc", "asyncio"}
-        tree = ast.parse(open(os.path.join(KIT, "matterkit", "capture.py")).read())
+        tree = ast.parse(_read_text(os.path.join(KIT, "matterkit", "capture.py")))
         for node in ast.walk(tree):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
                      else [node.module] if isinstance(node, ast.ImportFrom) and node.module

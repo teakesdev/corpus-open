@@ -223,7 +223,7 @@ class TestGrantWords(Base):
 class TestManifest(unittest.TestCase):
     def test_version_and_what_leaves(self):
         m = read_manifest()
-        self.assertEqual(m["version"], '"0.6.0"')
+        self.assertEqual(m["version"], '"0.7.0"')
         with open(os.path.join(hp.KIT, "plugin.yaml"), encoding="utf-8") as f:
             text = " ".join(f.read().split())
         self.assertNotIn("only after a person grants them", text)

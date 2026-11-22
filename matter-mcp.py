@@ -19,6 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from matterkit import ingest as ing, store, packet as pk, timeline  # noqa: E402
 
+VERSION = "0.7.0"  # the plugin version; tests/test_release.py keeps it equal to plugin.yaml
+
 MATTER_DIR = os.environ.get("MATTER_DIR", os.getcwd())
 
 TOOLS = [
@@ -426,7 +428,7 @@ def handle(req: dict) -> dict:
     if method == "initialize":
         return result({"protocolVersion": req["params"].get("protocolVersion", "2025-06-18"),
                        "capabilities": {"tools": {}},
-                       "serverInfo": {"name": "matter-kit", "version": "0.1.0"}})
+                       "serverInfo": {"name": "matter-kit", "version": VERSION}})
     if method == "notifications/initialized":
         return {}
     if method == "tools/list":

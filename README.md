@@ -7,7 +7,7 @@ court case. It checks every citation and quotation your AI writes, protects the 
 have filed, and keeps your deadlines in front of you. Your case file stays on your computer.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml/badge.svg)](https://github.com/teakesdev/corpus-open/actions/workflows/ci.yml)
+[![Tests: run locally, CI is off](https://img.shields.io/badge/tests-run%20locally%2C%20CI%20is%20off-lightgrey.svg)](docs/reference.md#running-the-tests)
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/teakesdev/corpus-open)
 
 <p align="center">
@@ -97,7 +97,8 @@ because Hermes runs them and the model cannot skip them:
   Deadline Watch can also send them to you each morning through Hermes, with no model in
   between.
 
-It also adds thirteen tools for the case folder (facts labeled with their sources, deadlines, a
+It also adds fifteen tools for the case folder (facts labeled with their sources, a dated case
+timeline, deadlines, a
 brief check, a filing privacy check for Social Security, birth-date and account numbers and
 minors' names, a packet for a lawyer who might take the case, court rules, file fingerprints),
 the `/matter` command, and a Case pane in Hermes Desktop. The details are under

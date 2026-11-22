@@ -23,6 +23,7 @@ import subprocess
 import sys
 import unittest
 from unittest import mock
+from fileio import read_text as _read_text
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -444,7 +445,7 @@ class TestEntryPoints(Phase):
         p = subprocess.run([sys.executable, os.path.join(KIT, "matter.py"), "brief", "--help"],
                            capture_output=True, text=True, timeout=60)
         self.assertIn("--offline", p.stdout)
-        self.assertIn("--offline", open(os.path.join(KIT, "matter.py"), encoding="utf-8").read().split("def ")[0])
+        self.assertIn("--offline", _read_text(os.path.join(KIT, "matter.py"), encoding="utf-8").split("def ")[0])
 
     def mcp(self, arguments):
         req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -468,7 +469,7 @@ class TestEntryPoints(Phase):
         self.assertEqual(self.requests_logged(), [])
 
     def test_mcp_schema_and_description(self):
-        src = open(os.path.join(KIT, "matter-mcp.py"), encoding="utf-8").read()
+        src = _read_text(os.path.join(KIT, "matter-mcp.py"), encoding="utf-8")
         self.assertIn('"offline": {"type": "boolean"', src)
         tool = next(line for line in src.splitlines() if '"name": "matter.brief_check"' in line)
         for words in ("CourtListener", "bare", "offline", "never writes the store"):

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from fileio import read_bytes as _read_bytes, read_text as _read_text
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
@@ -141,11 +142,11 @@ class TestSubcaseInit(SubBase):
 
     def test_refuses_existing_folder_and_leaves_it_alone(self):
         self.make_subcase("child", "First")
-        before = open(os.path.join(self.child, "matter.json")).read()
+        before = _read_text(os.path.join(self.child, "matter.json"))
         r = self.run_cli("subcase", "init", self.parent, "child", "--title", "Second", check=False)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("already exists", r.stderr)
-        self.assertEqual(open(os.path.join(self.child, "matter.json")).read(), before)
+        self.assertEqual(_read_text(os.path.join(self.child, "matter.json")), before)
         # a plain pre-existing folder (no store) is refused too
         os.makedirs(os.path.join(self.parent, "Subcases", "plain"))
         r = self.run_cli("subcase", "init", self.parent, "plain", "--title", "T", check=False)
@@ -305,7 +306,7 @@ class TestParentReferences(ParentBase):
         self.assertEqual(sorted(x[2] for x in sources), ["p. 1", "p. 2"])
 
     def test_same_hash_already_registered_locally_is_reused_and_said_so(self):
-        write(os.path.join(self.child, "Evidence", "copy.txt"), open(self.parent_file).read())
+        write(os.path.join(self.child, "Evidence", "copy.txt"), _read_text(self.parent_file))
         self.run_cli("ingest", self.child)
         r = self.fact("parent:Filings/order.txt@p. 1", check=True)
         self.assertIn("reused", r.stdout)
@@ -632,9 +633,9 @@ class TestStatus(SubBase):
     def test_status_reads_children_without_writing_to_them(self):
         self.make_subcase("alpha", "Alpha")
         db = os.path.join(self.parent, "Subcases", "alpha", ".matter", "matter.db")
-        before = open(db, "rb").read()
+        before = _read_bytes(db)
         self.status(self.parent)
-        self.assertEqual(open(db, "rb").read(), before)
+        self.assertEqual(_read_bytes(db), before)
 
     def test_subcase_status_names_its_parent(self):
         self.make_subcase("alpha", "Alpha libel matter")

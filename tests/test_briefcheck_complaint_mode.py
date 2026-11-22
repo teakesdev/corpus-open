@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import unittest
+from fileio import read_text as _read_text
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
@@ -163,7 +164,7 @@ class TestSwe2ComplaintModeReview(Base):
         self.assertIn("1 alleged quotation listed", r.summary())
 
     def test_p3_mcp_mode_schema_is_typed_and_invalid_mode_is_an_error(self):
-        mcp = open(os.path.join(KIT, "matter-mcp.py"), encoding="utf-8").read()
+        mcp = _read_text(os.path.join(KIT, "matter-mcp.py"), encoding="utf-8")
         self.assertIn('"mode": {"type": "string", "enum": ["brief", "complaint"]', mcp)
         draft = os.path.join(self.m.dir, "Filings", "fac.md")
         with open(draft, "w") as f:
@@ -178,7 +179,7 @@ class TestSwe2ComplaintModeReview(Base):
         self.m.conn = store.connect(self.m.dir)
 
     def test_p3_readme_states_the_actual_rule(self):
-        readme = open(os.path.join(KIT, "docs", "reference.md"), encoding="utf-8").read()  # the manual moved out of README.md
+        readme = _read_text(os.path.join(KIT, "docs", "reference.md"), encoding="utf-8")  # the manual moved out of README.md
         self.assertIn("Headings are still read for cites and quotations", readme)
 
 
@@ -233,5 +234,5 @@ class TestSwe2ComplaintModeReviewRound3(Base):
                              ["The arrest happened at home on a holiday."], name)
 
     def test_readme_lists_every_veto_pattern(self):
-        readme = open(os.path.join(KIT, "docs", "reference.md"), encoding="utf-8").read()  # the manual moved out of README.md
+        readme = _read_text(os.path.join(KIT, "docs", "reference.md"), encoding="utf-8")  # the manual moved out of README.md
         self.assertIn("short-form or Westlaw cite, Id.", readme)

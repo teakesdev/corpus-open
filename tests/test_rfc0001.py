@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from fileio import read_text as _read_text
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -354,7 +355,7 @@ class TestConsentCooperative(unittest.TestCase):
     def test_egress_log_is_hash_only(self):
         secret = "matter fact text nobody should find here"
         rec = search.log_egress(self.dir, "p1", "example.org", "query_text", secret)
-        self.assertNotIn(secret, open(consent.egress_path(self.dir)).read())
+        self.assertNotIn(secret, _read_text(consent.egress_path(self.dir)))
         self.assertEqual(rec["sha256"], hashlib.sha256(secret.encode()).hexdigest())
         self.assertNotIn("created_by", rec)  # not an authorization proof
 
@@ -447,7 +448,7 @@ class TestNetworkIsolation(unittest.TestCase):
         for mod_file in ("matterkit/citations.py", "matterkit/consent.py",
                          "matterkit/search.py", "matterkit/caselaw.py", "matterkit/credentials.py",
                          "matterkit/saved_lookups.py"):
-            tree = ast.parse(open(os.path.join(KIT, mod_file)).read())
+            tree = ast.parse(_read_text(os.path.join(KIT, mod_file)))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for a in node.names:

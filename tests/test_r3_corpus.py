@@ -10,6 +10,7 @@ from unittest import mock
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fileio import read_text as _read_text
 from matterkit import consent, search, store
 from matterkit.adapters import corpus_search as cs
 
@@ -107,7 +108,7 @@ class TestR3Protocol(unittest.TestCase):
         self.assertEqual(r.provenance["kind"], "law.get_node")
         self.assertFalse(r.provenance["verified"])
         # egress log records the identifier
-        log = open(consent.egress_path(self.dir)).read()
+        log = _read_text(consent.egress_path(self.dir))
         self.assertIn("corpuslaw.us", log)
 
     def test_authenticated_without_key_fails_before_egress(self):
