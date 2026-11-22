@@ -19,11 +19,13 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 
-from ..matterkit import authority, citations, citelookup, citescreen, statutelookup, store
+from ..matterkit import authority, citations, citelookup, citescreen, municipal, statutelookup, store
 from ..matterkit.consent import ConsentError
 
 # Statute/code outcomes (case outcomes are citelookup's own words).
 IN_CORPUS, NOT_MATCHED, NOT_LOOKED_UP = "IN CORPUS", "NOT MATCHED IN CORPUS", citelookup.NOT_LOOKED_UP
+PARTIAL = ("not looked up: Corpus's search did not finish, so its answer says nothing about this cite. "
+           "Check again later.")
 
 PROBLEM = (*citescreen.LABELS,  # cites the offline screen says cannot exist as written
            citelookup.NOT_FOUND, citelookup.NAME_DIFFERS, citelookup.UNKNOWN_REPORTER, citelookup.AMBIGUOUS)
@@ -161,20 +163,36 @@ def jurisdiction(cite: str) -> str | None:
 def statute_cites(text: str) -> list[str]:
     """Code and statute cites the kit's local parser finds, longest form only, in order, once each.
     A bare section ("§ 89-7-27") is the short form of a full cite in the same text that ends in that
-    section ("Miss. Code Ann. § 89-7-27"), so only the full cite is listed and looked up."""
+    section ("Miss. Code Ann. § 89-7-27"), so only the full cite is listed and looked up. City code cites
+    ("Austin City Code § 25-2-551") are read by matterkit.municipal and listed whole."""
+    return [c for c, _city in _statute_items(text)]
+
+
+def _statute_items(text: str) -> list[tuple]:
+    """statute_cites, each with its matterkit.municipal.CityCite (None for a state or federal cite). The
+    city cite is kept as read in the whole text: "Carson City Code § 4-1" names a city Corpus does not
+    list, which "City Code § 4-1" read alone would not show."""
+    city = municipal.find(text)  # "Austin City Code § 25-2-551": one cite, not "§ 25-2-551" inside it
     rows = [r for r in citations.extract_citations(text)
-            if r["status"] == "extracted" and "§" in (r["parsed_citation"] or "")]
+            if r["status"] == "extracted" and "§" in (r["parsed_citation"] or "")
+            and not any(c.start < r["char_end"] and r["char_start"] < c.end for c in city)]
     keep = [r for r in rows if not any(o is not r and o["char_start"] <= r["char_start"]
                                        and r["char_end"] <= o["char_end"]
                                        and (o["char_end"] - o["char_start"]) > (r["char_end"] - r["char_start"])
                                        for o in rows)]
-    out: list[str] = []
-    for r in keep:
-        c = r["parsed_citation"].strip()
-        if c not in out:
-            out.append(c)
-    full = [_norm(c) for c in out if not c.startswith("§")]
-    return [c for c in out if not (c.startswith("§") and any(f.endswith(_norm(c)) for f in full))]
+    spans = sorted([(r["char_start"], r["parsed_citation"].strip(), None) for r in keep] +
+                   [(c.start, _shown(c), c) for c in city], key=lambda t: t[0])
+    out: list[tuple] = []
+    for _, c, cc in spans:
+        if c not in [o[0] for o in out]:
+            out.append((c, cc))
+    full = [_norm(c) for c, _cc in out if not c.startswith("§")]
+    return [(c, cc) for c, cc in out if not (c.startswith("§") and any(f.endswith(_norm(c)) for f in full))]
+
+
+def _shown(city) -> str:
+    """A city cite as listed: with the unknown city's name in front ("Carson City Code § 4-1")."""
+    return f"{city.name} {city.text}" if city.name and not city.known else city.text
 
 
 def _heading_cite(heading: str) -> str:
@@ -216,6 +234,29 @@ def match_section(cite: str, hits: list) -> tuple | None:
         if _norm(_heading_cite(h.citation)) == want:
             return h.citation, (h.provenance or {}).get("url"), m.group(0)
     return None
+
+
+def match_city(city, hits: list) -> tuple | None:
+    """For a city code cite, the one Corpus hit (from a search scoped to that city) whose heading cites the
+    same section number. City codes are headed many ways ("Municipal Code of Chicago § 5-12-080", "Seattle
+    Mun. Code ch. 22.206, subch. VI, § 22.206.160"), so the number is compared, not the words. Returns
+    (heading, url, where) or None; two different sections with that number (two codes of one city) is
+    None too, since we cannot tell which one the cite means."""
+    found = {}
+    for h in hits:
+        if municipal.same_section(municipal.heading_section(_heading_cite(h.citation)), city.section):
+            nid = (h.provenance or {}).get("node_id") or h.citation
+            found.setdefault(nid, h)
+    if len(found) != 1:
+        return None
+    h = next(iter(found.values()))
+    where = ((h.provenance or {}).get("where") or "").split(" · ")[0]
+    return h.citation, (h.provenance or {}).get("url"), where
+
+
+def _city_matches(city, hits: list) -> int:
+    return len({(h.provenance or {}).get("node_id") or h.citation for h in hits
+                if municipal.same_section(municipal.heading_section(_heading_cite(h.citation)), city.section)})
 
 
 def _ledger(conn, cite: str) -> str:
@@ -316,7 +357,8 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                                    _ledger(conn, r.cite.sent)))
 
     # Statute and code cites -------------------------------------------------------------------
-    statutes = statute_cites(text)
+    items = _statute_items(text)
+    statutes = [c for c, _city in items]
     adapter = None
     why = None
     if statutes:
@@ -337,20 +379,50 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
             except Exception as e:  # noqa: BLE001
                 why = corpus_trouble(e, bool(corpus_api_key))
         from ..matterkit.search import SearchQuery
-        for i, cite in enumerate(statutes):
+        home = municipal.case_city(matter_dir)
+        tried = 0
+        for cite, city in items:
             row = Row("statute", cite, NOT_LOOKED_UP, "not looked up", None, _ledger(conn, cite))
-            if adapter is not None and why is None and i < max(0, int(max_statutes)):
+            juris = jurisdiction(cite)
+            if city is not None:
+                juris, unsent = municipal.resolve(city, home)
+                if juris is None:
+                    row.detail = f"not looked up: {unsent}"
+                    result.rows.append(row)
+                    continue
+            if adapter is not None and why is None and tried < max(0, int(max_statutes)):
+                tried += 1
                 try:
-                    hits = adapter.search(SearchQuery(text=cite, jurisdiction=jurisdiction(cite), limit=5),
-                                          caller_id)
+                    hits = adapter.search(SearchQuery(text=cite, jurisdiction=juris, limit=5), caller_id)
                     result.sent["corpus"] = result.sent.get("corpus", 0) + 1
+                    if city is not None:
+                        mc = match_city(city, hits)
+                        if mc:
+                            heading, url, _where = mc
+                            row.outcome, row.url = IN_CORPUS, url
+                            row.detail = f"Corpus, {municipal.label(juris)}: {heading}"
+                            if city.subsection:
+                                row.detail += f". Subsection {city.subsection} not checked against its text"
+                        elif getattr(adapter, "last_partial", False):
+                            row.detail = PARTIAL
+                        else:
+                            row.outcome = NOT_MATCHED
+                            row.detail = (f"Corpus returned no section {city.section} in {municipal.label(juris)}"
+                                          + (" (more than one code there has a section with that number)"
+                                             if _city_matches(city, hits) > 1 else "")
+                                          + ". It may be outside Corpus's coverage of that city or cited in "
+                                          "another form; check it by hand.")
+                        result.rows.append(row)
+                        continue
                     m = match_statute(cite, hits)
                     sub = None
                     if not m:
                         ms = match_section(cite, hits)
                         if ms:
                             m, sub = ms[:2], ms[2]
-                    if m:
+                    if not m and getattr(adapter, "last_partial", False):
+                        row.detail = PARTIAL
+                    elif m:
                         heading, url = m
                         title = heading[len(_heading_cite(heading)):].strip(" —–-")
                         detail = f"Corpus: {title}" if title else "Corpus holds this section"

@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .. import statutelookup
+from .. import municipal, statutelookup
 from ..citations import now_iso
 from ..consent import ConsentError
 from ..search import SearchQuery, SearchResult, log_egress
@@ -55,6 +55,7 @@ class CorpusSearchAdapter:
         if mode not in ("anonymous", "authenticated"):
             raise ConsentError(f"auth_mode must be anonymous|authenticated, not {auth_mode!r}")
         self.matter_dir = matter_dir
+        self.last_partial = False  # the last search's answer said it did not finish
         self.auth_mode = mode
         self._given_key = api_key  # a host that owns credentials passes the key in; None reads CORPUS_API_KEY
 
@@ -116,12 +117,11 @@ class CorpusSearchAdapter:
             raise MCPRpcError(f"MCP {name} error {resp['error'].get('code')}: "
                               f"{resp['error'].get('message')}")
         result = resp.get("result") or {}
+        if not result.get("text"):
+            result["text"] = _result_text(result)
         if result.get("isError"):
             raise MCPRpcError(
                 f"MCP {name} tool error: {result.get('text', '')[:300]}")
-        if not result.get("text"):
-            sc = result.get("structuredContent") or {}
-            result["text"] = sc.get("text", "")
         return result
 
     # -- public surface ----------------------------------------------------
@@ -170,6 +170,10 @@ class CorpusSearchAdapter:
 
     def _parse_hits(self, result: dict, q: str) -> list[SearchResult]:
         text = result.get("text") or ""
+        # Corpus says so first when a search did not finish (its semantic leg timed out or the embedding
+        # service was down): what comes back is partial, and a missing section is no sign of anything.
+        self.last_partial = bool(re.match(r"\s*NOTE: these results are PARTIAL", text)) or \
+            "the search did not complete" in text[:1500]
         empty = (not text.strip()) or "no results" in text.lower()[:200]
         hits = _extract_hits(text)
         if not hits and empty:
@@ -187,6 +191,7 @@ class CorpusSearchAdapter:
                     "url": f"https://corpuslaw.us/code/{h['node_id']}",
                     "retrieved_at": now_iso(),
                     "node_id": h["node_id"],
+                    "where": h.get("where", ""),
                     "kind": "law.search",
                     "authenticated": self.auth_mode == "authenticated",
                     "verified": False,
@@ -207,6 +212,10 @@ class CorpusStatuteLookupAdapter(CorpusSearchAdapter):
         from .. import consent
         q = statutelookup.payload(query.text)  # ValueError for anything but one parsed cite
         juris = statutelookup.jurisdiction(query.jurisdiction)
+        if municipal.whole(q) and not municipal.known(juris):
+            # A city code cite goes out only scoped to the city it names or the case names: never to
+            # every jurisdiction, where "Municipal Code § 12.03" would match some other city's section.
+            raise ValueError("a city code cite is checked only with the city's Corpus code; refusing to send it")
         consent.authorize(self.matter_dir, self.provider, self.endpoint, self.payload_type, caller_id)
         log_egress(self.matter_dir, self.provider, self.endpoint, self.payload_type, q)
         args: dict = {"query": q, "limit": statutelookup.LIMIT}
@@ -217,6 +226,14 @@ class CorpusStatuteLookupAdapter(CorpusSearchAdapter):
     def get_node(self, node_id: str, caller_id: str) -> SearchResult:
         raise ConsentError("the statute check sends bare cites only; a Corpus node lookup needs a person's "
                            "corpus-search grant")
+
+
+def _result_text(result: dict) -> str:
+    """A tools/call result's text: its text content blocks (MCP 2025-06-18), else structuredContent.text.
+    Corpus sends both; an error result has no top-level "text"."""
+    parts = [c.get("text", "") for c in (result.get("content") or [])
+             if isinstance(c, dict) and c.get("type") == "text"]
+    return "\n".join(p for p in parts if p) or (result.get("structuredContent") or {}).get("text", "") or ""
 
 
 def _first_line(text: str) -> str:
@@ -249,16 +266,21 @@ def _extract_hits(text: str) -> list[dict]:
         if not m:
             continue
         node_id = m.group(1)
-        heading = ""
-        for line in block.splitlines():
-            hm = head_pat.match(line.strip())
+        heading, where = "", ""
+        lines = [ln.strip() for ln in block.splitlines()]
+        for i, line in enumerate(lines):
+            hm = head_pat.match(line)
             if hm:
                 heading = hm.group(1).strip()
+                # The line under the heading says where the section sits: "City of Austin · Austin City Code".
+                nxt = next((ln for ln in lines[i + 1:] if ln), "")
+                if " · " in nxt and not nxt.startswith("node_id"):
+                    where = nxt
                 break
         snippet = re.sub(r"</?b>", "", block)
         snippet = re.sub(r"node_id:.*", "", snippet).strip()
         hits.append({"citation": heading or node_id, "node_id": node_id,
-                     "heading": heading or node_id,
+                     "heading": heading or node_id, "where": where,
                      "snippet": snippet[:500]})
     # form 2: markdown code links
     for m in re.finditer(

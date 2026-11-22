@@ -9,10 +9,15 @@ So the string sent must be one cite the kit's own parser reads, and nothing else
 whatever a caller hands it, wherever the caller got it: a string that is not exactly one parsed
 statute or code cite is refused, and a parenthetical of words after a cite ("(excessive force)",
 "(Rev. 2021)") is dropped, so only the cite and its subsection markers ("(a)(1)") go out.
+
+City and county code cites ("Austin City Code § 25-2-551", "St. Louis Rev. Code 26.80.060") are read by
+matterkit.municipal, whose names come only from Corpus's city list and whose code words come from a
+fixed list. One goes out under the same grant, with the city's Corpus jurisdiction code (TX-AUSTIN),
+and only when the cite or the case names the city: see matterkit.municipal.
 """
 import re
 
-from . import citations
+from . import citations, municipal
 
 PROVIDER = "corpus-statute-lookup"
 ENDPOINT = "corpuslaw.us"  # host: what a grant names (matterkit.adapters.corpus_search.HOST)
@@ -42,6 +47,9 @@ def payload(cite) -> str:
     if not text or len(text) > MAX_CHARS or any(not c.isprintable() for c in text):
         raise ValueError("a statute check sends one cite on one line, and nothing else")
     if not _one_cite(text):
+        city = _city_payload(text)
+        if city:
+            return city
         raise ValueError("not one statute or code cite the kit reads; refusing to send it")
     # Drop trailing parentheticals that are not subsection markers, then check what is left again.
     while True:
@@ -56,10 +64,24 @@ def payload(cite) -> str:
     return text
 
 
+def _city_payload(text: str) -> str | None:
+    """`text` as sent when it is one city code cite (spaces collapsed to one line), else None. A trailing
+    parenthetical of words is dropped first, as for any cite."""
+    while True:
+        c = municipal.whole(text)
+        if c:
+            return c.text
+        m = _TAIL.search(text)
+        if not m or re.fullmatch(_MARK, m.group(0).strip()):
+            return None
+        text = text[:m.start()].rstrip()
+
+
 def jurisdiction(code):
-    """A Corpus jurisdiction code ("US", "MS") or None. Anything else is refused."""
+    """A Corpus jurisdiction code or None: a two-letter one ("US", "MS"), or a city Corpus lists
+    ("TX-AUSTIN", matterkit.municipal.CITIES). Anything else is refused."""
     if code is None:
         return None
-    if not isinstance(code, str) or not re.fullmatch(r"[A-Z]{2}", code):
-        raise ValueError("a statute check's jurisdiction is a two-letter code or nothing")
-    return code
+    if isinstance(code, str) and (re.fullmatch(r"[A-Z]{2}", code) or municipal.known(code)):
+        return code
+    raise ValueError("a statute check's jurisdiction is a two-letter code, a Corpus city code, or nothing")

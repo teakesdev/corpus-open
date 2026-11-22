@@ -137,6 +137,55 @@ to turn search on.
   only by your user account), never in a case folder, so sharing a case with a
   lawyer doesn't share your key. `COURTLISTENER_TOKEN`, if set, is used instead.
 
+### Case law research log
+
+Case law is rarely all in one place: you also look in Google Scholar, on a court's
+own website, at a law library. The research log keeps what you tried and what came
+of it, the cases you want to look at again, and where else to look when a search
+comes up short. It lives in the case, in `.matter/caselaw/research.jsonl`, and
+sends nothing anywhere. The searches the kit itself sends to CourtListener are
+already saved, and `research list` shows them beside the ones you log by hand.
+
+```bash
+# 1. A search you did anywhere, and what came of it (found, nothing, blocked, not-online, paywalled, error).
+#    After a miss, with --jurisdiction (a state code, DC, or US for the federal courts), it says where else to look.
+python3 matter.py research log ~/cases/my-case --source "google scholar" --query "inherent authority docket" \
+  --outcome nothing --jurisdiction OH --years 1995-2000
+python3 matter.py research list ~/cases/my-case [--outcome blocked] [--jurisdiction OH]
+
+# 2. A case that may matter later: a reason is required, a date to look again is optional.
+python3 matter.py research save ~/cases/my-case "Smith v. Jones, docket control" \
+  --why "Treats a missed scheduling order as waiver; check whether still followed" --revisit 2026-12-01
+python3 matter.py research due ~/cases/my-case         # leads whose date has come, and the ones with none
+python3 matter.py research set ~/cases/my-case rl_1a2b3c4d --status revisited --note "still good"
+
+# 3. Where else to look, for a court and year. No case folder needed.
+python3 matter.py research where OH --level appellate --year 1998
+python3 matter.py research where US --level federal-district --court Maryland
+```
+
+`research leads` lists saved cases (`--status all` to include ones marked
+revisited, dropped or used), and `research list`, `leads`, `due` and `where` take
+`--json`. A saved case is a note to yourself: it is not checked and is not good
+law, so read the opinion before relying on it.
+
+The "where else to look" data is a survey taken on **2026-11-07** of what each
+state's courts, CourtListener, Google Scholar, Harvard's Caselaw Access Project
+and GovInfo publish for free. It records public metadata only (which website, from
+what year, whether it has full-text search, and whether the survey's own check
+could open the page); it logged in nowhere and needed no CourtListener key.
+Court websites change: every answer says when it was checked,
+and "blocked" means only that the survey's automated check was refused, so the
+page may still open in your browser. The data is `matterkit/data/caselaw_coverage.json`
+(schema 2, public: other projects read the same file, among them the case-law map on corpuslaw.us);
+`scripts/build_caselaw_coverage.py` rebuilds it from a newer survey. For CourtListener it carries
+the years, the opinion count and the newest opinion's date, counted from CourtListener's public bulk
+files (Public Domain Mark, no key): `scripts/cl_bulk_years.py <snapshot>` streams two of them, saves
+nothing, and writes the per-court summary that `build_caselaw_coverage.py --cl-years` folds in. A
+mistyped early date in the files (a Minnesota opinion dated 1665) is corrected, and only when it falls
+before both the court's own start and the Caselaw Access Project's earliest year for the state: it is
+raised to the project's year. A real predecessor court's history (Kentucky's 1881) is kept.
+
 ## Capturing a web page
 
 ```bash
@@ -216,7 +265,9 @@ Tools: `matter.status` · `matter.fact_add` · `matter.fact_list` ·
 `matter.ingest_path` · `matter.verify` · `matter.hold_render` ·
 `matter.brief_check` · `matter.privacy_check` · `matter.rules_show` ·
 `matter.correspondence_list` · `matter.caselaw_status` · `matter.search` ·
-`matter.cite_lookup`.
+`matter.cite_lookup` · `matter.research_list` · `matter.research_leads` ·
+`matter.research_due` · `matter.research_where` · `matter.research_log` ·
+`matter.research_save`.
 `matter.privacy_check` reads a file or folder inside `MATTER_DIR`, changes nothing and sends
 nothing; see [Checking a filing for private information](#checking-a-filing-for-private-information-rule-52).
 `matter.cite_lookup` and `matter.brief_check` send a draft's bare case cites to
@@ -225,6 +276,10 @@ CourtListener unless a person turned that check off for the case;
 (see above). When a check is off or there is no key, the tools send nothing and
 reply with the steps, for the agent to pass on. `matter.caselaw_status` says
 what is on.
+The `matter.research_*` tools never reach the network: `research_log` and
+`research_save` append one line to the case's `.matter/caselaw/research.jsonl`
+(an agent saves leads; marking one revisited or dropped is for a person), and the
+rest read it and the dated "where else to look" survey.
 `matter.ingest_path` refuses paths that escape `MATTER_DIR`. `matter.verify`
 prints absolute `root=` and ok/changed/missing; it does not send network.
 `matter.hold_render` takes a `notice_id` and returns a filtered custodian packet.
@@ -339,6 +394,16 @@ back on, with full paths, so they work from any folder:
 <python> <kit>/matter.py consent activate ~/cases/my-case --scope statute-lookup   # statutes back on: type ACTIVATE
 ```
 
+**City code cites.** A cite to a city's code is checked on Corpus under that city's jurisdiction
+code when the cite names a city Corpus lists (`Austin City Code § 25-2-551`, `Municipal Code of
+Chicago § 5-12-080`, `St. Louis Rev. Code 26.80.060`). A cite that names no city
+(`Municipal Code § 12.03`) is checked only once a person sets the case's city: `/matter city
+TX-AUSTIN` in Hermes or `matter.py city ~/cases/my-case TX-AUSTIN` (`matter.py city --list austin`
+finds a code). Setting it sends nothing. A name several Corpus cities share (`Springfield`,
+`Columbus`, `Portland`) is checked only when the case's city is one of them; a city Corpus does not
+list is never sent. The city list is a snapshot of Corpus's `law.list_coverage`
+(`matterkit/data/corpus_cities.json`, rebuilt with `scripts/refresh-corpus-cities.py`).
+
 `<kit>` is where Hermes installed the plugin and `<python>` is the Python Hermes itself runs on;
 `/matter grant` prints both real paths. The kit needs Python 3.10 or newer, and a bare `python3`
 on a Mac can be 3.9.
@@ -369,6 +434,7 @@ default:
 |---|---|---|
 | `www.courtlistener.com` citation lookup | the bare case cites (`123 F.4th 456`), up to 60 per reply, with your token; nothing without a token | 100 lookups a day per case (CourtListener's free account allows about 125) |
 | `corpuslaw.us` law search | one statute or code cite per request (`Miss. Code Ann. § 89-7-27`), re-read by the kit's own parser before it is sent | `max_statute_checks` per reply, 50 a day per case; Corpus allows 250 searches a month without a key |
+| `corpuslaw.us` law search, city codes | one city code cite per request (`Austin City Code § 25-2-551`) and the city's Corpus jurisdiction code (`TX-AUSTIN`), and only when the cite names a city Corpus lists or a person set the case's city; a bare `§ 25-2-551` is never taken for a city cite | the same limits, from the same grant |
 | Hermes cron delivery (Deadline Watch, only if you create the job) | the case folder's name (the message heading, e.g. `Smith v Acme`), deadline names, dates and confidence labels, and counts of changed or missing files; never file names, paths or contents | once a day, only on days with something to report |
 
 No reply text, facts or documents leave the machine. Every request, and every Deadline Watch
@@ -743,6 +809,63 @@ the check date plus the pack's review window, whichever comes first. A check
 applies to the pack version it was recorded for, never vouches for an undated
 pack, and `--found amended` keeps the pack `STALE` until you attach the new
 version.
+
+## Case timeline (dated facts)
+
+A fact can carry the date it happened, and each of its sources can carry the
+exact words that support it. `timeline` lists dated facts oldest first, then the
+undated ones, and checks every quote against the registered document each time
+it is shown.
+
+```bash
+python3 matter.py fact add ~/cases/my-case --text "Landlord taped the notice to the door" \
+  --status ALLEGATION --date 2026-03-14 \
+  --source Filings/complaint.pdf@p.3 --quote "taped a notice to the door on March 14"
+python3 matter.py fact date ~/cases/my-case a_… --date 2026-03 --approx   # date a fact you already have
+python3 matter.py fact date ~/cases/my-case a_… --clear                   # take it off the timeline
+python3 matter.py timeline ~/cases/my-case [--from 2026-03] [--to 2026-06] [--out TIMELINE.md]
+python3 matter.py fact add ~/cases/my-case --text "Notice posted" --status ALLEGATION --date 2026-03-16 \
+  --event "notice served" --source Evidence/log.txt@L12-L14 --quote "posted the notice on March 16"
+python3 matter.py timeline ~/cases/my-case --conflicts          # only the events whose dates disagree
+python3 matter.py timeline ~/cases/my-case --label allegation    # or --doc Filings/complaint.pdf, --hypotheses
+```
+
+- **Dates** are `YYYY-MM-DD`, `YYYY-MM` or `YYYY`, only as precise as a source is.
+  `--date-end` makes a range, `--approx` marks "on or about", and `--inferred`
+  marks a date worked out rather than stated by any source. A month sorts before
+  the days of that month. `--from`/`--to` keep facts whose dates overlap the window.
+- **Quotes** pair with sources in order: the first `--quote` belongs to the first
+  `--source`. A quote on a source that can't be resolved refuses the whole fact.
+  When the date is on a different page from the event (a dated cover letter),
+  cite that page as a second source with its own quote; both are checked.
+- **Line cites.** A text or Markdown file is cited by line: `@L12`, `@L12-L14` or
+  `@lines 12-14`, counted in the file as registered. If the words are on other
+  lines the timeline names them (`⚠ words on L40-L41`), and a cite past the end
+  of the file says how many lines it has. Because a changed file can't be
+  checked, a line cite can't silently drift.
+- **Events and conflicts.** `--event "notice served"` names the happening a fact
+  dates. Facts that share an event and whose dates don't overlap are listed
+  under "Dates that disagree", each side with its label and sources; a range
+  that covers the other date is not a conflict. The timeline never picks a
+  side. `fact date <dir> <a_id> --event NAME` renames the event alone.
+- **What each row shows.** How many documents back the fact ("2 documents: …").
+  Hypotheses are left out unless you pass `--hypotheses` or `--label hypothesis`;
+  the timeline says how many it left out.
+- **Checks** run when the timeline is shown, never stored, so editing a file
+  after the fact was saved can never keep an old ✓. ✓ the words are on the cited
+  page, paragraph or lines; ⚠ they are elsewhere in the document (named); ✗ not
+  found; · can't check (file changed, missing, or no text); – no quote saved. A
+  locator that is none of those (a heading, "Tier 1 #6") gets a search of the
+  whole document. A ✓ means the words are in the document, not that the fact is
+  true.
+- Over MCP: `matter.fact_add` takes `date`, `date_end`, `approximate`, `inferred`
+  and `quotes` (parallel to `sources`); `matter.fact_date` and `matter.timeline`
+  (read-only). In Hermes: `/matter timeline [from DATE] [to DATE]`, and `/matter`
+  status says how many facts are dated, how many dates disagree and how many
+  sources have no quote to check. `/matter timeline` takes `conflicts`,
+  `hypotheses`, `from DATE`, `to DATE`, `label LABEL` and `doc FILE`; the MCP and
+  Hermes tools take the same as `conflicts`, `hypotheses`, `from`, `to`, `label`,
+  `doc`, and `event` on `fact_add` / `fact_date`.
 
 ## Deadlines and subcases
 
