@@ -754,6 +754,63 @@ applies to the pack version it was recorded for, never vouches for an undated
 pack, and `--found amended` keeps the pack `STALE` until you attach the new
 version.
 
+## Case timeline (dated facts)
+
+A fact can carry the date it happened, and each of its sources can carry the
+exact words that support it. `timeline` lists dated facts oldest first, then the
+undated ones, and checks every quote against the registered document each time
+it is shown.
+
+```bash
+python3 matter.py fact add ~/cases/my-case --text "Landlord taped the notice to the door" \
+  --status ALLEGATION --date 2026-03-14 \
+  --source Filings/complaint.pdf@p.3 --quote "taped a notice to the door on March 14"
+python3 matter.py fact date ~/cases/my-case a_… --date 2026-03 --approx   # date a fact you already have
+python3 matter.py fact date ~/cases/my-case a_… --clear                   # take it off the timeline
+python3 matter.py timeline ~/cases/my-case [--from 2026-03] [--to 2026-06] [--out TIMELINE.md]
+python3 matter.py fact add ~/cases/my-case --text "Notice posted" --status ALLEGATION --date 2026-03-16 \
+  --event "notice served" --source Evidence/log.txt@L12-L14 --quote "posted the notice on March 16"
+python3 matter.py timeline ~/cases/my-case --conflicts          # only the events whose dates disagree
+python3 matter.py timeline ~/cases/my-case --label allegation    # or --doc Filings/complaint.pdf, --hypotheses
+```
+
+- **Dates** are `YYYY-MM-DD`, `YYYY-MM` or `YYYY`, only as precise as a source is.
+  `--date-end` makes a range, `--approx` marks "on or about", and `--inferred`
+  marks a date worked out rather than stated by any source. A month sorts before
+  the days of that month. `--from`/`--to` keep facts whose dates overlap the window.
+- **Quotes** pair with sources in order: the first `--quote` belongs to the first
+  `--source`. A quote on a source that can't be resolved refuses the whole fact.
+  When the date is on a different page from the event (a dated cover letter),
+  cite that page as a second source with its own quote; both are checked.
+- **Line cites.** A text or Markdown file is cited by line: `@L12`, `@L12-L14` or
+  `@lines 12-14`, counted in the file as registered. If the words are on other
+  lines the timeline names them (`⚠ words on L40-L41`), and a cite past the end
+  of the file says how many lines it has. Because a changed file can't be
+  checked, a line cite can't silently drift.
+- **Events and conflicts.** `--event "notice served"` names the happening a fact
+  dates. Facts that share an event and whose dates don't overlap are listed
+  under "Dates that disagree", each side with its label and sources; a range
+  that covers the other date is not a conflict. The timeline never picks a
+  side. `fact date <dir> <a_id> --event NAME` renames the event alone.
+- **What each row shows.** How many documents back the fact ("2 documents: …").
+  Hypotheses are left out unless you pass `--hypotheses` or `--label hypothesis`;
+  the timeline says how many it left out.
+- **Checks** run when the timeline is shown, never stored, so editing a file
+  after the fact was saved can never keep an old ✓. ✓ the words are on the cited
+  page, paragraph or lines; ⚠ they are elsewhere in the document (named); ✗ not
+  found; · can't check (file changed, missing, or no text); – no quote saved. A
+  locator that is none of those (a heading, "Tier 1 #6") gets a search of the
+  whole document. A ✓ means the words are in the document, not that the fact is
+  true.
+- Over MCP: `matter.fact_add` takes `date`, `date_end`, `approximate`, `inferred`
+  and `quotes` (parallel to `sources`); `matter.fact_date` and `matter.timeline`
+  (read-only). In Hermes: `/matter timeline [from DATE] [to DATE]`, and `/matter`
+  status says how many facts are dated, how many dates disagree and how many
+  sources have no quote to check. `/matter timeline` takes `conflicts`,
+  `hypotheses`, `from DATE`, `to DATE`, `label LABEL` and `doc FILE`; the MCP and
+  Hermes tools take the same as `conflicts`, `hypotheses`, `from`, `to`, `label`,
+  `doc`, and `event` on `fact_add` / `fact_date`.
+
 ## Deadlines and subcases
 
 ```bash

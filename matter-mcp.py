@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from matterkit import ingest as ing, store, packet as pk  # noqa: E402
+from matterkit import ingest as ing, store, packet as pk, timeline  # noqa: E402
 
 MATTER_DIR = os.environ.get("MATTER_DIR", os.getcwd())
 
@@ -28,7 +28,27 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["text", "status"],
                      "properties": {"text": {"type": "string"}, "status": {"enum": ["DOCUMENTED FACT", "ALLEGATION", "INFERENCE", "HYPOTHESIS", "UNKNOWN"]},
                                     "sources": {"type": "array", "items": {"type": "string"}}, "created_by": {"type": "string"},
-                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
+                                    "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."},
+                                    "quotes": {"type": "array", "items": {"type": ["string", "null"]}, "description": "Runs alongside sources: quotes[i] is the exact words sources[i] holds for the fact (null for none). matter.timeline checks each against the record when shown. A quote on a source that is not a registered document is refused."},
+                                    "date": {"type": "string", "description": "When it happened: YYYY-MM-DD, YYYY-MM or YYYY, only as precise as a source is. Puts the fact on the timeline."},
+                                    "date_end": {"type": "string", "description": "Last date of a range, same forms."},
+                                    "approximate": {"type": "boolean", "description": "The source says 'on or about' or similar."},
+                                    "inferred": {"type": "boolean", "description": "The date is worked out (e.g. 'three days after the notice'), not stated by any source."},
+                                    "event": {"type": "string", "description": "A short name for the happening ('notice served'). Facts that share an event and whose dates do not overlap are listed by matter.timeline as a date conflict; neither side is picked."}}}},
+    {"name": "matter.fact_date", "description": "Put an existing fact on the timeline, change its date, or take it off (clear=true). With an event and no date, renames the event of a fact that already has a date. Dates are YYYY-MM-DD, YYYY-MM or YYYY. Refuses an unknown fact, a date that doesn't exist and a range that ends before it starts; changes nothing when it refuses.",
+     "inputSchema": {"type": "object", "required": ["fact_id"],
+                     "properties": {"fact_id": {"type": "string"}, "date": {"type": "string"}, "date_end": {"type": "string"},
+                                    "approximate": {"type": "boolean"}, "inferred": {"type": "boolean"}, "clear": {"type": "boolean"},
+                                    "event": {"type": "string", "description": "A short name for the happening ('notice served'). Facts that share an event and whose dates do not overlap are listed by matter.timeline as a date conflict; neither side is picked."},
+                                    "created_by": {"type": "string"}, "directed_by": {"type": "string"}}}},
+    {"name": "matter.timeline", "description": "The case's dated facts, oldest first, then events whose dates disagree, then undated facts, as Markdown. Each source's quote is checked against the registered document now: exact (on the cited page or lines), in the wrong place, not found, or can't check (no text, file missing or changed). Nothing is stored. A match means the words are there, not that the fact is true. Each row says how many documents back it. Hypotheses are left out unless asked for. Read-only.",
+     "inputSchema": {"type": "object", "properties": {
+         "from": {"type": "string", "description": "YYYY[-MM[-DD]]: only dates on or after"},
+         "to": {"type": "string", "description": "YYYY[-MM[-DD]]: only dates on or before"},
+         "label": {"type": "string", "description": "only this label; HYPOTHESIS shows hypotheses"},
+         "doc": {"type": "string", "description": "only facts with a source in this registered file (rel_path)"},
+         "hypotheses": {"type": "boolean", "description": "include hypotheses"},
+         "conflicts": {"type": "boolean", "description": "only the events whose dates disagree"}}}},
     {"name": "matter.fact_list", "description": "List assertions, optionally filtered by label, with their provenance.",
      "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}}}},
     {"name": "matter.amend_add", "description": "Queue a change for the next version of a pleading (the amendment list): what to add or change, the paragraphs it touches, why, and the facts (assertion ids) and registered documents ('rel_path@page', split on the last '@') that support it. Starts as 'proposed'. Refuses empty text, an empty target, an unknown fact id and a document that is not registered; changes nothing when it refuses. Agents only propose: approving, dropping or marking a change as in the draft is a person's decision, made with `matter.py amend set` or in the browser UI.",
@@ -145,6 +165,10 @@ TOOLS = [
                                     "directed_by": {"type": "string", "description": "Person who directed the agent to do this work (not an approval). Requires created_by 'agent:<model>'."}}}},
 ]
 
+
+def _dated(d):
+    """'2026-03-14 (event: notice served)': a fact's date as the tools report it."""
+    return timeline.display_date(d) + (" (event: %s)" % d["event"] if d.get("event") else "")
 
 def _resolve_in_matter(path: str) -> str:
     """Resolve path inside MATTER_DIR. Relative paths are joined to the matter root, not cwd."""
@@ -296,11 +320,25 @@ def call(name: str, args: dict):
         from matterkit import facts
         by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
         # raises -> isError, nothing written: invalid label, empty text, an uncitable parent: ref
-        r = facts.add(conn, MATTER_DIR, args["text"], args.get("status", "UNKNOWN"), args.get("sources", []), by)
+        r = facts.add(conn, MATTER_DIR, args["text"], args.get("status", "UNKNOWN"), args.get("sources", []), by,
+                      date=args.get("date"), date_end=args.get("date_end"), approximate=bool(args.get("approximate")),
+                      inferred=bool(args.get("inferred")), quotes=args.get("quotes"),
+                      event=args.get("event"))
         warn = "\n⚠ UNSUPPORTED — no recognized sources." if r["unsupported"] else ""
         bad = f"\n⚠ Unrecognized source refs ignored: {r['unrecognized']}" if r["unrecognized"] else ""
-        return (f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}"
+        when = f"\ndated {_dated(r['date'])}" if r["date"] else ""
+        return (f"{r['id']} [{r['status']}] by {r['created_by']}{warn}{bad}{when}"
                 + "".join(f"\n  ↳ {note}" for note in r["notes"]))
+    if name == "matter.fact_date":
+        by = store.attribution(args.get("created_by"), args.get("directed_by"), default="agent")  # raises -> isError
+        d = timeline.set_date(conn, args["fact_id"], args.get("date"), args.get("date_end"),
+                              bool(args.get("approximate")), bool(args.get("inferred")), by, clear=bool(args.get("clear")),
+                              event=args.get("event"))
+        return f"{args['fact_id']}: date cleared" if d is None else f"{args['fact_id']}: dated {_dated(d)} by {by}"
+    if name == "matter.timeline":
+        data = timeline.build(conn, MATTER_DIR, since=args.get("from"), until=args.get("to"), label=args.get("label"),
+                              doc=args.get("doc"), hypotheses=bool(args.get("hypotheses")))
+        return timeline.render(data, conflicts_only=bool(args.get("conflicts")))
     if name == "matter.fact_list":
         from matterkit import facts
         out = [{"id": f["id"], "status": f["status"], "text": f["text"],

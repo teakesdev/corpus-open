@@ -29,6 +29,8 @@ provides_tools:
   - matter_status
   - matter_fact_add
   - matter_fact_list
+  - matter_fact_date
+  - matter_timeline
   - matter_deadline_list
   - matter_trigger_list
   - matter_trigger_fire
