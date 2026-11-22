@@ -43,7 +43,9 @@ KEY_URL = "https://www.courtlistener.com/profile/api/"
 BY_DEFAULT = ("Cite checking is on for every case unless a person turns it off. Bare case cites such as "
               "\"550 U.S. 544\" go to CourtListener (a free, nonprofit case law site), only once a CourtListener "
               "key is set. Bare statute and code cites such as \"42 U.S.C. § 2000e-3(a)\" go to Corpus "
-              "(corpuslaw.us). Nothing else goes anywhere: no case names, facts, documents or drafts. Each check "
+              "(corpuslaw.us), and so do city code cites such as \"Austin City Code § 25-2-551\", with the city's Corpus "
+              "code (TX-AUSTIN), when the cite or the case names the city. Nothing else goes anywhere: no case names, "
+              "facts, documents or drafts. Each check "
               "can be turned off for a case, and off stays off. Every request is logged in the case's "
               ".matter/egress.jsonl.")
 WHAT_IS_SENT = ("Turning this on lets Matter Kit, and the AI agents you use with it, search case law on "
@@ -189,6 +191,12 @@ def _use(s: dict) -> str:
     return f"{s['used_today']} used today, {limit} a day allowed"
 
 
+def _city_note(matter_dir: str) -> str:
+    from . import municipal
+    code = municipal.case_city(matter_dir)
+    return f" (this case's city: {municipal.label(code)})" if code else " (no city set: `matter.py city`)"
+
+
 def describe(matter_dir: str) -> str:
     """state() as a few lines a person or an agent can read."""
     st = state(matter_dir)
@@ -203,8 +211,9 @@ def describe(matter_dir: str) -> str:
         lines.append(f"- Case cite checking: {why}. To turn it back on: {CASE_BACK_ON}.")
     if law["on"]:
         lines.append(f"- Statute and code cite checking: on{' (the default)' if law['by_default'] else ''}. Bare "
-                     f"statute and code cites such as \"42 U.S.C. § 2000e-3(a)\" go to Corpus (corpuslaw.us); "
-                     f"{_use(law)}. To turn it off for this case: {STATUTE_OFF}.")
+                     f"statute and code cites such as \"42 U.S.C. § 2000e-3(a)\" go to Corpus (corpuslaw.us), and "
+                     f"city code cites with the city's Corpus code when the cite or the case names the city"
+                     f"{_city_note(matter_dir)}; {_use(law)}. To turn it off for this case: {STATUTE_OFF}.")
     else:
         why = "turned off for this case by a person" if law["state"] == "declined" else "off"
         lines.append(f"- Statute and code cite checking: {why}. To turn it back on: {STATUTE_BACK_ON}.")

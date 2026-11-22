@@ -17,7 +17,9 @@ description: >-
   and how many facts have no source.
   Network calls are only cite checks, on by default for each case: bare case cites such as
   550 U.S. 544 go to CourtListener, only when a key is set, and bare statute and code cites such
-  as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us). Nothing else goes anywhere. Each check
+  as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us). City code cites such as Austin City
+  Code § 25-2-551 go to Corpus too, with the city's Corpus code (TX-AUSTIN), only when the cite
+  or the case names the city. Nothing else goes anywhere. Each check
   can be turned off per case, and off sticks; citation_guard local keeps every cite on this
   computer. Nothing is filed, sent or shared. Not a lawyer and not legal advice.
 author: Corpus (teakesdev)
