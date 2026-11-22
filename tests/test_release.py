@@ -64,6 +64,7 @@ class TestToolsAgree(unittest.TestCase):
         n = words[len(self.schemas)]
         self.assertIn(n + " tools", _read("README.md").lower())
         self.assertIn(n + " tools", " ".join(_read("plugin.yaml").lower().split()))
+        self.assertIn("**" + n + " tools**", _read("docs", "reference.md").lower())
 
 
 if __name__ == "__main__":
