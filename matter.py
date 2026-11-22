@@ -65,6 +65,9 @@ Usage:
   matter.py brief check <dir> <draft.md|.txt|.docx|.pdf> [--mode brief|complaint] [--out REPORT.md] [--docket MAP.json] [--no-pdftotext]
                         [--offline]   # never writes the store; checks the draft's case cites on CourtListener
                         # (bare cites, at most one request; a saved answer first); --offline sends nothing
+  matter.py privacy check <dir> <file-or-folder>... [--out REPORT.md] [--no-pdftotext]
+                        # Fed. R. Civ. P. 5.2(a): full SSNs/tax ids, birth dates, minors' names, account numbers
+                        # (advisory: phones, addresses). Masks every match; changes no file; no network.
   matter.py cite lookup <dir> <draft.md> [--dry-run] [--record] [--out REPORT.md] [--max-requests N] [--fresh]
                         [--caller ID] [--author agent:MODEL [--directed-by PERSON]]
                         # sends the draft's case cites, nothing else, to CourtListener; on by default
@@ -585,6 +588,33 @@ def cmd_brief(args):
                                   docket_path=args.docket, mode=args.mode, cites=cites)
     except (ValueError, FileNotFoundError) as e:
         sys.exit(f"brief check refused: {e}")
+    text = report.render()
+    if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"{report.summary()}\nwrote {args.out}")
+    else:
+        print(text)
+    sys.exit(report.exit_code)
+
+
+def cmd_privacy(args):
+    """privacy check: list what Fed. R. Civ. P. 5.2(a) restricts in drafts or filings (and, as advisory, phone
+    numbers and street addresses), every match masked. Reads the files once; writes none of them, sends
+    nothing. Exit 1 = something restricted, 2 = advisory items or files not (fully) scanned, 0 = nothing found."""
+    from matterkit import privacy
+    if not os.path.isdir(args.case_dir):
+        sys.exit(f"no such case folder: {args.case_dir}")
+    targets = [draft_path(args.case_dir, p) for p in args.paths]
+    if args.out:
+        out = os.path.abspath(args.out)
+        for t in targets:
+            t = os.path.abspath(t)
+            if out == t or (os.path.isdir(t) and out.startswith(t.rstrip(os.sep) + os.sep)):
+                sys.exit("privacy check refused: --out would write inside what is being checked; "
+                         "name a report file somewhere else")
+    report = privacy.check(targets, case_dir=args.case_dir, use_pdftotext=not args.no_pdftotext)
     text = report.render()
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -1267,6 +1297,14 @@ def main():
                    help="send nothing: case cites with no saved CourtListener answer are marked NOT VERIFIED "
                         "(by default their bare cites, nothing else, go to CourtListener in at most one request)")
     p.set_defaults(fn=cmd_brief)
+
+    p = sub.add_parser("privacy", help="Filing privacy check (Fed. R. Civ. P. 5.2): masked report, changes no file")
+    p.add_argument("sub", choices=["check"]); p.add_argument("case_dir")
+    p.add_argument("paths", nargs="+", metavar="file-or-folder",
+                   help="drafts or filings (.md, .txt, .docx, .pdf); a folder is scanned file by file")
+    p.add_argument("--out", help="write the (masked) report here instead of printing it")
+    p.add_argument("--no-pdftotext", action="store_true", help="do not run pdftotext: PDFs are listed as not scanned")
+    p.set_defaults(fn=cmd_privacy)
 
     p = sub.add_parser("docket"); p.add_argument("sub", choices=["suggest"]); p.add_argument("case_dir")
     p.set_defaults(fn=cmd_docket)
