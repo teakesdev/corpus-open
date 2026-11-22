@@ -60,6 +60,7 @@ class TestBackwardCompat(BaseMatter):
         legacy.commit()
         legacy.close()
         conn = store.connect(self.dir)  # triggers _migrate
+        self.addCleanup(conn.close)
         cols = [r[1] for r in conn.execute("PRAGMA table_info(authorities)")]
         self.assertIn("check_evidence", cols)
         self.assertIn("citation_extractions",
@@ -164,6 +165,7 @@ class TestExtraction(BaseMatter):
 
     def test_extraction_failed_not_lookup_addressable(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         # v3: failure rows need a genuinely unparsable § (non-digit after sign)
         rows = citations.extract_citations("See § for details.", document_sha256="doc")
         self.assertEqual(len(rows), 1)
@@ -185,12 +187,14 @@ class TestStageOrder(BaseMatter):
 
     def test_source_checked_requires_resolved_source(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         aid = self._hand_log(conn)
         with self.assertRaises(StageOrderError):
             citations.transition_authority(conn, aid, "source-checked")
 
     def test_source_checked_requires_evidence_not_just_provider(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         aid = self._hand_log(conn)
         citations.transition_authority(conn, aid, "resolved",
                                        checked_via="courtlistener:id=123")
@@ -203,6 +207,7 @@ class TestStageOrder(BaseMatter):
 
     def test_research_pending_requires_prior_lookup(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         aid = self._hand_log(conn)
         with self.assertRaises(StageOrderError):
             citations.transition_authority(conn, aid, "research-pending")
@@ -212,6 +217,7 @@ class TestStageOrder(BaseMatter):
 
     def test_legacy_verified_official_not_writable(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         aid = self._hand_log(conn)
         citations.transition_authority(conn, aid, "resolved",
                                        checked_via="courtlistener:id=123")
@@ -220,6 +226,7 @@ class TestStageOrder(BaseMatter):
 
     def test_resolve_from_extraction_creates_resolved_authority(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         rows = citations.extract_citations(SAMPLE, document_sha256="doc")
         citations.record_extractions(conn, rows)
         good = next(r for r in rows if r["status"] == "extracted"
@@ -231,6 +238,7 @@ class TestStageOrder(BaseMatter):
 
     def test_unknown_status_refused(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         aid = self._hand_log(conn)
         with self.assertRaises(StageOrderError):
             citations.transition_authority(conn, aid, "good-law")  # never a thing
@@ -240,6 +248,7 @@ class TestPacketBackCompat(BaseMatter):
     def test_status_report_counts_across_vocabularies(self):
         from matterkit import packet
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         conn.executemany(
             "INSERT INTO authorities (id, citation, status) VALUES (?,?,?)",
             [("auth_1", "c1", "unverified"),

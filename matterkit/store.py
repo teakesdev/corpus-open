@@ -1,7 +1,9 @@
 """SQLite matter store. Plain file next to the case material — no server required."""
+import contextlib
 import os
 import secrets
 import sqlite3
+import threading
 from datetime import datetime, timezone
 
 SCHEMA = """
@@ -250,10 +252,47 @@ def db_path(matter_dir: str) -> str:
     return os.path.join(matter_dir, ".matter", "matter.db")
 
 
+_scopes = threading.local()
+
+
+def _track(conn: sqlite3.Connection) -> sqlite3.Connection:
+    stack = getattr(_scopes, "stack", None)
+    if stack:
+        stack[-1].append(conn)
+    return conn
+
+
+@contextlib.contextmanager
+def closing_scope():
+    """Close every store connection this thread opens inside the block when the block ends.
+
+    For one-shot entry points (a CLI command, one MCP tool call) that open a store and hand the
+    connection on without closing it. sqlite3 never commits on close, so this changes nothing
+    that was not already lost when the connection was garbage-collected; it only closes the
+    file at a known point instead of leaving it to the collector (and its ResourceWarning).
+    Closing a connection twice is harmless, so code that closes its own is unaffected."""
+    stack = getattr(_scopes, "stack", None)
+    if stack is None:
+        stack = _scopes.stack = []
+    opened: list[sqlite3.Connection] = []
+    stack.append(opened)
+    try:
+        yield
+    finally:
+        stack.pop()
+        for conn in opened:
+            conn.close()
+
+
+def create(matter_dir: str) -> None:
+    """Create (or migrate) the store and close it again: `connect` for its side effect only."""
+    connect(matter_dir).close()
+
+
 def connect(matter_dir: str) -> sqlite3.Connection:
     path = db_path(matter_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = _track(sqlite3.connect(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     _migrate(conn)
@@ -264,7 +303,8 @@ def connect_existing(matter_dir: str, timeout: float = 5.0) -> sqlite3.Connectio
     """`connect` for a store that must already exist: never creates one. The web UI writes only
     to stores inside cases it has checked, so a missing store is an error, not a new matter."""
     from urllib.parse import quote
-    conn = sqlite3.connect(f"file:{quote(os.path.abspath(db_path(matter_dir)))}?mode=rw", uri=True, timeout=timeout)
+    conn = _track(sqlite3.connect(f"file:{quote(os.path.abspath(db_path(matter_dir)))}?mode=rw", uri=True,
+                                  timeout=timeout))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     _migrate(conn)
@@ -281,7 +321,7 @@ def connect_readonly(matter_dir: str) -> sqlite3.Connection:
     if not os.path.isfile(path):
         raise FileNotFoundError(f"no matter store at {path}")
     from urllib.parse import quote
-    conn = sqlite3.connect(f"file:{quote(os.path.abspath(path))}?mode=ro", uri=True)
+    conn = _track(sqlite3.connect(f"file:{quote(os.path.abspath(path))}?mode=ro", uri=True))
     conn.row_factory = sqlite3.Row
     return conn
 

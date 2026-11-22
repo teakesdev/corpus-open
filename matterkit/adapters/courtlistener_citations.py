@@ -66,28 +66,31 @@ def post_form(url: str, fields: dict, token: str, timeout: float = 60):
     except consent.ConsentError:
         raise
     except urllib.error.HTTPError as e:
-        code = int(e.code)
-        if 300 <= code < 400:
-            loc = e.headers.get("Location", "") if e.headers else ""
-            raise consent.ConsentError(f"refusing HTTP {code} redirect to {loc} — no follow") from e
-        if code == 429:
-            until = ""
-            try:
-                body = json.loads(e.read().decode("utf-8") or "null")
-                if isinstance(body, dict):
-                    until = str(body.get("wait_until") or body.get("wait_util") or "")
-            except (OSError, ValueError):
-                pass
-            if not until and e.headers and e.headers.get("Retry-After"):
-                # A key's lookups for the day being used up comes this way, with a wait of hours.
-                until = str(e.headers["Retry-After"]).strip()
-                words = wait_words(until)
-                if words:
-                    raise Throttled(f"{words} from now", when=f"in {words}") from e
-            raise Throttled(until or "an unstated time") from e
-        if code in (401, 403):
-            raise RuntimeError(f"CourtListener refused the token (HTTP {code}); check COURTLISTENER_TOKEN") from e
-        raise RuntimeError(f"CourtListener HTTP {code}") from e
+        try:  # the error holds the response's open socket: close it once its body is read
+            code = int(e.code)
+            if 300 <= code < 400:
+                loc = e.headers.get("Location", "") if e.headers else ""
+                raise consent.ConsentError(f"refusing HTTP {code} redirect to {loc} — no follow") from e
+            if code == 429:
+                until = ""
+                try:
+                    body = json.loads(e.read().decode("utf-8") or "null")
+                    if isinstance(body, dict):
+                        until = str(body.get("wait_until") or body.get("wait_util") or "")
+                except (OSError, ValueError):
+                    pass
+                if not until and e.headers and e.headers.get("Retry-After"):
+                    # A key's lookups for the day being used up comes this way, with a wait of hours.
+                    until = str(e.headers["Retry-After"]).strip()
+                    words = wait_words(until)
+                    if words:
+                        raise Throttled(f"{words} from now", when=f"in {words}") from e
+                raise Throttled(until or "an unstated time") from e
+            if code in (401, 403):
+                raise RuntimeError(f"CourtListener refused the token (HTTP {code}); check COURTLISTENER_TOKEN") from e
+            raise RuntimeError(f"CourtListener HTTP {code}") from e
+        finally:
+            e.close()
     except urllib.error.URLError as e:
         raise RuntimeError(f"could not reach CourtListener: {e.reason}") from e
     except (OSError, http.client.HTTPException) as e:  # a timeout or reset while reading the answer

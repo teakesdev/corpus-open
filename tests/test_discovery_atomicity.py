@@ -7,6 +7,7 @@ class TestImportAtomicity(unittest.TestCase):
     def test_mixed_brief_is_all_or_nothing(self):
         d = tempfile.mkdtemp()
         conn = store.connect(d)
+        self.addCleanup(conn.close)
         brief = {"candidates": [
             {"name": "Good Org (SYNTHETIC)", "org": "G", "jurisdiction": "US",
              "practice_area": "civil", "intake_channel": "published web form",

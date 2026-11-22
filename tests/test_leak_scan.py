@@ -9,6 +9,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,10 @@ LIN = "/" + "home" + "/"
 WIN = "C:" + "\\" + "Users" + "\\"
 AT = "@"
 SHELL_SAMPLE = os.path.join(KIT, "scripts", "pre-push.sample")
+CHECK_SH = os.path.join(KIT, "scripts", "check.sh")
+# The hook tests stand a no-op in for scripts/check.sh: the real gate runs the whole suite.
+TRUE = shutil.which("true") or "/bin/true"
+FALSE = shutil.which("false") or "/bin/false"
 
 
 def kinds(findings):
@@ -471,8 +476,9 @@ class TestPrePushSample(GitCase):
     ZERO = "0" * 40
 
     def hook(self, lines, env=None):
-        e = dict(os.environ, LEAK_SCAN_PY=os.path.join(KIT, "scripts", "leak_scan.py"))
+        e = dict(os.environ, LEAK_SCAN_PY=os.path.join(KIT, "scripts", "leak_scan.py"), PRE_PUSH_CHECK=TRUE)
         e.pop(leak_scan.PATTERNS_ENV, None)
+        e.pop("PRE_PUSH_SKIP_CHECK", None)
         e.update(env or {})
         return subprocess.run(["sh", SHELL_SAMPLE, "origin", "git@example.com:o/r.git"],
                               cwd=self.repo, input=lines, capture_output=True, text=True, env=e)
@@ -502,6 +508,44 @@ class TestPrePushSample(GitCase):
         tip = self.commit("leak")
         r = self.hook(f"refs/heads/new {tip} refs/heads/new {self.ZERO}\n")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def clean_push(self):
+        self.write("a.txt", "x\n")
+        base = self.commit("base")
+        self.write("a.txt", "y\n")
+        return f"refs/heads/b {self.commit('clean')} refs/heads/b {base}\n"
+
+    def test_a_clean_push_that_fails_the_gate_is_blocked(self):
+        r = self.hook(self.clean_push(), env={"PRE_PUSH_CHECK": FALSE})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("push blocked", r.stderr)
+
+    def test_a_missing_gate_blocks_the_push(self):
+        missing = os.path.join(self.repo, "no-such-check.sh")
+        r = self.hook(self.clean_push(), env={"PRE_PUSH_CHECK": missing})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_the_gate_runs_without_its_own_commit_scan_and_can_be_skipped(self):
+        seen = os.path.join(self.repo, "gate-args")
+        gate = os.path.join(self.repo, "gate.sh")
+        with open(gate, "w") as fh:
+            fh.write(f'#!/bin/sh\necho "$@" > "{seen}"\n')
+        os.chmod(gate, 0o755)
+        lines = self.clean_push()
+        self.assertEqual(self.hook(lines, env={"PRE_PUSH_CHECK": gate}).returncode, 0)
+        with open(seen) as fh:
+            self.assertEqual(fh.read().strip(), "--no-range")
+        os.remove(seen)
+        self.assertEqual(self.hook(lines, env={"PRE_PUSH_CHECK": FALSE, "PRE_PUSH_SKIP_CHECK": "1"}).returncode, 0)
+        self.assertFalse(os.path.exists(seen))
+
+    def test_check_sh_says_how_to_use_it_and_refuses_an_unknown_option(self):
+        r = subprocess.run(["sh", CHECK_SH, "--help"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--no-range", r.stdout)
+        r = subprocess.run(["sh", CHECK_SH, "--bogus"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unknown option", r.stderr)
 
 
 # ---- SWE-2's review of 81e8344 (docs/superpowers/reviews/2026-11-01-leak-scan-code/) -----------------------
@@ -551,8 +595,9 @@ class TestHookRemoteAndRefs(GitCase):
     ZERO = "0" * 40
 
     def hook(self, lines, first="origin", env=None):
-        e = dict(os.environ, LEAK_SCAN_PY=os.path.join(KIT, "scripts", "leak_scan.py"))
+        e = dict(os.environ, LEAK_SCAN_PY=os.path.join(KIT, "scripts", "leak_scan.py"), PRE_PUSH_CHECK=TRUE)
         e.pop(leak_scan.PATTERNS_ENV, None)
+        e.pop("PRE_PUSH_SKIP_CHECK", None)
         e.update(env or {})
         return subprocess.run(["sh", SHELL_SAMPLE, first, "https://example.invalid/r.git"],
                               cwd=self.repo, input=lines, capture_output=True, text=True, env=e)

@@ -45,6 +45,7 @@ class TestIngestVerifyCwd(unittest.TestCase):
 
     def _rel_paths(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         return [r["rel_path"] for r in conn.execute(
             "SELECT rel_path FROM documents ORDER BY rel_path")]
 
@@ -56,6 +57,7 @@ class TestIngestVerifyCwd(unittest.TestCase):
             for cwd in cwds:
                 os.chdir(cwd)
                 conn = store.connect(self.dir)
+                self.addCleanup(conn.close)
                 conn.execute("DELETE FROM documents")
                 conn.commit()
                 added, skipped, excluded = ingest.ingest_paths(
@@ -136,6 +138,7 @@ class TestIngestVerifyCwd(unittest.TestCase):
 
     def test_old_cwd_relative_row_missing_until_reingest_no_silent_update(self):
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         # Relative to a sibling folder, not /tmp: where the temp dir is under /tmp (Linux), a path
         # relative to /tmp has no "..", and the row this test needs is one that climbs out.
         bogus = os.path.relpath(self.foo, self.foreign)
@@ -160,6 +163,7 @@ class TestIngestVerifyCwd(unittest.TestCase):
         escaped = os.path.relpath(secret, self.dir)
         self.assertTrue(escaped.startswith(".."), escaped)
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         conn.execute(
             "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
             " VALUES (?,?,?,?,?,?)",
@@ -230,6 +234,7 @@ class TestMcpIngestVerify(unittest.TestCase):
         self.assertIn(f"root={os.path.abspath(self.dir)}", verify_text)
         self.assertIn("· 0 changed · 0 missing", verify_text)
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         rel = conn.execute("SELECT rel_path FROM documents").fetchone()["rel_path"]
         self.assertEqual(rel, os.path.join("Research", "foo.md"))
 
@@ -252,6 +257,7 @@ class TestMcpIngestVerify(unittest.TestCase):
             self.assertTrue(msg["result"].get("isError"), msg)
             self.assertIn("escape", msg["result"]["content"][0]["text"].lower())
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         n = conn.execute("SELECT COUNT(*) c FROM documents").fetchone()["c"]
         self.assertEqual(n, 0)
 

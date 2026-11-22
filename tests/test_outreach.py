@@ -23,6 +23,7 @@ class OutreachTests(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="mk-ou-")
         self.conn = store.connect(self.d)
+        self.addCleanup(self.conn.close)
 
     def test_end_to_end_nosend_synthetic(self):
         ids = outreach.seed_synthetic(self.conn)

@@ -68,7 +68,7 @@ class TestActivateUnderRealTTY(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = self._tmp.name
         self.addCleanup(self._tmp.cleanup)
-        store.connect(self.dir)
+        store.create(self.dir)
         consent.stage_proposal(self.dir, "courtlistener-free",
                                ["www.courtlistener.com"], ["query_text"], "lead")
 

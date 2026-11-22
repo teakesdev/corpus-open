@@ -35,7 +35,7 @@ class IsolatedConfig(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.dir = os.path.join(self._tmp.name, "matter")
         self.cfg = os.path.join(self._tmp.name, "config", "matter-kit")
-        store.connect(self.dir)
+        store.create(self.dir)
         env = mock.patch.dict(os.environ, {"MATTER_KIT_CONFIG": self.cfg})
         env.start()
         self.addCleanup(env.stop)

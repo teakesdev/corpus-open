@@ -19,7 +19,7 @@ class TestR2ConsentAuthoring(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = self._tmp.name
         self.addCleanup(self._tmp.cleanup)
-        store.connect(self.dir)
+        store.create(self.dir)
 
     def test_proposal_is_inert(self):
         consent.stage_proposal(
@@ -64,7 +64,7 @@ class TestR2Search(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = self._tmp.name
         self.addCleanup(self._tmp.cleanup)
-        store.connect(self.dir)
+        store.create(self.dir)
         consent.save_grants(self.dir, [{
             "provider": "courtlistener-free",
             "endpoints": ["www.courtlistener.com"],
@@ -78,7 +78,7 @@ class TestR2Search(unittest.TestCase):
     def test_search_without_grant_refused(self):
         empty = tempfile.TemporaryDirectory()
         self.addCleanup(empty.cleanup)
-        store.connect(empty.name)
+        store.create(empty.name)
         with self.assertRaises(consent.ConsentError):
             search.manual_search(empty.name, "ty", "347 U.S. 483")
 
@@ -106,6 +106,7 @@ class TestR2Search(unittest.TestCase):
         self.assertFalse(rows[0].provenance["authenticated"])
         # never source-checked
         conn = store.connect(self.dir)
+        self.addCleanup(conn.close)
         n = conn.execute("SELECT COUNT(*) c FROM authorities WHERE status='source-checked'").fetchone()["c"]
         self.assertEqual(n, 0)
         log = _read_text(consent.egress_path(self.dir))
