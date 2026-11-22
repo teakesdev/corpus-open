@@ -567,7 +567,8 @@ class TestParentIsNeverWrittenBySubcaseOperations(ParentBase):
         mcp("matter.status", {})
         mcp("matter.deadline_list", {})
         self.assertEqual(self.parent_db_bytes(), db_before)
-        self.assertEqual(sorted(os.listdir(os.path.join(self.parent, ".matter"))), ["matter.db"],
+        # consent.json is the case defaults cases.init wrote before the battery; tree_digest below shows it unchanged.
+        self.assertEqual(sorted(os.listdir(os.path.join(self.parent, ".matter"))), ["consent.json", "matter.db"],
                          "no journal, wal or other file may appear in the parent store folder")
         self.assertEqual(tree_digest(self.parent), files_before, "parent files must not be added, moved or edited")
 

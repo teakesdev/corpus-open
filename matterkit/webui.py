@@ -301,7 +301,11 @@ def _store(app, case, write=False):
 def h_session(app, req, case):
     return {"operator": req.identity.name, "workspace": os.path.basename(app.workspace) or app.workspace,
             "api": "v0", "folders": list(cases.FOLDERS), "labels": sorted(store.VALID_STATUS),
-            "layers": list(LAYERS), "max_upload_bytes": app.max_upload}
+            "layers": list(LAYERS), "max_upload_bytes": app.max_upload,
+            # Whether this computer has a CourtListener key (where from, never the key): the new-case
+            # form asks for one only when there is none.
+            "courtlistener_key": credentials.courtlistener_token_source(),
+            "courtlistener_key_url": caselaw.KEY_URL}
 
 
 def h_cases(app, req, case):
@@ -555,8 +559,9 @@ def h_brief_check(app, req, case):
             raise HttpError(400, "Brief check reads .md and .txt drafts only for now. In Word, use "
                                  "File > Save As > Plain Text (.txt), put the copy in the case, and check that.")
         shown = hashlib.sha256(pin.read(path)).hexdigest()  # read without following a link
+        cites = briefcheck.CiteCheck(caller_id=req.identity.name)  # bare case cites to CourtListener, by default
         try:
-            rep = briefcheck.check(pin.path, os.path.join(pin.path, path), mode=mode)
+            rep = briefcheck.check(pin.path, os.path.join(pin.path, path), mode=mode, cites=cites)
         except (ValueError, FileNotFoundError) as e:
             raise HttpError(400, f"Brief check refused: {e}") from None
         if rep.draft_sha256 != shown:  # the report must describe the file that was picked
@@ -589,7 +594,7 @@ def h_caselaw_set(app, req, case):
         if on:
             caselaw.turn_on(pin.path, req.identity.name, "web-ui")
         else:
-            caselaw.turn_off(pin.path)
+            caselaw.turn_off(pin.path, req.identity.name, "web-ui")
         pin.check()
         return {"caselaw": caselaw.state(pin.path)}
 

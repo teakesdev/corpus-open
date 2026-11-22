@@ -16,7 +16,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from matterkit import caselaw, citelookup, consent, credentials, store  # noqa: E402
+from matterkit import caselaw, citelookup, consent, credentials, statutelookup, store  # noqa: E402
 from webui_helpers import ServerCase  # noqa: E402
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -121,8 +121,11 @@ class TestAnyCaller(unittest.TestCase):
 
 class TestSwitch(IsolatedConfig):
     def test_off_by_default(self):
-        self.assertFalse(caselaw.is_on(self.dir))
-        self.assertIn("off", caselaw.describe(self.dir))
+        # Search is off by default; the two bare-cite checks are on (design 2026-11-09).
+        self.assertFalse(caselaw.search_on(self.dir))
+        self.assertFalse(caselaw.state(self.dir)["on"])
+        self.assertTrue(caselaw.cite_check_on(self.dir))
+        self.assertIn("Case law search: off", caselaw.describe(self.dir))
 
     def test_turn_on_writes_both_grants_with_liberal_limits(self):
         caselaw.turn_on(self.dir, "ty", "web-ui")
@@ -134,7 +137,7 @@ class TestSwitch(IsolatedConfig):
             self.assertEqual((g["kind"], g["created_by"], g["activated_via"]), ("human", "ty", "web-ui"))
             self.assertEqual(g["authorized_callers"], ["*"])
             self.assertNotIn("expires", g)
-        self.assertTrue(caselaw.is_on(self.dir))
+        self.assertTrue(caselaw.state(self.dir)["on"])
         consent.authorize(self.dir, citelookup.PROVIDER, citelookup.ENDPOINT, "citation_strings", "agent")
 
     def test_turning_on_twice_leaves_one_grant_each(self):
@@ -147,8 +150,10 @@ class TestSwitch(IsolatedConfig):
         caselaw.turn_on(self.dir, "ty", "tty")
         consent.save_grants(self.dir, consent.load_grants(self.dir) + [{"provider": "other", "kind": "human"}])
         self.assertEqual(caselaw.turn_off(self.dir), 2)
-        self.assertFalse(caselaw.is_on(self.dir))
-        self.assertEqual([g["provider"] for g in consent.load_grants(self.dir)], ["other"])
+        self.assertFalse(caselaw.state(self.dir)["on"])
+        self.assertFalse(caselaw.cite_check_on(self.dir))  # off sticks: a declined record, not just no grant
+        self.assertEqual([(g["provider"], g["kind"]) for g in consent.load_grants(self.dir)],
+                         [("other", "human"), (citelookup.PROVIDER, consent.DECLINED)])
 
     def test_not_a_case_folder(self):
         with self.assertRaises(ValueError):
@@ -306,8 +311,11 @@ class TestMcp(IsolatedConfig):
                 self.assertIn("Turn on", self.text(out, i))
                 self.assertIn("matter.py courtlistener on", self.text(out, i))
         self.assertIn("Nothing was sent", self.text(out, 2))
-        self.assertEqual(self.egress_lines(), [])
-        self.assertEqual(consent.load_grants(self.dir), [])
+        # Nothing was sent. Case cite checking is on by default, so cite_lookup wrote this never-chosen
+        # case's default (and a note saying so, which is not a request) before refusing for want of a key.
+        self.assertEqual([json.loads(ln).get("event") for ln in self.egress_lines()], ["case-default-written"])
+        self.assertEqual([(g["provider"], g["kind"]) for g in consent.load_grants(self.dir)],
+                         [(citelookup.PROVIDER, consent.DEFAULT)])
 
     def test_on_without_key_cite_lookup_asks_for_the_key(self):
         caselaw.turn_on(self.dir, "ty", "tty")
@@ -347,7 +355,7 @@ class TestCli(IsolatedConfig):
         r = self.cli("on", self.dir)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("TTY", r.stderr)
-        self.assertFalse(caselaw.is_on(self.dir))
+        self.assertFalse(caselaw.search_on(self.dir))
 
     def test_status_and_off(self):
         self.assertIn("off", self.cli("status", self.dir).stdout)
@@ -355,7 +363,8 @@ class TestCli(IsolatedConfig):
         self.assertIn("are on", self.cli("status", self.dir).stdout)
         r = self.cli("off", self.dir)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertFalse(caselaw.is_on(self.dir))
+        self.assertFalse(caselaw.search_on(self.dir))
+        self.assertFalse(caselaw.cite_check_on(self.dir))
 
     def test_not_a_case_folder(self):
         r = self.cli("status", self._tmp.name)
@@ -379,19 +388,23 @@ class TestBrowserSwitch(ServerCase):
         status, _, data = self.api("POST", path, {"on": True})
         self.assertEqual(status, 200)
         self.assertTrue(data["caselaw"]["on"])
-        for g in consent.load_grants(self.alpha):
+        humans = [g for g in consent.load_grants(self.alpha) if g["kind"] == "human"]
+        self.assertEqual(sorted(g["provider"] for g in humans), sorted([caselaw.SEARCH_PROVIDER, citelookup.PROVIDER]))
+        for g in humans:
             self.assertEqual((g["created_by"], g["activated_via"], g["authorized_callers"]),
                              ("Pat Example", "web-ui", ["*"]))
-        self.assertFalse(caselaw.is_on(self.beta))  # one case at a time
+        self.assertFalse(caselaw.state(self.beta)["on"])  # one case at a time
         status, _, data = self.api("POST", path, {"on": False})
         self.assertFalse(data["caselaw"]["on"])
-        self.assertEqual(consent.load_grants(self.alpha), [])
+        # Off: no person's grant is left, case cite checking stays off, and the statute default is untouched.
+        self.assertEqual(sorted((g["provider"], g["kind"]) for g in consent.load_grants(self.alpha)),
+                         sorted([(citelookup.PROVIDER, consent.DECLINED), (statutelookup.PROVIDER, consent.DEFAULT)]))
 
     def test_body_cannot_name_the_issuer_or_send_junk(self):
         path = self.case_path("Alpha v. City", "/caselaw")
         self.assertEqual(self.api("POST", path, {"on": True, "created_by": "someone"})[0], 400)
         self.assertEqual(self.api("POST", path, {"on": "yes"})[0], 400)
-        self.assertEqual(consent.load_grants(self.alpha), [])
+        self.assertEqual([g for g in consent.load_grants(self.alpha) if g["kind"] == "human"], [])
 
     def test_key_saved_never_echoed(self):
         status, _, data = self.api("POST", "/courtlistener-key", {"key": KEY})
@@ -408,7 +421,7 @@ class TestBrowserSwitch(ServerCase):
     def test_needs_the_launch_token(self):
         status, _, _ = self.api("POST", self.case_path("Alpha v. City", "/caselaw"), {"on": True}, token="wrong")
         self.assertEqual(status, 403)
-        self.assertEqual(consent.load_grants(self.alpha), [])
+        self.assertEqual([g for g in consent.load_grants(self.alpha) if g["kind"] == "human"], [])
 
 
 if __name__ == "__main__":

@@ -5,34 +5,103 @@ What a plugin adds that a skill or an MCP server can't:
   agent writes is listed under the reply with what CourtListener, Corpus and the case file say
   about it, so a fabricated cite is flagged before anyone copies it into a filing;
 - a deadline brief at the start of each session (pre_llm_call on the first turn);
+- Deadline Watch: /matter watch on installs a script that Hermes's cron runs each morning with no
+  model, so overdue and upcoming dates and changed files reach Telegram exactly as the kit wrote
+  them (the message carries the case folder's name, deadline names, dates and labels, and counts
+  of changed files: never file names, paths or contents); /matter calendar exports the deadlines
+  with reminders;
 - a source guard (pre_tool_call): Hermes's file tools can't change a registered source document
   or the case store, and a command that looks like it would goes to the person's approval;
 - /matter, a slash command for the case's status, deadlines, packet and cite checks;
 - the matter tools, reading the case folder chosen in Hermes's own settings form, with tokens
-  read through Hermes's secret store.
+  read through Hermes's secret store (agent.secret_scope.get_secret, catalog rule 11).
 
-Nothing here files, sends or contacts anyone. Network calls happen only for cite checks, only
-with the bare cites, and only after a person grants them in the case folder (RFC 0001).
+Nothing here files or contacts anyone. Network calls happen only for cite checks and carry only
+the bare cites: case cites to CourtListener once a key is set, statute and code cites to Corpus.
+Both checks are on for a case unless a person turns them off in the case folder, and off sticks
+(RFC 0001 as amended by the 2026-11-09 design); citation_guard: local keeps every cite on this
+computer. Deadline Watch messages leave only through a cron job a person creates, and each one is
+logged in the case.
 """
 from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import hashlib
 import io
+import json
 import os
+import re
+import shlex
 import shutil
 
 from . import guard as _guard
+from . import quote_guard as _quote_guard
 from . import source_guard as _source_guard
-from .tools import SCHEMAS, TOOLSET, MatterError, Tools, resolve_matter
+from . import terminal as _terminal
+from .tools import SCHEMAS, TOOLSET, MatterError, Tools, draft_path, resolve_matter
 
 PLUGIN_ID = "corpus-open"
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL_PATH = os.path.join(KIT, "skills", "matter-kit", "SKILL.md")
+SKILLS = [
+    ("matter-kit", SKILL_PATH,
+     "How to keep a case folder: hashed sources, labeled facts with sources, deadlines, counsel packets"),
+    ("case-intake", os.path.join(KIT, "skills", "case-intake", "SKILL.md"),
+     "Start a new case with a person who has no lawyer: one plain question at a time, recorded as "
+     "facts with no source until a paper backs them, then /matter intake for what is missing"),
+]
 DEMO_SOURCE = os.path.join(KIT, "demo-matter")
+DEMO_DECLARATION = "Filings/12-declaration_synthetic.md"
+DEMO_COMPLAINT = "Filings/complaint_synthetic.md"
+DEMO_DRAFT = "Drafts/response_draft_synthetic.md"  # a working draft: never registered as a source
 DEMO_DIR = "~/cases/corpus-open-demo"
-USAGE = ("Usage: /matter [status] | deadlines | packet [30s|3min|15min] | check <draft.md> | grant | "
-         "init <folder> | demo [folder]")
+DEMO_BY = "plugin:corpus-open-demo"
+# (text, label, sources). The last has no source on purpose: it shows as UNSUPPORTED, and it is the
+# same claim the demo draft's made-up quotation asserts.
+DEMO_FACTS = (
+    ("Demo Corp.'s HR manager swore that Plaintiff received no written warnings before January 5, 2026.",
+     "DOCUMENTED FACT", (DEMO_DECLARATION + "@p. 2 ¶ 3",)),
+    ("The HR manager swore that after the January 5 meeting she was told to mark the personnel file "
+     "\"voluntary resignation.\"", "DOCUMENTED FACT", (DEMO_DECLARATION + "@p. 3 ¶ 6",)),
+    ("Plaintiff alleges wrongful termination on January 5, 2026.", "ALLEGATION", (DEMO_COMPLAINT,)),
+    ("The plant manager ordered the file changed to hide the reason for the firing.", "HYPOTHESIS", ()),
+)
+WELCOME = ("Corpus Open keeps a court case in one folder on this computer and checks what the AI says "
+           "about it against your own documents.")
+DEMO_WAY = "- /matter demo: a made-up case to try things on. Nothing in it is real."
+THEN_ASK = ('After that, ask in plain words: "what\'s due in my case?", "register my files", '
+            '"check my draft".')
+NO_CASE_HINT = ("[Corpus Open] No case folder is set up yet, so the case tools (matter_*) will not work "
+                "and cites in replies are listed but not looked up. If the user brings up a court case "
+                "or legal papers, tell them once: " + _guard.HOW_TO_START + " Otherwise do not mention "
+                "this.")
+UNCONFIRMED = ("Dates marked working-estimate, unverified or secondary-source are not confirmed. Check "
+               "them against the rules and the court's orders.")
+_QUOTE_ORDER = (_quote_guard.quotecheck.NOT_FOUND, _quote_guard.quotecheck.WRONG_PAGE,
+                _quote_guard.quotecheck.CANT_CHECK, _quote_guard.quotecheck.EXACT)
+_QUOTE_MARK = {_quote_guard.quotecheck.EXACT: "✓", _quote_guard.quotecheck.CANT_CHECK: "·"}
+USAGE = ("Usage: /matter [status] | deadlines | intake | packet [30s|3min|15min] | check <draft.md> | "
+         "grant | init <folder> | demo [folder] | watch [on [HH:MM] | off] | calendar")
+WATCH_MARK = "# corpus-open deadline watch: written by /matter watch on"
+WATCH_USAGE = ("Usage: /matter watch (the check, now) | /matter watch on [HH:MM] (each morning, through Hermes "
+               "cron) | /matter watch off")
+_HHMM = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
+# What leaves the computer, in the words the decisions file (2026-11-10, extension 2) asks for.
+WHAT_LEAVES = ("Cite checks are on for every case unless a person turns them off. Only bare cites leave "
+               "this computer:\n"
+               "- Bare case cites such as 550 U.S. 544 go to CourtListener, only when a key is set.\n"
+               "- Bare statute and code cites such as 42 U.S.C. § 2000e-3(a) go to Corpus (corpuslaw.us).\n"
+               "Nothing else goes anywhere. Each check can be turned off per case, and off sticks.")
+# Catalog rule 11: the key goes in through Hermes's own settings, never into a chat.
+KEY_IN_HERMES = (f"The key is free: get one at {_guard.KEY_URL}, then add it in Hermes, and never paste it "
+                 "into a chat:\n"
+                 "- Hermes Desktop: Settings > Plugins > corpus-open > courtlistener_token, then Save settings.\n"
+                 "- Hermes CLI: hermes config set COURTLISTENER_TOKEN <your key>\n"
+                 "Hermes keeps it in your profile's .env file. If cites still say there is no key, restart "
+                 "Hermes.")
+_STATE_WORDS = {"default": "on (the default)", "on": "on (a person turned it on)",
+                "declined": "turned off for this case by a person", "off": "off"}
 GUARD_MODES = ("lookup", "local", "off")
 DEFAULTS = {
     "matter_dir": "",
@@ -41,9 +110,20 @@ DEFAULTS = {
     "deadline_window_days": 14,
     "max_statute_checks": 5,
     "source_guard": True,
+    "quote_guard": True,
 }
 OFF = (False, "off", "false", "no", "0", 0)
+CHECKED_MEMORY = 256  # replies this process appended a block to, remembered to skip a replay
 SECRET_ENV = {"courtlistener_token": "COURTLISTENER_TOKEN", "corpus_api_key": "CORPUS_API_KEY"}
+
+
+def _secret_route() -> bool:
+    """Whether this Hermes has the secret route catalog rule 11 names (agent.secret_scope.get_secret)."""
+    try:
+        from agent.secret_scope import get_secret  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def _secret(name: str) -> str | None:
@@ -59,12 +139,18 @@ def _secret(name: str) -> str | None:
     return (value or "").strip() or None
 
 
+def _digest(text: str) -> bytes:
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest()
+
+
 class Plugin:
-    def __init__(self, ctx, secret=_secret, today=None):
+    def __init__(self, ctx, secret=_secret, today=None, secret_route=_secret_route):
         self.ctx = ctx
         self.secret = secret
+        self.secret_route = secret_route
         self.today = today or _dt.date.today
-        self.tools = Tools(self.settings, self.run_guard)
+        self.tools = Tools(self.settings, self.run_guard, self.courtlistener_token)
+        self._checked: dict = {}  # sha256 of each reply on_reply returned, oldest first
 
     # -- settings -------------------------------------------------------------------------------
     def settings(self) -> dict:
@@ -83,8 +169,9 @@ class Plugin:
                 out[key] = max(0, int(out[key]))
             except (TypeError, ValueError):
                 out[key] = DEFAULTS[key]
-        value = out["source_guard"]
-        out["source_guard"] = (value.strip().lower() if isinstance(value, str) else value) not in OFF
+        for key in ("source_guard", "quote_guard"):
+            value = out[key]
+            out[key] = (value.strip().lower() if isinstance(value, str) else value) not in OFF
         return out
 
     def _matter_or_none(self) -> str | None:
@@ -96,19 +183,39 @@ class Plugin:
     # -- source guard -------------------------------------------------------------------------------
     def on_tool_call(self, tool_name: str = "", args=None, task_id: str = "", **kwargs):
         """pre_tool_call. Never raises: Hermes blocks every tool call when this hook raises."""
-        matter_dir = None
+        # The source guard answers first, and its refusal is final. Its approval is only a question,
+        # which a person may answer yes and which nobody is asked with approvals turned off, so the
+        # quote check still runs and its refusal wins over the question.
+        matter_dir, settings, hit = None, None, None
         try:
             settings = self.settings()
-            if not settings["source_guard"]:
-                return None
             matter_dir = settings.get("matter_dir") or None
-            return _source_guard.check(tool_name, args, matter_dir=matter_dir)
+            if settings["source_guard"]:
+                hit = _source_guard.check(tool_name, args, matter_dir=matter_dir)
         except Exception:  # noqa: BLE001
-            return _source_guard.fallback(tool_name, args, matter_dir)
+            hit = _source_guard.fallback(tool_name, args, matter_dir)
+        if isinstance(hit, dict) and hit.get("action") == "block":
+            return hit
+        try:  # quote guard: a quotation or page cite the record doesn't hold may not reach a draft
+            if settings and settings["quote_guard"]:
+                refused = _quote_guard.check(tool_name, args, matter_dir=matter_dir)
+                if refused:
+                    return refused
+        except Exception:  # noqa: BLE001 - when the check itself fails, the source guard's answer stands
+            pass
+        return hit or None
 
     # -- citation guard -------------------------------------------------------------------------
     def run_guard(self, text: str, matter_dir: str | None) -> _guard.Check:
         s = self.settings()
+        if matter_dir and s["citation_guard"] == "lookup":
+            # A case made before cite checks were on by default gets its default on first use; a case a
+            # person turned off keeps its declined record (consent.ensure_defaults never writes over it).
+            try:
+                from ..matterkit import consent
+                consent.ensure_defaults(matter_dir)
+            except Exception:  # noqa: BLE001 - an unwritable folder: the lookups say why they did not run
+                pass
         return _guard.check_text(
             text, matter_dir=matter_dir, caller_id=str(s["caller_id"]),
             lookup=s["citation_guard"] == "lookup",
@@ -117,24 +224,40 @@ class Plugin:
             max_statutes=s["max_statute_checks"])
 
     def courtlistener_token(self) -> str | None:
-        """Hermes's secret first; else the key `matter.py courtlistener on` / `courtlistener key` saved
-        (or COURTLISTENER_TOKEN in the environment), so the one switch also works inside Hermes."""
+        """Hermes's secret first (catalog rule 11). When Hermes has that route, the only other place is
+        the key Matter Kit saved (`matter.py courtlistener key`, its browser UI): never a bare
+        environment variable, which under multiplexing can be another profile's. A Hermes without the
+        route keeps the old way (COURTLISTENER_TOKEN in the environment, then the saved key)."""
         token = self.secret(SECRET_ENV["courtlistener_token"])
         if token:
             return token
         from ..matterkit import credentials
+        if self.secret_route():
+            return credentials.saved_courtlistener_token() or None
         return credentials.courtlistener_token() or None
 
     def on_reply(self, response_text: str = "", **kwargs) -> str | None:
-        """transform_llm_output: append the citation check under a reply that cites anything."""
+        """transform_llm_output: append the citation check under a reply that cites anything.
+        Hermes's terminal prints what is added under a reply as typed, so there the block comes
+        without its Markdown marks; the reply itself is never changed."""
         try:
             if self.settings()["citation_guard"] == "off" or not response_text:
                 return None
-            if "Citation check" in response_text and "Checked by Corpus Open" in response_text:
-                return None  # already carries one (a resumed or replayed reply)
+            if _digest(response_text) in self._checked:
+                # Exactly a reply this plugin already returned (a replay), so its block is the
+                # check of this very text. Words in the reply never count: the model can write them.
+                return None
             check = self.run_guard(response_text, self._matter_or_none())
             block = _guard.render(check)
-            return response_text + "\n" + block if block else None
+            if not block:
+                return None
+            if kwargs.get("platform") in _terminal.PLAIN_PLATFORMS:
+                block = _terminal.plain_text(block)
+            out = response_text + "\n" + block
+            self._checked[_digest(out)] = None
+            while len(self._checked) > CHECKED_MEMORY:
+                del self._checked[next(iter(self._checked))]
+            return out
         except Exception:  # noqa: BLE001 - never hold up a reply; the reply goes out unchanged
             return None
 
@@ -178,79 +301,232 @@ class Plugin:
         return "\n".join(lines)
 
     def on_turn(self, is_first_turn: bool = False, **kwargs):
-        """pre_llm_call: on a session's first turn, hand the agent the case's deadlines."""
+        """pre_llm_call: on a session's first turn, hand the agent the case's deadlines; with no case
+        yet, tell it so, and how the user starts one."""
         if not is_first_turn:
             return None
         try:
-            text = self.deadline_brief()
+            text = NO_CASE_HINT if self._matter_or_none() is None else self.deadline_brief()
         except Exception:  # noqa: BLE001
             return None
         return {"context": text} if text else None
 
     # -- /matter --------------------------------------------------------------------------------
     def command(self, raw_args: str = "", **kwargs) -> str:
+        """/matter. Hermes's classic terminal prints a command's answer as typed, so there the
+        Markdown marks come out; every other surface gets the Markdown."""
+        out = self._answer(raw_args)
+        return _terminal.plain_text(out) if kwargs.get("platform") in _terminal.PLAIN_PLATFORMS else out
+
+    def _answer(self, raw_args: str = "") -> str:
         parts = (raw_args or "").strip().split(None, 1)
         sub = parts[0].lower() if parts else ""
         rest = parts[1].strip() if len(parts) > 1 else ""
         try:
             if sub in ("", "status"):
-                return self._unwrap(self.tools.handler("matter_status")({})) + "\n\n" + self._deadline_text()
+                md = self._matter_or_none()
+                if md is None:
+                    return self._welcome()
+                status = self._unwrap(self.tools.handler("matter_status")({}))
+                # The heading names the folder: ~/cases/x reads better than the whole home path.
+                return status.replace(md, _terminal.tilde(md), 1) + "\n\n" + self._deadline_text()
             if sub == "deadlines":
                 return self._deadline_text()
+            if sub == "intake":
+                return self._intake()
             if sub == "packet":
                 return self._unwrap(self.tools.handler("matter_packet_render")({"layer": rest or "3min"}))
             if sub == "check":
                 if not rest:
                     return "Usage: /matter check <draft.md inside the case folder>"
-                res = self.tools.matter_cite_check({"path": rest})
-                return res["report"] or "No citations found."
+                return self._check(rest)
             if sub == "grant":
                 return self._grant_text()
             if sub == "init":
                 return self._init(rest)
             if sub == "demo":
                 return self._demo(rest or DEMO_DIR)
+            if sub == "watch":
+                words = rest.split()
+                verb = words[0].lower() if words else ""
+                if verb == "on":
+                    return self._watch_on(words[1] if len(words) > 1 else "08:00")
+                if verb == "off":
+                    return self._watch_off()
+                if verb:
+                    return WATCH_USAGE
+                return self._watch_text()
+            if sub == "calendar":
+                return self._calendar()
             return USAGE
         except MatterError as e:
             return str(e)
         except Exception as e:  # noqa: BLE001
             return f"/matter failed: {e}"
 
-    def _grant_text(self) -> str:
+    def _welcome(self) -> str:
+        """What `/matter` says before there is a case: what this is, and the two ways to start."""
+        raw = str(self.settings().get("matter_dir") or "").strip()
+        if raw:  # a folder is set, but it is not a case yet
+            path = os.path.abspath(os.path.expanduser(raw))
+            head = f"{path} is not set up as a case folder yet. Two ways to start:"
+            ways = [f"- /matter init {path}: set that folder up as your case. Files already there are kept.",
+                    DEMO_WAY]
+        else:
+            head = "No case folder is set up yet. Two ways to start:"
+            ways = [DEMO_WAY, "- /matter init ~/cases/my-case: a folder for your own case. Your files stay "
+                              "on this computer."]
+        return "\n".join([WELCOME, "", head, *ways, "", THEN_ASK])
+
+    def _intake(self) -> str:
+        """/matter intake: the intake checklist (matterkit.intake), read-only. With no case yet, how
+        to make one."""
+        from ..matterkit import intake
         s = self.settings()
-        md, caller = s["matter_dir"] or None, s["caller_id"]
-        return ("A person turns on cite checks once per case folder, in a terminal (the kit refuses a "
-                "grant an agent writes). These work from any folder:\n"
-                f"  {_guard.grant_command('case', md, caller)}\n"
-                "    case cites (CourtListener): asks you to type yes, then for your free key, which this "
-                "plugin reads too (a COURTLISTENER_TOKEN in this plugin's settings is used first)\n"
-                f"  {_guard.grant_command('statute', md, caller)}\n"
-                "    statute and code cites (Corpus): asks you to type ACTIVATE")
+        try:
+            md = resolve_matter(s.get("matter_dir"))
+        except MatterError:
+            raw = str(s.get("matter_dir") or "").strip()
+            return intake.no_case(_terminal.tilde(os.path.abspath(os.path.expanduser(raw))) if raw else None)
+        today = self.today()
+        items = intake.steps(md, today=today, guard_mode=s["citation_guard"])
+        return intake.render(items, shown=_terminal.tilde(md), today=today)
+
+    def _check(self, rel: str) -> str:
+        """/matter check: the draft's cites (the citation guard's block), then its quotations and
+        record page cites against the registered documents (the quote guard's check, offline)."""
+        md = resolve_matter(self.settings().get("matter_dir"))
+        res = self.tools.matter_cite_check({"path": rel})
+        parts = [res["report"]] if res["report"] else []
+        try:
+            with open(draft_path(md, rel), "rb") as f:
+                text = f.read().decode("utf-8", "replace")
+            quotes = _quote_guard.quotecheck.check_text(md, text, use_pdftotext=_quote_guard.USE_PDFTOTEXT)
+        except Exception as e:  # noqa: BLE001 - the cite report above still goes out
+            quotes = []
+            parts.append(f"_Quotations could not be checked: {_guard._short(e)}_")
+        if quotes:
+            parts.append(self._quote_text(quotes))
+        return "\n\n".join(parts) or "No citations or quotations found."
+
+    @staticmethod
+    def _quote_text(results) -> str:
+        qc = _quote_guard.quotecheck
+        rows = sorted(results, key=lambda r: _QUOTE_ORDER.index(r.verdict) if r.verdict in _QUOTE_ORDER else 9)
+        bad = sum(1 for r in rows if r.verdict in qc.PROBLEMS)
+        out = [f"**Quotations and page cites: {bad} of {len(rows)} to fix**" if bad else
+               f"**Quotations and page cites: {len(rows)}**"]
+        for r in rows:
+            said = qc.describe(r)
+            said = said[len(r.verdict) + 2:] if said.startswith(r.verdict + ": ") else said
+            out.append(f"- {_QUOTE_MARK.get(r.verdict, '⚠')} **{r.verdict}**: {said}")
+        out.append("_Exact means the words are in the registered document on that page, not that they "
+                   "prove the point. Can't check means there was no record text to compare against._")
+        return "\n".join(out)
+
+    def _grant_text(self) -> str:
+        """What leaves by default, this case's checks, where the CourtListener key goes in Hermes
+        (never the chat), and the terminal lines a person runs to turn each check off or back on."""
+        s = self.settings()
+        caller, lead = s["caller_id"], ""
+        try:
+            md = resolve_matter(s["matter_dir"])
+        except MatterError as e:
+            # No case yet: say how to get one, and print no line that would fail on this folder.
+            md = None
+            lead = (f"{e} There is nothing to copy yet: once you have a case, /matter grant prints the "
+                    "lines below with your folder in place of <case folder>.\n\n")
+        how = "This is what the lines will look like:" if md is None else "Each line works from any folder:"
+        out = [lead + WHAT_LEAVES]
+        if md:
+            from ..matterkit import caselaw, citelookup, statutelookup
+            out += ["", "This case:",
+                    f"- Case cites: {_STATE_WORDS[caselaw.check_label(md, citelookup.PROVIDER)]}",
+                    f"- Statute and code cites: {_STATE_WORDS[caselaw.check_label(md, statutelookup.PROVIDER)]}",
+                    f"- Search: {'on' if caselaw.search_on(md) else 'off'}"]
+        if self.courtlistener_token():
+            out += ["", "CourtListener key: set."]
+        else:
+            out += ["", "CourtListener key: not set, so case cites are listed but not looked up. Statute and "
+                        "code cites need no key.", KEY_IN_HERMES]
+        out += ["", "A person turns a check off or back on in a terminal (the kit refuses a change an agent "
+                    f"writes). {how}",
+                f"  {_guard.grant_command('case-off', md, caller)}",
+                "    case cites off for this case (case law search too)",
+                f"  {_guard.grant_command('statute-off', md, caller)}",
+                "    statute and code cites off for this case",
+                f"  {_guard.grant_command('case', md, caller)}",
+                "    case cites back on, and case law search with them: asks you to type yes. Search sends "
+                "words that can describe your facts.",
+                f"  {_guard.grant_command('statute', md, caller)}",
+                "    statute and code cites back on: asks you to type ACTIVATE",
+                "To keep every cite on this computer in every case, set citation_guard to local in this "
+                "plugin's settings."]
+        return "\n".join(out)
 
     def _select(self, folder: str) -> str:
         """Point the plugin at folder. Returns a sentence saying whether that happened."""
         setter = getattr(self.ctx, "set_config", None)
         if callable(setter):
             setter("matter_dir", folder)
-            return f"The plugin now uses {folder} as your case folder."
+            return f"The plugin now uses {_terminal.tilde(folder)} as your case folder."
         return (f"Set the case folder to {folder} in Settings > Plugins > corpus-open "
                 "(this Hermes can't save it from here).")
+
+    @staticmethod
+    def _inside_case(folder: str) -> str | None:
+        """The case folder strictly above `folder`, if any. A case inside a case is one the rest of
+        the kit treats as a boundary, and selecting it would switch the plugin off the real case.
+        Both the path as given and its real location are walked, so a link into a case is caught,
+        and "a case" is what resolve_matter accepts: a folder holding `.matter/`."""
+        def walk(start: str) -> str | None:
+            cur = os.path.dirname(start)
+            while True:
+                if os.path.isdir(os.path.join(cur, ".matter")):
+                    return cur
+                up = os.path.dirname(cur)
+                if up == cur:
+                    return None
+                cur = up
+        return walk(folder) or walk(os.path.realpath(folder))
+
+    @staticmethod
+    def _nested_refusal(folder: str, root: str, retry: str) -> str:
+        return (f"{folder} is inside the case at {root}, so it can't be a case of its own. "
+                f"Pick a folder outside every case: {retry}")
 
     def _init(self, rest: str) -> str:
         if not rest:
             return "Usage: /matter init <folder> (made if missing; files already there are kept)"
         from ..matterkit import cases
         folder = os.path.abspath(os.path.expanduser(rest))
+        root = self._inside_case(folder)
+        if root:
+            return self._nested_refusal(folder, root, "/matter init <new folder>")
         with contextlib.redirect_stdout(io.StringIO()):
             docs = cases.init(folder)
-        return (f"Case folder ready: {folder} ({docs} documents registered). " + self._select(folder) +
-                " Put files in its folders, then ask me to register them (matter_ingest_path).")
+        shown = _terminal.tilde(folder)  # for reading; the setting keeps the full path
+        return "\n".join([
+            f"Case folder ready: {shown} ({docs} documents registered). " + self._select(folder),
+            "Next:",
+            f"1. Copy your papers into it. Anything filed with the court or sent by the other side goes "
+            f"in {os.path.join(shown, 'Filings')}; your proof (letters, photos, records) goes in "
+            f"{os.path.join(shown, 'Evidence')}.",
+            '2. Say "register my files". Each one is recorded with a fingerprint, so a later change '
+            "shows up.",
+            '3. Ask "what\'s due in my case?" or "check my draft".',
+            "Cite checks are on for this case: only bare case, statute and code cites are sent, and case "
+            "cites need a free CourtListener key, added in Hermes's settings. /matter grant shows what is "
+            "sent and how to turn each check off."])
 
     def _demo(self, rest: str) -> str:
-        from ..matterkit import cases, store
+        from ..matterkit import cases, facts, store
         from ..matterkit import deadlines as dl
         from ..matterkit import ingest as ing
         folder = os.path.abspath(os.path.expanduser(rest))
+        root = self._inside_case(folder)
+        if root:
+            return self._nested_refusal(folder, root, "/matter demo <new folder>")
         if os.path.exists(folder) and (not os.path.isdir(folder) or os.listdir(folder)):
             return (f"{folder} already has files, so the demo won't write there. "
                     "Pick another folder: /matter demo <new folder>")
@@ -259,14 +535,118 @@ class Plugin:
         with contextlib.redirect_stdout(io.StringIO()):
             cases.init(folder)
             with contextlib.closing(store.connect(folder)) as conn:
-                ing.ingest_paths(conn, folder, [folder])
-                dl.add(conn, "Answer to complaint (demo)", (today - _dt.timedelta(days=3)).isoformat(),
-                       "plugin:corpus-open-demo", rule="synthetic demo date")
-                dl.add(conn, "Initial disclosures (demo)", (today + _dt.timedelta(days=7)).isoformat(),
-                       "plugin:corpus-open-demo", rule="synthetic demo date")
-        return (f"Made a synthetic demo case at {folder}: a made-up complaint and evidence memo, "
-                "registered and hashed, and two made-up deadlines (one overdue). Nothing in it is real. "
-                + self._select(folder) + " Try /matter, or ask me what's due.")
+                # The draft stays unregistered: a registered file is a source, and the source guard
+                # would then stop the agent from ever editing it. The folder's README is not a case
+                # paper either.
+                ing.ingest_paths(conn, folder, [folder],
+                                 exclude=(os.path.dirname(DEMO_DRAFT) + "/", "README.md"))
+                dl.add(conn, "Initial disclosures (demo)", (today - _dt.timedelta(days=3)).isoformat(),
+                       DEMO_BY, rule="synthetic demo date")
+                dl.add(conn, "Response to motion to dismiss (demo)", (today + _dt.timedelta(days=7)).isoformat(),
+                       DEMO_BY, rule="synthetic demo date")
+                for text, label, sources in DEMO_FACTS:
+                    facts.add(conn, folder, text, label, list(sources), by=DEMO_BY)
+        with open(os.path.join(folder, ".matter", "docket.json"), "w", encoding="utf-8") as f:
+            json.dump({"entries": {"12": DEMO_DECLARATION}}, f, indent=2)
+        return "\n".join([
+            f"Made a practice case at {_terminal.tilde(folder)}. It is synthetic. Nothing in it is real.",
+            "",
+            "In it: a complaint, an evidence memo and a three-page declaration (Doc. 12), each recorded "
+            "with a fingerprint; two deadlines, one already overdue; four labeled facts, one with nothing "
+            "to back it up; and a draft with three planted mistakes: a case that does not exist, a "
+            "quotation that is not in the record, and a quotation cited to the wrong page.",
+            "",
+            self._select(folder),
+            "",
+            "Try these:",
+            "- /matter: the case at a glance",
+            # The made-up case needs no lookup (matterkit.citescreen); a key adds the real case's check.
+            (f"- /matter check {DEMO_DRAFT}: finds all three, the two bad quotations and the made-up case"
+             if self.courtlistener_token() else
+             f"- /matter check {DEMO_DRAFT}: finds all three, the made-up case with no lookup at all. The "
+             "real case is checked too once a CourtListener key is set (/matter grant)"),
+            '- ask "what\'s due in my case?"',
+            "- ask me to add a quotation from Doc. 12 to the draft: one that is not in the record is "
+            "refused before it is written. Ask for an edit to one part of the draft: rewriting the whole "
+            "file is refused while the planted bad quotations are still in it"])
+
+    # -- Deadline Watch -------------------------------------------------------------------------
+    def _watch_text(self) -> str:
+        from ..matterkit import watch
+        md = resolve_matter(self.settings().get("matter_dir"))
+        text = watch.render(watch.report(md, today=self.today()))
+        return text or ("Nothing to report today: no open deadline is overdue or due in 0, 1, 3 or 7 "
+                        "days, and every registered file matches its hash.")
+
+    def _watch_on(self, when: str) -> str:
+        m = _HHMM.fullmatch(when.strip())
+        if not m:
+            return "Usage: /matter watch on [HH:MM] (24-hour time, for example 07:30; default 08:00)"
+        md = resolve_matter(self.settings().get("matter_dir"))
+        case = os.path.basename(md)
+        scripts, name, path = self._watch_script(md)
+        if os.path.exists(path) and not _ours(path):
+            return (f"{path} already exists and this plugin didn't write it, so it was left alone. "
+                    "Move it, then run /matter watch on again.")
+        os.makedirs(scripts, exist_ok=True)
+        body = (f"{WATCH_MARK}\n"
+                "# Hermes's cron runs this with no model; it prints the case's deadline news, or nothing.\n"
+                "import sys\n"
+                f"sys.path.insert(0, {KIT!r})\n"
+                "from matterkit import watch\n"
+                f"watch.cron_main({md!r})\n")
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(body)
+        os.replace(tmp, path)
+        hour, minute = int(m.group(1)), int(m.group(2))
+        cmd = " ".join(["hermes cron create", shlex.quote(f"{minute} {hour} * * *"), "--no-agent",
+                        "--script", shlex.quote(name), "--deliver telegram",
+                        "--name", shlex.quote(f"Case deadlines: {case}")])
+        return ("Wrote the morning check for " + md + " to " + path + ".\n"
+                "Run this once in a terminal to schedule it (Hermes asks a person to create cron jobs):\n"
+                f"  {cmd}\n"
+                f"Each day at {hour:02d}:{minute:02d} it sends overdue deadlines, ones due today, tomorrow or "
+                "in 3 or 7 days, and a count of changed or missing case files. On a day with none of "
+                "those it sends nothing. No model runs, so the dates arrive exactly as the case records "
+                "them.\n"
+                "--deliver telegram uses your Telegram home channel (/sethome). Use --deliver local to "
+                "keep the output on this computer instead. Try it now with: hermes cron run <job id>\n"
+                "Each message that goes out is logged, hash only, in the case's .matter/egress.jsonl. "
+                f"It carries the case folder's name ({case}), deadline names, dates and labels, and counts "
+                "of changed files; never file names, paths or contents. /matter watch off removes it.")
+
+    @staticmethod
+    def _watch_script(md: str) -> tuple[str, str, str]:
+        """(scripts folder, script name, full path) for the case's watch script."""
+        slug = (re.sub(r"[^a-z0-9]+", "-", os.path.basename(md).lower()).strip("-")[:40] or "case")
+        name = f"corpus-open-watch-{slug}-{hashlib.sha256(md.encode()).hexdigest()[:6]}.py"
+        scripts = os.path.join(_hermes_home(), "scripts")
+        return scripts, name, os.path.join(scripts, name)
+
+    def _watch_off(self) -> str:
+        md = resolve_matter(self.settings().get("matter_dir"))
+        _scripts, name, path = self._watch_script(md)
+        steps = ("To remove the scheduled job too, find its id with `hermes cron list` (the job that runs "
+                 f"{name}), then run `hermes cron remove <job id>`. Until then Hermes reports the missing "
+                 "script as a failed run each morning.")
+        if not os.path.lexists(path):
+            return f"No watch script for {md} in Hermes's scripts folder. " + steps
+        if not _ours(path):
+            return (f"{path} exists but this plugin didn't write it, so it was left alone. " + steps)
+        os.remove(path)
+        return f"Removed the morning check's script ({path}). " + steps
+
+    def _calendar(self) -> str:
+        from ..matterkit import calendar_export
+        md = resolve_matter(self.settings().get("matter_dir"))
+        path, count = calendar_export.write(md)
+        if not count:
+            return f"No open deadlines with a date, so {path} has no events."
+        return (f"Wrote {count} deadline{'' if count == 1 else 's'} to {path}. Open it to add them to "
+                "your calendar, with reminders 7, 3 and 1 days before. Titles keep each date's "
+                "confidence label. Exporting again later updates the same events instead of adding "
+                "copies. Deadlines still waiting on an event have no date yet and are left out.")
 
     def _deadline_text(self) -> str:
         md = resolve_matter(self.settings().get("matter_dir"))
@@ -283,6 +663,9 @@ class Plugin:
         for r in rows:
             flag = " **OVERDUE**" if dl.is_overdue(r["due_date"], r["state"], today=self.today()) else ""
             out.append(f"- {r['due_date']} · {r['label']}{flag} ({r['confidence']}, {r['verification_status']})")
+        # Deadline Watch's rule: only a hard, verified-official date counts as confirmed.
+        if any(not (r["confidence"] == "hard" and r["verification_status"] == "verified-official") for r in rows):
+            out.append(UNCONFIRMED)
         return "\n".join(out)
 
     @staticmethod
@@ -295,6 +678,23 @@ class Plugin:
         return r if isinstance(r, str) else json.dumps(r, indent=1)
 
 
+def _ours(path: str) -> bool:
+    """A regular file whose first line is the watch script's marker (never through a symlink)."""
+    if os.path.islink(path) or not os.path.isfile(path):
+        return False
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.readline().rstrip("\r\n") == WATCH_MARK
+
+
+def _hermes_home() -> str:
+    """Hermes's home folder (its profile's, inside Hermes), where cron looks for scripts."""
+    try:
+        from hermes_constants import get_hermes_home
+        return str(get_hermes_home())
+    except Exception:  # noqa: BLE001 - outside Hermes, or an older Hermes
+        return os.path.expanduser("~/.hermes")
+
+
 def register(ctx, *, secret=_secret, today=None) -> Plugin:
     plugin = Plugin(ctx, secret=secret, today=today)
     for name, schema in SCHEMAS.items():
@@ -304,14 +704,15 @@ def register(ctx, *, secret=_secret, today=None) -> Plugin:
     ctx.register_hook("pre_llm_call", plugin.on_turn)
     ctx.register_hook("pre_tool_call", plugin.on_tool_call)
     skill = getattr(ctx, "register_skill", None)
-    if callable(skill) and os.path.isfile(SKILL_PATH):
+    for name, path, description in SKILLS if callable(skill) else ():
+        if not os.path.isfile(path):
+            continue
         try:
-            skill("matter-kit", SKILL_PATH,
-                  description="How to keep a case folder: hashed sources, labeled facts with sources, "
-                              "deadlines, counsel packets")
-        except Exception:  # noqa: BLE001 - a skill that won't register must not stop the tools loading
+            skill(name, path, description=description)
+        except Exception:  # noqa: BLE001 - a skill that won't register must not stop the tools or the next skill
             pass
     ctx.register_command("matter", plugin.command,
-                         description="Your case: status, deadlines, counsel packet, cite check, new case, demo",
-                         args_hint="[status|deadlines|packet|check|grant|init|demo]")
+                         description="Your case: status, deadlines, intake checklist, morning watch, calendar, "
+                                     "counsel packet, cite check, new case, demo",
+                         args_hint="[status|deadlines|intake|watch|calendar|packet|check|grant|init|demo]")
     return plugin

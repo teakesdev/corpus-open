@@ -76,11 +76,16 @@ async function verify() {
   emit()
 }
 
+// Hermes answers 404 three ways, and only one means corpus-open is off for this profile.
 function backendError(e) {
   const msg = (e && e.message) || String(e)
-  return /404|not enabled|not found/i.test(msg)
-    ? 'The Corpus Open backend is off. Add corpus-open to plugins.enabled in config.yaml and restart Hermes.'
-    : msg
+  if (/not enabled in this profile/i.test(msg))
+    return "Corpus Open is not enabled in this profile. Add corpus-open to plugins.enabled in this profile's config.yaml and restart Hermes."
+  if (/plugin not found/i.test(msg))
+    return "This profile can't reach the Corpus Open backend. Hermes serves a plugin you installed yourself only to the profile it started with, unless ~/.hermes/config.yaml sets plugins.isolation: host. Switch to that profile, or set it and restart Hermes."
+  if (/404|not found/i.test(msg))
+    return `Hermes did not find the Corpus Open backend (${msg}). Check that corpus-open is enabled for this profile, then restart Hermes.`
+  return msg
 }
 
 let refreshTimer = null

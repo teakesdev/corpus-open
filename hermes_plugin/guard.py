@@ -1,11 +1,12 @@
 """Citation guard: find every citation in a piece of text and say what is known about each one.
 
 Case cites (volume reporter page) go to CourtListener's citation lookup through the kit's own
-adapter; statute and code cites go to Corpus's law search through the kit's Corpus adapter. Both
-adapters refuse to send anything unless the case folder holds a human-issued grant in
-.matter/consent.json naming this caller (RFC 0001), and both log every request to
-.matter/egress.jsonl. Without a grant, a token or a case folder, the guard still lists every cite it
-found and says plainly that it was not looked up.
+adapter; statute and code cites go, one bare cite per request, to Corpus's law search through the
+kit's statute lookup adapter (matterkit.statutelookup decides what may be sent). Both adapters
+refuse to send anything unless .matter/consent.json allows it: the case's default grant, which
+covers bare cites only and which a person can turn off for the case, or a person's own grant
+(RFC 0001). Both log every request to .matter/egress.jsonl. Without a grant, a token or a case
+folder, the guard still lists every cite it found and says plainly that it was not looked up.
 
 Outcomes say what a source holds at a cite, never that the text says what a reply says or that
 the authority is still good law.
@@ -15,15 +16,17 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import sys
 from dataclasses import dataclass, field
 
-from ..matterkit import authority, citations, citelookup, store
+from ..matterkit import authority, citations, citelookup, citescreen, statutelookup, store
 from ..matterkit.consent import ConsentError
 
 # Statute/code outcomes (case outcomes are citelookup's own words).
 IN_CORPUS, NOT_MATCHED, NOT_LOOKED_UP = "IN CORPUS", "NOT MATCHED IN CORPUS", citelookup.NOT_LOOKED_UP
 
-PROBLEM = (citelookup.NOT_FOUND, citelookup.NAME_DIFFERS, citelookup.UNKNOWN_REPORTER, citelookup.AMBIGUOUS)
+PROBLEM = (*citescreen.LABELS,  # cites the offline screen says cannot exist as written
+           citelookup.NOT_FOUND, citelookup.NAME_DIFFERS, citelookup.UNKNOWN_REPORTER, citelookup.AMBIGUOUS)
 GOOD = (citelookup.FOUND, IN_CORPUS)
 
 LIMITS = ("Found means a source holds something at that cite. It does not mean it says what this "
@@ -32,19 +35,79 @@ LIMITS = ("Found means a source holds something at that cite. It does not mean i
 KIT_CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "matter.py")
 
 
+KEY_URL = "https://www.courtlistener.com/profile/api/"
+HOW_TO_START = ("Type /matter demo to try a made-up case, or /matter init ~/cases/my-case to start "
+                "your own.")
+
+
+def python_cmd() -> str:
+    """The Python running this plugin (Hermes's own), quoted for a shell. A printed command must not
+    start with a bare `python3`: on a stock Mac that is Python 3.9, which the kit does not run on."""
+    return shlex.quote(sys.executable) if sys.executable else "python3"
+
+
 def grant_command(kind: str, matter_dir: str | None, caller: str) -> str:
-    """The terminal command a person runs to allow lookups, with the kit's full path so it works from
-    any folder. kind is "case" (CourtListener, the one switch) or "statute" (Corpus)."""
-    cli = "python3 " + shlex.quote(KIT_CLI)
+    """The terminal command a person runs to turn a check on or off, with the interpreter's and the
+    kit's full paths so it works from any folder. kind is "case" (CourtListener on: case cites and
+    search), "case-off", "statute" (Corpus statute and code cites back on) or "statute-off". Both cite
+    checks cover every caller, so `caller` no longer changes the line."""
+    cli = python_cmd() + " " + shlex.quote(KIT_CLI)
     md = shlex.quote(os.path.abspath(os.path.expanduser(matter_dir))) if matter_dir else "<case folder>"
     if kind == "case":
         return f"{cli} courtlistener on {md}"
-    return f"{cli} consent activate {md} --scope corpus-search --caller {shlex.quote(str(caller))}"
+    if kind == "case-off":
+        return f"{cli} courtlistener off {md}"
+    if kind == "statute-off":
+        return f"{cli} consent decline {md} --scope statute-lookup"
+    return f"{cli} consent activate {md} --scope statute-lookup"
 
 
-NO_KEY = ("Case cites were not looked up: there is no CourtListener key. Get a free one at "
-          "https://www.courtlistener.com/profile/api/ and save it with `python3 " + shlex.quote(KIT_CLI) +
-          " courtlistener key`, or as COURTLISTENER_TOKEN in this plugin's settings.")
+NO_KEY = ("Case cites were not looked up: there is no CourtListener key yet. The key is free: get one "
+          f"at {KEY_URL} and add it in Hermes's settings for this plugin (COURTLISTENER_TOKEN), never in a "
+          "chat. /matter grant shows how.")
+NO_FOLDER = "no case folder is set up yet. " + HOW_TO_START
+_WHAT = {"case": ("Case cites", "case law"), "statute": ("Statute and code cites", "statutes")}
+
+
+def not_allowed(kind: str, e: Exception) -> str:
+    """Why a lookup was refused, in words for someone who has never seen a grant. The refusal's own
+    text names providers, endpoints and payload types; none of that helps the reader, and
+    `/matter grant` prints the steps. kind is "case" or "statute"."""
+    cites, what = _WHAT[kind]
+    text = str(e)
+    if "turned off for this case by a person" in text:
+        return (f"{cites} were not looked up: looking up {what} was turned off for this case by a person. "
+                "Type /matter grant to see how to turn it back on.")
+    if "daily budget" in text:
+        return (f"{cites} were not looked up: today's limit for looking up {what} in this case is used "
+                "up. The count starts over each day.")
+    if "grant expired" in text:
+        return (f"{cites} were not looked up: the permission to look up {what} for this case has run "
+                "out. Type /matter grant to turn it on again.")
+    if text.startswith("no valid grant"):
+        return (f"{cites} were not looked up: looking up {what} is not turned on for this case yet. "
+                "Type /matter grant to see how to turn it on.")
+    return f"{cites} were not looked up: {_short(e)}"
+
+
+CORPUS_KEY_URL = "https://corpuslaw.us/settings"
+
+
+def corpus_trouble(e: Exception, has_key: bool) -> str:
+    """Why Corpus gave no answer, in words for the person reading the block. Corpus allows a set
+    number of searches a month without a key, counted per network, and its own text for a used-up
+    allowance is written for an agent ("send it as `Authorization: Bearer <key>`"), so that one is
+    said here instead. Any other failure keeps the error's own first line."""
+    lead = "Statute and code cites were not looked up: "
+    if "quota" in str(e).lower():
+        if has_key:
+            return (f"{lead}the lookups allowed on your Corpus key are used up for now. {CORPUS_KEY_URL} "
+                    "shows your count and your choices.")
+        return (f"{lead}this month's free Corpus lookups from your network are used up. They start over "
+                f"next month. A free Corpus key raises the limit: get one at {CORPUS_KEY_URL} and add it "
+                "in Hermes's settings for this plugin (CORPUS_API_KEY), never in a chat.")
+    return lead + _short(e)
+
 
 # Code-name prefix -> Corpus jurisdiction code. Unknown codes search every jurisdiction.
 _JURIS = [
@@ -80,8 +143,12 @@ class Check:
             self.notes.append(text)
 
 
+# Dash look-alikes: the United States Code prints "§ 2000e–3" with an en dash, briefs write a hyphen.
+_DASHES = re.compile("[\u2010-\u2015\u2212]")
+
+
 def _norm(cite: str) -> str:
-    return re.sub(r"[\s.,]+", "", cite).lower()
+    return re.sub(r"[\s.,]+", "", _DASHES.sub("-", cite)).lower()
 
 
 def jurisdiction(cite: str) -> str | None:
@@ -92,7 +159,9 @@ def jurisdiction(cite: str) -> str | None:
 
 
 def statute_cites(text: str) -> list[str]:
-    """Code and statute cites the kit's local parser finds, longest form only, in order, once each."""
+    """Code and statute cites the kit's local parser finds, longest form only, in order, once each.
+    A bare section ("§ 89-7-27") is the short form of a full cite in the same text that ends in that
+    section ("Miss. Code Ann. § 89-7-27"), so only the full cite is listed and looked up."""
     rows = [r for r in citations.extract_citations(text)
             if r["status"] == "extracted" and "§" in (r["parsed_citation"] or "")]
     keep = [r for r in rows if not any(o is not r and o["char_start"] <= r["char_start"]
@@ -104,19 +173,48 @@ def statute_cites(text: str) -> list[str]:
         c = r["parsed_citation"].strip()
         if c not in out:
             out.append(c)
-    return out
+    full = [_norm(c) for c in out if not c.startswith("§")]
+    return [c for c in out if not (c.startswith("§") and any(f.endswith(_norm(c)) for f in full))]
 
 
 def _heading_cite(heading: str) -> str:
     return re.split(r"\s+[—–-]\s+", heading, maxsplit=1)[0]
 
 
+def _as_sent(cite: str) -> str:
+    """The cite as it is sent to Corpus: without a trailing year or publisher note in parentheses."""
+    try:
+        return statutelookup.payload(cite)
+    except ValueError:
+        return cite
+
+
 def match_statute(cite: str, hits: list) -> tuple | None:
-    """The first Corpus hit whose citation is this cite. Returns (heading, url) or None."""
-    want = _norm(cite)
+    """The first Corpus hit whose citation is this cite, compared as the cite is sent to Corpus (so a
+    trailing year in parentheses does not stop a match). Returns (heading, url) or None."""
+    want = _norm(_as_sent(cite))
     for h in hits:
         if _norm(_heading_cite(h.citation)) == want:
             return h.citation, (h.provenance or {}).get("url")
+    return None
+
+
+_SUBSECTIONS = re.compile(r"(?:\([0-9A-Za-z]{1,4}\))+$")
+
+
+def match_section(cite: str, hits: list) -> tuple | None:
+    """For a cite to a subsection ("§ 2000e-3(a)(1)"), the first Corpus hit whose citation is the
+    section it sits in. Returns (heading, url, subsection) or None. Only trailing markers are cut, so
+    a parenthesis inside a CFR number ("§ 1.1031(a)-1") stays part of the number. Corpus holds
+    sections, so this says the section exists; it does not check the subsection's text."""
+    sent = _as_sent(cite)
+    m = _SUBSECTIONS.search(sent)
+    if not m or not sent[:m.start()].rstrip():
+        return None
+    want = _norm(sent[:m.start()])
+    for h in hits:
+        if _norm(_heading_cite(h.citation)) == want:
+            return h.citation, (h.provenance or {}).get("url"), m.group(0)
     return None
 
 
@@ -166,6 +264,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
 
     # Case cites -------------------------------------------------------------------------------
     cites = citelookup.draft_cites(text)
+    screened = _screen(text)  # cites that cannot exist as written, known with no lookup
     payloads = citelookup.payloads(cites)
     answers, stopped = [], None
     why = None
@@ -173,7 +272,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
         if not lookup:
             why = "Case cites were not looked up: the guard is set to local only."
         elif not matter_dir:
-            why = "Case cites were not looked up: no case folder is set (matter_dir)."
+            why = "Case cites were not looked up: " + NO_FOLDER
         elif not courtlistener_token:
             why = NO_KEY
         else:
@@ -189,9 +288,7 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                 if len(payloads) > 1 and stopped is None:
                     stopped = "more than 60 case cites; only the first 60 were looked up"
             except ConsentError as e:
-                why = (f"Case cites were not looked up: this case folder has no CourtListener grant for "
-                       f"'{caller_id}' ({_short(e)}). A person grants it once in a terminal: "
-                       + grant_command("case", matter_dir, caller_id))
+                why = not_allowed("case", e)
             except Exception as e:  # noqa: BLE001
                 why = f"Case cites were not looked up: {_short(e)}"
         if why:
@@ -214,7 +311,8 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                 detail = "not looked up"
             for w in r.warnings:
                 detail += f" ⚠ {w}"
-            result.rows.append(Row("case", r.cite.display, r.outcome, detail.strip(), url,
+            outcome, detail = _screened(r, screened.get(r.cite.sent), detail.strip())
+            result.rows.append(Row("case", r.cite.display, outcome, detail, url,
                                    _ledger(conn, r.cite.sent)))
 
     # Statute and code cites -------------------------------------------------------------------
@@ -225,17 +323,19 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
         if not lookup:
             why = "Statute and code cites were not looked up: the guard is set to local only."
         elif not matter_dir:
-            why = "Statute and code cites were not looked up: no case folder is set (matter_dir)."
+            why = "Statute and code cites were not looked up: " + NO_FOLDER
         else:
             try:
                 if corpus_factory is None:
-                    from ..matterkit.adapters.corpus_search import CorpusSearchAdapter
+                    from ..matterkit.adapters.corpus_search import CorpusStatuteLookupAdapter
 
                     def corpus_factory(md, key):
-                        return CorpusSearchAdapter(md, "authenticated" if key else "anonymous", api_key=key)
+                        return CorpusStatuteLookupAdapter(md, "authenticated" if key else "anonymous", api_key=key)
                 adapter = corpus_factory(matter_dir, corpus_api_key)
+            except ConsentError as e:
+                why = not_allowed("statute", e)
             except Exception as e:  # noqa: BLE001
-                why = f"Statute and code cites were not looked up: {_short(e)}"
+                why = corpus_trouble(e, bool(corpus_api_key))
         from ..matterkit.search import SearchQuery
         for i, cite in enumerate(statutes):
             row = Row("statute", cite, NOT_LOOKED_UP, "not looked up", None, _ledger(conn, cite))
@@ -245,21 +345,27 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
                                           caller_id)
                     result.sent["corpus"] = result.sent.get("corpus", 0) + 1
                     m = match_statute(cite, hits)
+                    sub = None
+                    if not m:
+                        ms = match_section(cite, hits)
+                        if ms:
+                            m, sub = ms[:2], ms[2]
                     if m:
                         heading, url = m
                         title = heading[len(_heading_cite(heading)):].strip(" —–-")
-                        row.outcome, row.detail, row.url = IN_CORPUS, (f"Corpus: {title}" if title else
-                                                                       "Corpus holds this section"), url
+                        detail = f"Corpus: {title}" if title else "Corpus holds this section"
+                        if sub:
+                            detail += (f". Corpus holds {_heading_cite(heading)}; subsection {sub} not "
+                                       "checked against its text")
+                        row.outcome, row.detail, row.url = IN_CORPUS, detail, url
                     else:
                         row.outcome = NOT_MATCHED
                         row.detail = ("Corpus returned no section with this exact cite. It may be outside "
                                       "Corpus's coverage or cited in another form; check it by hand.")
                 except ConsentError as e:
-                    why = (f"Statute and code cites were not looked up: this case folder has no Corpus grant "
-                           f"for '{caller_id}' ({_short(e)}). A person grants it once in a terminal: "
-                           + grant_command("statute", matter_dir, caller_id))
+                    why = not_allowed("statute", e)
                 except Exception as e:  # noqa: BLE001
-                    why = f"Statute and code cites were not looked up: {_short(e)}"
+                    why = corpus_trouble(e, bool(corpus_api_key))
             elif adapter is not None and why is None:
                 result.note(f"Only the first {max_statutes} statute cites were looked up.")
             result.rows.append(row)
@@ -268,9 +374,36 @@ def _check_text(text: str, *, matter_dir: str | None = None, caller_id: str = "h
     return result
 
 
-def _short(e: Exception) -> str:
+def _short(e: Exception, limit: int = 240) -> str:
+    """The error's first line, cut at a word (never mid-word) when it is long."""
     s = str(e).strip().splitlines()[0] if str(e).strip() else type(e).__name__
-    return s[:240]
+    if len(s) <= limit:
+        return s
+    head = s[:limit]
+    return (head[:head.rfind(" ")] if " " in head else head).rstrip(" ,;:(—-") + "…"
+
+
+def _screen(text: str) -> dict:
+    """The offline screen's findings for the text's case cites (citescreen); none if the screen fails."""
+    try:
+        return citescreen.screen_text(text)
+    except Exception:  # noqa: BLE001 - the screen must never cost a reply its citation block
+        return {}
+
+
+def _screened(r, finding, detail: str) -> tuple:
+    """A case row's (outcome, detail) once the offline screen has spoken. CourtListener outranks the
+    table: an opinion at the cite (FOUND, NAME DIFFERS, AMBIGUOUS) keeps CourtListener's outcome and
+    the contradiction is logged. NOT FOUND and the like keep their outcome and add the screen's
+    sentence; a cite that was not looked up takes the screen's label (NO SUCH VOLUME...)."""
+    if finding is None:
+        return r.outcome, detail
+    if r.cluster or r.candidates:
+        citescreen.contradicted(r.cite.sent, finding, (r.cluster or r.candidates[0]).get("date_filed"))
+        return r.outcome, detail
+    if r.outcome == citelookup.NOT_LOOKED_UP:
+        return finding.label, finding.text
+    return r.outcome, f"{detail} {finding.text}".strip()
 
 
 _MARK = {citelookup.FOUND: "✓", IN_CORPUS: "✓", citelookup.NOT_LOOKED_UP: "·"}

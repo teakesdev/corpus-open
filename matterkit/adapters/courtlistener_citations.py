@@ -13,6 +13,7 @@ payload is validated before the first is sent, and a throttled run stops. It nev
 """
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -25,13 +26,34 @@ from .courtlistener import UA, opener
 
 
 class Throttled(Exception):
-    def __init__(self, until: str):
+    def __init__(self, until: str, when: str = ""):
         super().__init__(f"throttled until {until}")
         self.until = until
+        self.when = when or f"after {until}"  # how it reads after "try again"
 
 
-def post_form(url: str, fields: dict, token: str):
-    """POST form fields with the token; return the parsed JSON. Redirects are refused."""
+def wait_words(seconds) -> str:
+    """A wait given in seconds, in words a person can plan around: 49345 is "about 13 hours 42
+    minutes". "" when `seconds` is not a whole number of seconds (Retry-After may hold a date)."""
+    try:
+        s = int(str(seconds).strip())
+    except (TypeError, ValueError):
+        return ""
+    if s < 0:
+        return ""
+    if s < 90:
+        return f"{s} second" + ("" if s == 1 else "s")
+    m = round(s / 60)
+    if m < 90:
+        return f"about {m} minutes"
+    h, m = divmod(m, 60)
+    return (f"about {h} hour" + ("" if h == 1 else "s")
+            + (f" {m} minute" + ("" if m == 1 else "s") if m else ""))
+
+
+def post_form(url: str, fields: dict, token: str, timeout: float = 60):
+    """POST form fields with the token; return the parsed JSON. Redirects are refused. A connection
+    that drops or times out part way is a RuntimeError like any other failure to reach CourtListener."""
     if not token:
         raise consent.ConsentError("citation lookup requires a token — no egress")
     req = urllib.request.Request(
@@ -39,7 +61,7 @@ def post_form(url: str, fields: dict, token: str):
         headers={"User-Agent": UA, "Accept": "application/json",
                  "Content-Type": "application/x-www-form-urlencoded", "Authorization": "Token " + token})
     try:
-        with opener().open(req, timeout=60) as resp:
+        with opener().open(req, timeout=timeout) as resp:
             raw = resp.read()
     except consent.ConsentError:
         raise
@@ -57,13 +79,19 @@ def post_form(url: str, fields: dict, token: str):
             except (OSError, ValueError):
                 pass
             if not until and e.headers and e.headers.get("Retry-After"):
-                until = f"{e.headers['Retry-After']} seconds"
+                # A key's lookups for the day being used up comes this way, with a wait of hours.
+                until = str(e.headers["Retry-After"]).strip()
+                words = wait_words(until)
+                if words:
+                    raise Throttled(f"{words} from now", when=f"in {words}") from e
             raise Throttled(until or "an unstated time") from e
         if code in (401, 403):
             raise RuntimeError(f"CourtListener refused the token (HTTP {code}); check COURTLISTENER_TOKEN") from e
         raise RuntimeError(f"CourtListener HTTP {code}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"could not reach CourtListener: {e.reason}") from e
+    except (OSError, http.client.HTTPException) as e:  # a timeout or reset while reading the answer
+        raise RuntimeError(f"could not reach CourtListener: {e}") from e
     try:
         return json.loads(raw.decode("utf-8"))
     except ValueError as e:
@@ -113,7 +141,7 @@ class CitationLookupAdapter:
             try:
                 body = self._post(citelookup.URL, {"text": p}, self._token)
             except Throttled as e:
-                return answers, f"CourtListener throttled the lookup; try again after {e.until}"
+                return answers, f"CourtListener throttled the lookup; try again {e.when}"
             except (RuntimeError, consent.ConsentError) as e:
                 return answers, f"stopped: {e}"
             if not isinstance(body, list):

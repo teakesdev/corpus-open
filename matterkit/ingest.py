@@ -1,6 +1,7 @@
 """Ingest files into the matter store: hash, classify, register. Sources are never modified."""
 import hashlib
 import os
+import re
 import sqlite3
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".matter"}
@@ -77,17 +78,99 @@ def walk_files(root: str):
             yield os.path.join(dirpath, fn)
 
 
+def abs_path(path: str) -> str:
+    """os.path.abspath, plus a leading "//" folded to "/". POSIX keeps exactly two leading slashes
+    as written, but on macOS and Linux "//x" is "/x", and a spelling left with two would not match
+    the case folder's own."""
+    p = os.path.abspath(path)
+    return p[1:] if p.startswith("//") and not p.startswith("///") else p
+
+
 def is_within_matter(path: str, matter_dir: str) -> bool:
     """True iff abspath(path) is the matter root or a descendant (no .. escape)."""
-    abs_path = os.path.abspath(path)
+    abs_p = os.path.abspath(path)
     abs_matter = os.path.abspath(matter_dir)
     try:
-        rel = os.path.relpath(abs_path, abs_matter)
+        rel = os.path.relpath(abs_p, abs_matter)
     except ValueError:
         return False
     if rel == os.curdir:
         return True
     return not _invalid_rel(rel)
+
+
+def resolve_in_matter(path: str, matter_dir: str):
+    """`path` as a path under matter_dir, or None when it is outside. A relative path joins the
+    matter root. An absolute path that is outside as written but whose folder is, once links are
+    resolved, inside the matter's real location (a case set up through a link, or /var vs
+    /private/var on a Mac) is mapped back under matter_dir. Only the folder part is resolved: a
+    link at the last step keeps its own name, so later link checks still see it."""
+    root = abs_path(matter_dir)
+    cand = abs_path(path if os.path.isabs(path) else os.path.join(root, path))
+    if is_within_matter(cand, root):
+        return cand
+    if not os.path.isabs(path):
+        return None
+    real_root = os.path.realpath(root)
+    if _same_dir(os.path.realpath(cand), real_root):
+        return root
+    head, leaf = os.path.split(cand)
+    rel = _rel_under(os.path.realpath(head), real_root)
+    if rel is None:
+        return None
+    return os.path.normpath(os.path.join(root, rel, leaf))
+
+
+def _same_dir(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _rel_under(real_head: str, real_root: str):
+    """real_head (no links left in it) relative to real_root, or None when it is not under it. The
+    folders are compared as folders on the disk, not as spellings, so a disk that ignores capital
+    letters (the Mac default) finds "/cases/CASE/evidence" under "/cases/case"."""
+    if is_within_matter(real_head, real_root):
+        return os.path.relpath(real_head, real_root)
+    cur = real_head
+    while True:
+        if _same_dir(cur, real_root):
+            return os.path.relpath(real_head, cur)
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def case_relative_notes(printed: str, matter_dir: str) -> list:
+    """The "  ! reason: /abs/path" lines ingest_paths printed, as "reason: rel/path" for a reply:
+    only the leading marker is dropped, and the matter root is cut only where a path starts (after
+    a space or at the start), never from the middle of a name."""
+    lead = re.compile(r"(?:(?<=\s)|^)/?" + re.escape(abs_path(matter_dir) + os.sep))
+    return [lead.sub("", ln.strip()[2:]) for ln in printed.splitlines() if ln.strip().startswith("! ")]
+
+
+def recorded_name(conn, matter_dir: str, cand: str) -> str:
+    """The case-relative name facts cite `cand` by after an ingest: for a file already registered
+    under another spelling (same bytes, reached through a linked folder or another capitalization),
+    the stored name, not the one asked for. A folder, or a file left out, keeps its own name."""
+    rel = to_rel_path(cand, matter_dir)
+    if not os.path.isfile(cand) or _links_out(cand, matter_dir):
+        return rel
+    row = conn.execute("SELECT rel_path FROM documents WHERE rel_path=?", (rel,)).fetchone()
+    if row is None:
+        row = conn.execute("SELECT rel_path FROM documents WHERE sha256=? ORDER BY rowid",
+                           (sha256_file(cand),)).fetchone()
+    return row[0] if row else rel
+
+
+def reads_inside(path: str, matter_dir: str) -> bool:
+    """True if reading `path` reads bytes inside the matter's real location: a link is followed
+    only when its target is inside too. A path that does not exist is not refused here."""
+    return (not os.path.lexists(path)
+            or is_within_matter(os.path.realpath(path), os.path.realpath(matter_dir)))
 
 
 def _links_out(fp: str, matter_dir: str) -> bool:
@@ -137,10 +220,10 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
     documents.rel_path is always relative to abspath(matter_dir), never cwd.
     Paths that resolve outside the matter are excluded (fail-closed).
     """
-    abs_matter = os.path.abspath(matter_dir)
+    abs_matter = abs_path(matter_dir)
     added = skipped = excluded = 0
     for p in paths:
-        ap = os.path.abspath(p)
+        ap = abs_path(p)
         if not os.path.exists(ap):
             print(f"  ! not found: {p}")
             continue
@@ -157,6 +240,10 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 continue
             if _links_out(fp, abs_matter):
                 print(f"  ! links outside this matter (or into a nested matter): {fp}")
+                excluded += 1
+                continue
+            if not os.path.exists(fp):  # a link whose target is gone: nothing to hash
+                print(f"  ! not found: {fp}")
                 excluded += 1
                 continue
             try:
@@ -185,7 +272,7 @@ def ingest_paths(conn, matter_dir: str, paths, exclude=()):
                 conn.execute(
                     "INSERT INTO documents (id, sha256, rel_path, bytes, mtime, kind)"
                     " VALUES (?,?,?,?,?,?)",
-                    (__import__("matterkit.store", fromlist=["new_id"]).new_id(),
+                    (_new_id(),
                      digest, rel_path, st.st_size, st.st_mtime, kind),
                 )
             except sqlite3.IntegrityError:  # another writer registered it after the lookup above
@@ -242,3 +329,8 @@ def verify_integrity(conn, matter_dir: str):
     if view is not None:
         view.close()
     return ok, bad, missing, failures
+
+
+def _new_id():
+    from .store import new_id  # relative: Hermes loads the kit under its own package name
+    return new_id()

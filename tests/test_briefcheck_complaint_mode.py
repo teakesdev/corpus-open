@@ -178,7 +178,7 @@ class TestSwe2ComplaintModeReview(Base):
         self.m.conn = store.connect(self.m.dir)
 
     def test_p3_readme_states_the_actual_rule(self):
-        readme = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
+        readme = open(os.path.join(KIT, "docs", "reference.md"), encoding="utf-8").read()  # the manual moved out of README.md
         self.assertIn("Headings are still read for cites and quotations", readme)
 
 
@@ -233,5 +233,5 @@ class TestSwe2ComplaintModeReviewRound3(Base):
                              ["The arrest happened at home on a holiday."], name)
 
     def test_readme_lists_every_veto_pattern(self):
-        readme = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
+        readme = open(os.path.join(KIT, "docs", "reference.md"), encoding="utf-8").read()  # the manual moved out of README.md
         self.assertIn("short-form or Westlaw cite, Id.", readme)

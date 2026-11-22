@@ -80,19 +80,19 @@ _PATTERNS = [
     # House bills (identifier, not statute): H.R. 3763
     re.compile(r"\bH\.R\.\s*\d+\b"),
     # Revised Statutes:                  R.S. § 1979 (Unicode space tolerated by \s)
-    re.compile(r"\bR\.S\.\s*§+\s*[\dA-Za-z.\-]+"),
+    re.compile(r"\bR\.S\.\s*§+\s*[\dA-Za-z.\-‐-―−]+"),
     # Florida short:                     F.S. 605.0101 / F.S. § 605.0101
-    re.compile(r"\bF\.S\.\s*(?:§+\s*)?[\dA-Za-z.\-]+"),
+    re.compile(r"\bF\.S\.\s*(?:§+\s*)?[\dA-Za-z.\-‐-―−]+"),
     # Code of Federal Regulations — dotted or undotted, § optional:
     #   17 C.F.R. § 240.10b-5 / 12 CFR 1026.1
-    re.compile(r"\b\d+\s+C\.?F\.?R\.?\s*(?:§+\s*)?[\dA-Za-z.\-]+"),
+    re.compile(r"\b\d+\s+C\.?F\.?R\.?\s*(?:§+\s*)?[\dA-Za-z.\-‐-―−]+(?:\([\dA-Za-z]{1,4}\)[\-‐-―−][\dA-Za-z.]+)*"),
     # U.S. Code — abbreviated or spelled out, with section sign:
     #   15 U.S.C. § 1681a / 42 U.S. Code § 1983
-    re.compile(r"\b\d+\s+(?:U\.?S\.?C\.?|U\.?S\.?\s+Code)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))*"),
+    re.compile(r"\b\d+\s+(?:U\.?S\.?C\.?|U\.?S\.?\s+Code)\s*§+\s*[\dA-Za-z.\-‐-―−]+(?:\s*\([^)]{1,24}\))*"),
     # U.S. Code without section sign:    15 U.S.C. 78j
-    re.compile(r"\b\d+\s+U\.?S\.?C\.?\s+(?!§)[\dA-Za-z][\dA-Za-z.\-]*\b"),
+    re.compile(r"\b\d+\s+U\.?S\.?C\.?\s+(?!§)[\dA-Za-z][\dA-Za-z.\-‐-―−]*\b"),
     # Code of Federal Regulations (full depth):  17 C.F.R. § 240.10b-5
-    re.compile(r"\b\d+\s+C\.F\.R\.\s*§+\s*[\dA-Za-z.\-]+"),
+    re.compile(r"\b\d+\s+C\.F\.R\.\s*§+\s*[\dA-Za-z.\-‐-―−]+(?:\([\dA-Za-z]{1,4}\)[\-‐-―−][\dA-Za-z.]+)*"),
     # Delaware:            8 Del. C. § 141
     re.compile(r"\b\d+\s+Del\.\s+C\.\s*§+\s*\d+[a-z]?(?:\s*\([^)]{1,24}\))?"),
     # State Code Ann.:     Miss. Code Ann. § 57-1-319 / Wyo. Stat. Ann. § 17-29-802 ·
@@ -102,18 +102,18 @@ _PATTERNS = [
     # One regex, so no inner "Va. Code Ann." row is left inside "W. Va. Code Ann.".
     re.compile(rf"(?<![\w.])(?:(?:{_STATE_DOTTED})\.\s*|(?:{_STATE_UNDOTTED})\s+)"
                r"(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){0,4}"
-               r"(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"
-               r"|\b[A-Z][A-Za-z.]*\.?\s+(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
+               r"(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-‐-―−]+(?:\s*\([^)]{1,24}\))?"
+               r"|\b[A-Z][A-Za-z.]*\.?\s+(?:Code|Stat\.)\s+Ann\.\s*§+\s*[\dA-Za-z.\-‐-―−]+(?:\s*\([^)]{1,24}\))?"),
     # Keyword-tail code names (v2): dotted words chain across legitimate
     # spaces; (?<![\w.]) forbids starting mid-acronym (the 'N.Y.' -> 'Y. …'
     # FP) and sentence prefixes can never match (no trailing dot).
     #   Cal. Civ. Code § 1542 · Cal. Bus. & Prof. Code § 17200 ·
     #   Tex. Bus. & Orgs. Code § 101.55 · N.Y. Bus. Corp. Law § 405
-    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,4}(?:Code|Law)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
+    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,4}(?:Code|Law)\s*§+\s*[\dA-Za-z.\-‐-―−]+(?:\s*\([^)]{1,24}\))?"),
     # Gov't-tail:          Tex. Gov't Code § 3.005
-    re.compile(r"(?<![\w.])[A-Z][\w'.]*(?:\s*&\s*)?\s*Gov'?t\.?\s+(?:Code|Stat\.)\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
+    re.compile(r"(?<![\w.])[A-Z][\w'.]*(?:\s*&\s*)?\s*Gov'?t\.?\s+(?:Code|Stat\.)\s*§+\s*[\dA-Za-z.\-‐-―−]+(?:\s*\([^)]{1,24}\))?"),
     # Dotted-pure stat:    Fla. Stat. § 605.100
-    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,2}Stat\.\s*§+\s*[\dA-Za-z.\-]+(?:\s*\([^)]{1,24}\))?"),
+    re.compile(r"(?<![\w.])(?:[A-Z][\w'&]*\.(?:\s*&\s*)?\s*){1,2}Stat\.\s*§+\s*[\dA-Za-z.\-‐-―−]+(?:\s*\([^)]{1,24}\))?"),
     # Multi-part compiled statutes:  805 Ill. Comp. Stat. 5/1.10
     re.compile(r"\b\d+\s+[A-Z][\w'.]*\.(?:\s*[A-Z][\w'.]*\.)+\s*\d+(?:\.\d+)?/\d+(?:\.\d+)?\b"),
     # Reporter cites:      347 U.S. 483   /   946 So. 2d 851
@@ -144,11 +144,11 @@ _PATTERNS = [
     re.compile(
         r"(?:§|&sect;|&#x00A7;|&#167;)\s*"
         r"(?:&nbsp;|&#x2003;|&#8194;|&#8195;|&#8239;|\s)*"
-        r"\d[\dA-Za-z.\-]*(?:\s*\([^)]{1,24}\))*"
+        r"\d[\dA-Za-z.\-‐-―−]*(?:\s*\([^)]{1,24}\))*"
     ),
     # Bare § followed by a NON-number: recorded as extraction-failed evidence
     # (honest-failure path preserved for genuinely unparsable fragments).
-    re.compile(r"(?:§|&sect;|&#x00A7;|&#167;)\s*(?:&nbsp;|&#x2003;|\s)*[A-Za-z][\dA-Za-z.\-]*"),
+    re.compile(r"(?:§|&sect;|&#x00A7;|&#167;)\s*(?:&nbsp;|&#x2003;|\s)*[A-Za-z][\dA-Za-z.\-‐-―−]*"),
 ]
 
 

@@ -1,0 +1,5 @@
+You are SWE-2, reviewing code for ty. Read docs/superpowers/reviews/2026-11-07-deadline-watch-code-r2/HANDOFF.md in your working directory and do exactly what it asks.
+
+Hard rule: use file read, grep and glob tools only. Do NOT run exec, a shell, python3 or git, not even `ls` or `true`: this headless run rejects any shell call and ends before your report. The diff you need is in docs/superpowers/reviews/2026-11-07-deadline-watch-code-r2/review.diff.
+
+Your final message is the report itself (verdict, round-1 findings ADDRESSED or not, new breakage with file:line, answers to points 1-4, readiness, your model). Write nothing to disk.

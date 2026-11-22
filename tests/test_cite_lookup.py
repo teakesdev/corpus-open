@@ -18,7 +18,7 @@ from unittest import mock
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
 
-from matterkit import briefcheck, cases, citelookup, consent, store  # noqa: E402
+from matterkit import briefcheck, caselaw, cases, citelookup, consent, store  # noqa: E402
 from matterkit.adapters import courtlistener_citations as clc  # noqa: E402
 
 DRAFT = """# Response in opposition
@@ -77,6 +77,14 @@ class Matter(unittest.TestCase):
         self.dir = os.path.join(self._tmp.name, "matter")
         with redirect_stdout(io.StringIO()):
             cases.init(self.dir)
+        # A new case checks its case cites by default (brief check, cite lookup): a settings folder of its
+        # own and no COURTLISTENER_TOKEN, so no test reads the person's real saved key. A test that needs a
+        # key sets one.
+        env = {k: v for k, v in os.environ.items() if k != "COURTLISTENER_TOKEN"}
+        env["MATTER_KIT_CONFIG"] = os.path.join(self._tmp.name, "no-config")
+        patch = mock.patch.dict(os.environ, env, clear=True)
+        patch.start()
+        self.addCleanup(patch.stop)
 
 
 # --------------------------------------------------------------------------
@@ -100,6 +108,41 @@ class TestPayload(unittest.TestCase):
         gamma = citelookup.draft_cites(DRAFT)[3]
         self.assertEqual(gamma.names, ["Gamma v. Delta"])
         self.assertEqual(gamma.lines, [8])
+
+    def test_a_lowercase_word_in_front_of_a_name_belongs_to_the_sentence(self):
+        # Seen in a live reply: "the plausibility standard of Ashcroft v. Iqbal" was listed as
+        # "of Ashcroft v. Iqbal". Brief check's name walk keeps "of", "in" and "the" because they
+        # join the words of a name; in front of the name they are the sentence's.
+        for text, shown in (
+                ("the plausibility standard of Ashcroft v. Iqbal, 556 U.S. 662 (2009)",
+                 "Ashcroft v. Iqbal, 556 U.S. 662"),
+                ("as in Bell Atlantic Corp. v. Twombly, 550 U.S. 544 (2007)",
+                 "Bell Atlantic Corp. v. Twombly, 550 U.S. 544"),
+                ("so held the Estate of Smith v. Jones, 100 F.3d 200 (5th Cir. 1996)",
+                 "Estate of Smith v. Jones, 100 F.3d 200"),
+                ("the rule of In re Gault, 387 U.S. 1 (1967)", "In re Gault, 387 U.S. 1"),
+                ("the holding in in re Gault, 387 U.S. 1 (1967)", "in re Gault, 387 U.S. 1")):
+            (c,) = citelookup.draft_cites(text)
+            self.assertEqual(c.display, shown, text)
+            self.assertEqual(c.names, [shown.rsplit(", ", 1)[0]], text)
+        # A connector with no name after it is no name at all.
+        (c,) = citelookup.draft_cites("the rule in 556 U.S. 662 (2009) applies")
+        self.assertEqual((c.display, c.names), ("556 U.S. 662", []))
+
+    def test_a_name_keeps_its_own_first_word_and_the_words_inside_it(self):
+        for text, shown in (
+                ("The Florida Bar v. Went For It, Inc., 515 U.S. 618 (1995)",
+                 "The Florida Bar v. Went For It, Inc., 515 U.S. 618"),
+                ("He relies on de la Cruz v. State, 100 F.3d 300 (5th Cir. 1996)",
+                 "de la Cruz v. State, 100 F.3d 300"),
+                ("It was close. A Book Named Memoirs v. Attorney General, 383 U.S. 413 (1966)",
+                 "A Book Named Memoirs v. Attorney General, 383 U.S. 413"),
+                ("Women in City Government United v. City of New York, 563 F.2d 537 (2d Cir. 1977)",
+                 "Women in City Government United v. City of New York, 563 F.2d 537"),
+                ("See United States v. Board of Education of City of Chicago, 11 F.3d 668 (7th Cir. 1993)",
+                 "United States v. Board of Education of City of Chicago, 11 F.3d 668")):
+            (c,) = citelookup.draft_cites(text)
+            self.assertEqual(c.display, shown, text)
 
     def test_reporter_spacing_is_canonical(self):
         cites = citelookup.draft_cites("A v. B, 9 F. Supp.2d 10; C v. D, 3 U. S. 4; E v. F, 5 S.Ct. 6.")
@@ -549,6 +592,18 @@ class TestAdapter(Matter):
         self.assertEqual(len(self.calls), 3)
         self.assertEqual(clock.sleeps, [61.0, 61.0])
 
+    def test_a_throttled_lookup_says_when_to_try_again(self):
+        consent.save_grants(self.dir, [grant()])
+        said = {}
+        for name, err in (("a wait", clc.Throttled("about 13 hours 42 minutes from now", when="in about 13 hours 42 minutes")),
+                          ("a time", clc.Throttled("2026-11-01T12:00:00Z"))):
+            def post(url, fields, token, err=err):
+                raise err
+            clock = FakeClock()
+            said[name] = self.adapter(post=post, clock=clock, sleep=clock.sleep).lookup(["1 F.3d 1"])[1]
+        self.assertEqual(said["a wait"], "CourtListener throttled the lookup; try again in about 13 hours 42 minutes")
+        self.assertEqual(said["a time"], "CourtListener throttled the lookup; try again after 2026-11-01T12:00:00Z")
+
     def test_throttled_stops_without_retry(self):
         consent.save_grants(self.dir, [grant()])
 
@@ -668,6 +723,31 @@ class TestTransport(unittest.TestCase):
             t.join(timeout=2)
             self.assertEqual(ctx.exception.until, "2026-11-01T12:00:00Z")
 
+    def test_429_with_only_retry_after_says_the_wait_in_words(self):
+        # What CourtListener sent on 2026-11-10 once a key's lookups for the day were used up: no
+        # wait_until in the body, only Retry-After: 49345. "49345 seconds" is no use to a person.
+        url, _, t = self._reply(429, b'{"detail": "Request was throttled."}', headers=[("Retry-After", "49345")])
+        with self.assertRaises(clc.Throttled) as ctx:
+            clc.post_form(url, {"text": "1 F.3d 1"}, TOKEN)
+        t.join(timeout=2)
+        self.assertEqual(ctx.exception.when, "in about 13 hours 42 minutes")
+        self.assertNotIn("49345", str(ctx.exception))
+
+    def test_429_with_a_date_in_retry_after_keeps_the_date(self):
+        url, _, t = self._reply(429, b"", headers=[("Retry-After", "Wed, 11 Nov 2026 13:40:00 GMT")])
+        with self.assertRaises(clc.Throttled) as ctx:
+            clc.post_form(url, {"text": "1 F.3d 1"}, TOKEN)
+        t.join(timeout=2)
+        self.assertEqual(ctx.exception.when, "after Wed, 11 Nov 2026 13:40:00 GMT")
+
+    def test_wait_words(self):
+        for seconds, words in ((1, "1 second"), (45, "45 seconds"), (90, "about 2 minutes"),
+                               (600, "about 10 minutes"), (5400, "about 1 hour 30 minutes"),
+                               (7200, "about 2 hours"), ("49345", "about 13 hours 42 minutes")):
+            self.assertEqual(clc.wait_words(seconds), words, seconds)
+        for junk in ("", "soon", "Wed, 11 Nov 2026 13:40:00 GMT", -5, None):
+            self.assertEqual(clc.wait_words(junk), "", junk)
+
     def test_rejected_token_is_not_echoed(self):
         url, _, t = self._reply(401, b'{"detail": "Invalid token."}')
         with self.assertRaises(RuntimeError) as ctx:
@@ -783,11 +863,22 @@ class TestCLI(Matter):
         self.assertIn("1 found cite(s) could not be recorded", err)
         self.assertIn("not written: several store rows", out)
 
-    def test_refused_without_grant(self):
-        with mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
+    def test_refused_when_a_person_turned_it_off(self):
+        # Case cite checking is on by default (design 2026-11-09), so a refusal now needs a person's off.
+        caselaw.turn_off(self.dir)
+        env = {"COURTLISTENER_TOKEN": TOKEN, "MATTER_KIT_CONFIG": os.path.join(self._tmp.name, "cfg")}
+        with mock.patch.dict(os.environ, env), mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
             code, _, err = run_cli("cite", "lookup", self.dir, self.draft)
         self.assertNotEqual(code, 0)
         self.assertIn("refused", err)
+        self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
+
+    def test_on_by_default_but_nothing_is_sent_without_a_key(self):
+        env = {"COURTLISTENER_TOKEN": "", "MATTER_KIT_CONFIG": os.path.join(self._tmp.name, "cfg")}
+        with mock.patch.dict(os.environ, env), mock.patch.object(clc, "post_form", side_effect=AssertionError("egress")):
+            code, _, err = run_cli("cite", "lookup", self.dir, self.draft)
+        self.assertNotEqual(code, 0)
+        self.assertIn("key", err)
         self.assertFalse(os.path.exists(consent.egress_path(self.dir)))
 
     def test_lookup_and_record(self):
@@ -808,7 +899,7 @@ class TestCLI(Matter):
     def test_consent_propose_cite_lookup_scope(self):
         code, _, _ = run_cli("consent", "propose", self.dir, "--scope", "cite-lookup")
         self.assertEqual(code, 0)
-        (g,) = consent.load_grants(self.dir)
+        (g,) = [g for g in consent.load_grants(self.dir) if g["kind"] == "agent"]  # beside the case defaults
         self.assertEqual((g["provider"], g["endpoints"], g["payload_types"], g["kind"]),
                          (citelookup.PROVIDER, [citelookup.ENDPOINT], [citelookup.PAYLOAD_TYPE], "agent"))
 

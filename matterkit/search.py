@@ -39,9 +39,10 @@ class SearchResult:
 # R1 ships zero adapters by design (RFC §2.1/§2.5). R2/R3 register here only
 # after a grant exists — construction refuses without one, fail-closed.
 ADAPTERS: dict[str, str] = {
-    # name -> import path; urllib stays out of this file (isolation scan).
-    "courtlistener-free": "matterkit.adapters.courtlistener.CourtListenerFreeAdapter",
-    "corpus-search": "matterkit.adapters.corpus_search.CorpusSearchAdapter",
+    # name -> import path relative to this package; urllib stays out of this file (isolation
+    # scan). Relative because Hermes loads the kit under its own package name, not `matterkit`.
+    "courtlistener-free": ".adapters.courtlistener.CourtListenerFreeAdapter",
+    "corpus-search": ".adapters.corpus_search.CorpusSearchAdapter",
 }
 
 
@@ -52,7 +53,7 @@ def _load_adapter(provider: str):
             f"no adapter registered for {provider!r} — see RFC 0001 §6")
     mod_name, _, cls_name = spec.rpartition(".")
     import importlib
-    return getattr(importlib.import_module(mod_name), cls_name)
+    return getattr(importlib.import_module(mod_name, __package__), cls_name)
 
 
 def build_adapter(provider: str, matter_dir: str, caller_id: str,

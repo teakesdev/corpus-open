@@ -163,5 +163,52 @@ class Packaging(unittest.TestCase):
         self.assertNotIn("dangerouslySetInnerHTML", js)
 
 
+class BackendErrorWording(unittest.TestCase):
+    """The panel's words for a failed backend call (backendError in desktop/plugin.js).
+
+    Hermes answers 404 three ways, and only one of them means corpus-open is off: telling a
+    profile that has it enabled to "add corpus-open to plugins.enabled" sends the reader to edit
+    a config that is already right. Hermes refuses a secondary profile's request to a
+    user-installed plugin's in-process backend with "Plugin not found" (only plugins.isolation:
+    host forwards it); the hosted route says "is not enabled in this profile".
+    """
+
+    def setUp(self):
+        import shutil as _sh
+        self.node = _sh.which("node")
+        if not self.node:
+            self.skipTest("node is not installed")
+        with open(os.path.join(KIT, "desktop", "plugin.js"), encoding="utf-8") as f:
+            js = f.read()
+        m = re.search(r"\nfunction backendError\(e\) \{\n.*?\n\}\n", js, re.S)
+        self.assertIsNotNone(m, "backendError not found in plugin.js")
+        self.fn = m.group(0)
+
+    def words(self, message):
+        import subprocess
+        script = self.fn + "\nprocess.stdout.write(backendError(new Error(%s)))" % json.dumps(message)
+        out = subprocess.run([self.node, "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout
+
+    def test_not_enabled_in_this_profile(self):
+        said = self.words("404: plugin 'corpus-open' is not enabled in this profile")
+        self.assertIn("not enabled in this profile", said)
+        self.assertIn("plugins.enabled", said)
+
+    def test_secondary_profile_refused(self):
+        said = self.words("404: Plugin not found")
+        self.assertIn("plugins.isolation: host", said)
+        self.assertNotIn("Add corpus-open to plugins.enabled", said)
+
+    def test_other_404_names_what_hermes_said(self):
+        said = self.words("404: Not Found")
+        self.assertIn("404: Not Found", said)
+        self.assertNotIn("backend is off", said)
+
+    def test_other_errors_pass_through(self):
+        self.assertEqual(self.words("timed out after 20000 ms"), "timed out after 20000 ms")
+
+
 if __name__ == "__main__":
     unittest.main()
